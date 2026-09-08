@@ -15,6 +15,8 @@ concurrency:
 
 jobs:
   release:
+    # Forks distribute reviewed source commits; only upstream owns the npm package.
+    if: github.repository == 'ScriptedAlchemy/grok-bot-cli'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
