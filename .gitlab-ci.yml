@@ -15,4 +15,5 @@ unit:
   image: node:22-slim
   script:
     - npm ci
+    - npm run build
     - npm run test:unit
