@@ -18,6 +18,7 @@ export const config = {
       dir: { description: 'Agents directory for --files mode', type: 'string' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
+      account: { description: 'Saved Grok Bot login to use when several are stored', type: 'string' },
       avatarColor: { type: 'string' },
       avatarShape: { type: 'string' },
       description: { type: 'string' },

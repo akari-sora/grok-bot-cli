@@ -20,6 +20,7 @@ export const config = {
       dir: { description: 'Agents directory for --files mode', type: 'string' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
+      account: { description: 'Saved Grok Bot login to use when several are stored', type: 'string' },
     },
     type: 'object',
   },
@@ -46,7 +47,7 @@ export default async function doctor({ input }: CliRouteProps<typeof inputSchema
   }
   const note = 'Live roster is on the box. Prefer CURSOR_ACCESS_TOKEN then EnsureSandBox then POST gateway /api/*.';
   const gatewayAuthPresent = hasGatewayAuth();
-  const grokBotAppSession = inspectGrokBotGatewaySession();
+  const grokBotAppSession = inspectGrokBotGatewaySession({ account: input.account });
   const sessionJson = {
     present: grokBotAppSession.present,
     usable: grokBotAppSession.usable,

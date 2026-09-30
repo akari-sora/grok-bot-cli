@@ -38,6 +38,7 @@ export const config = {
       envelope: { description: 'Prepend the [gbot …] header', type: 'boolean' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
+      account: { description: 'Saved Grok Bot login to use when several are stored', type: 'string' },
       historyDir: {
         description: 'Directory containing history.jsonl',
         type: 'string',

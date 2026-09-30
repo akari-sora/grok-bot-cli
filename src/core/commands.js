@@ -14,7 +14,7 @@ function chooseBackend(opts) {
 export async function openBackend(opts) {
   const kind = chooseBackend(opts);
   if (kind === "gateway") {
-    const session = await gw.connectGateway();
+    const session = await gw.connectGateway({ account: opts.account });
     return {
       kind,
       session,

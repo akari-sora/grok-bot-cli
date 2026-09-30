@@ -66,10 +66,10 @@ function gatewayOverride() {
   return null;
 }
 
-function sessionFromApp() {
+function sessionFromApp(account) {
   let loaded;
   try {
-    loaded = loadGrokBotGatewaySession();
+    loaded = loadGrokBotGatewaySession({ account });
   } catch (error) {
     // Descriptor present but unusable (e.g. Windows Local State missing). Fall
     // through to CURSOR_ACCESS_TOKEN → EnsureSandBox when that token is set.
@@ -186,11 +186,11 @@ async function ensureSandbox(accessToken, { signal } = {}) {
   return { gatewayUrl: assertAllowedCredentialUrl(String(gatewayUrl).replace(/\/$/, ""), { kind: "gateway" }), gatewayToken: String(gatewayToken), gatewayHeaders: mergeGatewayHeaders(headersFromEnsureSandbox(body), headersFromEnv()) };
 }
 
-export async function connectGateway({ signal } = {}) {
+export async function connectGateway({ signal, account } = {}) {
   assertGatewayActive(signal);
   const override = gatewayOverride();
   if (override) return override;
-  const fromApp = sessionFromApp();
+  const fromApp = sessionFromApp(account);
   if (fromApp) return fromApp;
   const token = accessTokenFromEnv();
   if (!token) {

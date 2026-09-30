@@ -5,12 +5,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
+delete process.env.GBOT_ACCOUNT;
+
 import {
   decryptSafeStorageString,
   decryptWindowsSafeStorageString,
   grokBotGatewayDescriptorPath,
   hasGrokBotGatewaySession,
   inspectGrokBotGatewaySession,
+  listGrokBotGatewayAccounts,
   loadGrokBotGatewaySession,
 } from "../src/core/app-session.js";
 
@@ -154,6 +157,119 @@ test("rejects a version 2 descriptor with ambiguous entries", () => {
       assert.equal(error.name, "GrokBotGatewaySessionError");
       assert.equal(error.code, "AMBIGUOUS_ENTRIES");
       assert.match(error.message, /multiple saved gateway entries/i);
+      assert.match(error.message, /--account <label>/);
+      assert.match(error.message, /GBOT_ACCOUNT=<label>/);
+      assert.match(error.message, /first/);
+      assert.match(error.message, /second/);
+      assert.match(error.message, /last saved/);
+      assert.doesNotMatch(error.message, /gateway-token|djEw/);
+      return true;
+    },
+  );
+});
+
+function encryptDarwinDescriptor(value, password = "demo-password") {
+  const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
+  return Buffer.concat([
+    Buffer.from("v10"),
+    cipher.update(JSON.stringify(value), "utf8"),
+    cipher.final(),
+  ]).toString("base64");
+}
+
+const SECOND_LOGIN = encryptDarwinDescriptor({
+  baseUrl: "https://other.example",
+  token: "other-token",
+  headers: {},
+  email: "second@example.com",
+});
+
+function twoLogins() {
+  return writeWrappedDescriptor({
+    version: 2,
+    entries: {
+      abcdef0123456789aa: { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 10 },
+      abcdef9999999999bb: { encrypted: SECOND_LOGIN, savedAtMs: 20 },
+    },
+  });
+}
+
+test("selects a saved login by key, unique prefix, email, or GBOT_ACCOUNT", () => {
+  const home = twoLogins();
+  const options = {
+    platform: "darwin",
+    home,
+    getKeychainPassword: () => "demo-password",
+  };
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: "abcdef0123456789aa" }).gatewayUrl,
+    "https://box.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: "abcdef01234567" }).gatewayUrl,
+    "https://box.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: "second@example.com" }).gatewayUrl,
+    "https://other.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, env: { GBOT_ACCOUNT: "abcdef9999999999bb" } }).gatewayUrl,
+    "https://other.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({
+      ...options,
+      account: "abcdef0123456789aa",
+      env: { GBOT_ACCOUNT: "second@example.com" },
+    }).gatewayUrl,
+    "https://box.example",
+  );
+});
+
+test("lists saved logins without credential values", () => {
+  const home = twoLogins();
+  const accounts = listGrokBotGatewayAccounts({
+    platform: "darwin",
+    home,
+    getKeychainPassword: () => "demo-password",
+  });
+  assert.deepEqual(accounts, [
+    { id: "abcdef0123456789aa", label: "abcdef0123456789aa", savedAtMs: 10, lastSaved: false, usable: true },
+    { id: "abcdef9999999999bb", label: "second@example.com", savedAtMs: 20, lastSaved: true, usable: true },
+  ]);
+  assert.doesNotMatch(JSON.stringify(accounts), /other-token|gateway-token|https:|djEw/);
+});
+
+test("a single saved login still loads when no account is chosen", () => {
+  const home = writeWrappedDescriptor({
+    version: 2,
+    entries: { only: { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 1 } },
+  });
+  const session = loadGrokBotGatewaySession({
+    platform: "darwin",
+    home,
+    env: {},
+    getKeychainPassword: () => "demo-password",
+  });
+  assert.equal(session.gatewayUrl, "https://box.example");
+});
+
+test("an unknown account lists the labels and does not open that login", () => {
+  const home = twoLogins();
+  assert.throws(
+    () => loadGrokBotGatewaySession({
+      platform: "darwin",
+      home,
+      account: "missing",
+      getKeychainPassword: () => "demo-password",
+    }),
+    (error) => {
+      assert.equal(error.code, "UNKNOWN_ACCOUNT");
+      assert.match(error.message, /second@example.com/);
+      assert.match(error.message, /--account <label>/);
+      assert.doesNotMatch(error.message, /other-token|gateway-token/);
       return true;
     },
   );

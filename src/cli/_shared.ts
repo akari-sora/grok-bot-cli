@@ -6,6 +6,7 @@ import { withRedactedErrors } from '../gbot.js';
 
 /** Shared backend selection flags (were leading globals on the hand CLI). */
 export const backendFlagsSchema = z.object({
+  account: z.string().min(1).optional().describe('Saved Grok Bot login to use when several are stored'),
   dir: z.string().min(1).optional().describe('Agents directory for --files mode'),
   files: z.boolean().optional().describe('Force the on-disk agents store'),
   gateway: z.boolean().optional().describe('Force the live gateway'),
@@ -32,10 +33,12 @@ const redactBackendErrors = <T extends object>(backend: T): T =>
   });
 
 export const openBackendFromInput = async (input: {
+  readonly account?: string;
   readonly dir?: string;
   readonly files?: boolean;
   readonly gateway?: boolean;
 }) => withRedactedErrors(async () => redactBackendErrors(await openBackend({
+  account: input.account,
   files: Boolean(input.files),
   gateway: Boolean(input.gateway),
   root: input.dir,
