@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,14 +12,15 @@ permissions:
 
 concurrency:
   group: changesets-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   release:
     # Forks distribute reviewed source commits; only upstream owns the npm package.
     if: github.repository == 'ScriptedAlchemy/grok-bot-cli'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-26.04
+    # Allow ~20 minutes of npm registry propagation retries after publish.
+    timeout-minutes: 35
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -38,8 +40,8 @@ jobs:
       - name: Update npm for trusted publishing
         run: npm install --global npm@latest
 
-      - name: Test
-        run: npm test
+      - name: Validate, build, typecheck, and test
+        run: npm run check
 
       - name: Lint the package
         run: npx --yes publint@0.3.24
@@ -53,12 +55,16 @@ jobs:
           package_files=("$package_root"/*.tgz)
           test -f "${package_files[0]}"
           test "${#package_files[@]}" -eq 1
-          npm install --global --prefix "$install_root" "${package_files[0]}"
-          "$install_root/bin/gbot" --help
+          npm install --prefix "$install_root" "${package_files[0]}"
+          npm exec --prefix "$install_root" --no -- gbot --help
+          npm exec --prefix "$install_root" --no -- grok-bot --help
+          npm exec --prefix "$install_root" --no -- gbot-install --help
 
       - name: Create release pull request or publish
         id: changesets
-        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
+        env:
+          NPM_CONFIG_LOGS_DIR: ${{ runner.temp }}/gbot-publish-logs
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           pr-base-branch: main
           commit-message: Release packages
@@ -66,3 +72,37 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           publish-script: npm run release
           pr-title: Release packages
+          push-with-git-cli: true
+          version-script: npm run release:version
+
+      # Green must mean published. Once no changesets are pending, the version
+      # in package.json is the one that should be on npm, whether this run
+      # published it or an earlier one did; a silent publish failure is red.
+      - name: Verify package.json version resolves on npm
+        if: steps.changesets.outputs.has-changesets == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          # npm can take several minutes to show a just-published version.
+          # Retry for ~20 minutes (40 × 30s) before failing.
+          for attempt in $(seq 1 40); do
+            if [ "$(npm view "$name@$version" version 2>/dev/null || true)" = "$version" ]; then
+              echo "registry $name@$version"
+              exit 0
+            fi
+            echo "attempt $attempt: $name@$version not on npm yet"
+            sleep 30
+          done
+          echo "::error::$name@$version is not on npm; the release did not publish."
+          exit 1
+
+      - name: Report npm publish result on failure
+        if: failure()
+        shell: bash
+        run: |
+          # Changesets captures npm output, including errors from a false success.
+          # Show only command/status records; exclude config and authentication data.
+          grep -hE ' (verbose (title|exit)|info using|http fetch PUT|error|warn|notice Publishing) ' \
+            "$RUNNER_TEMP"/gbot-publish-logs/* 2>/dev/null || true

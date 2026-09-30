@@ -1,8 +1,6 @@
 name: Package CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -14,7 +12,7 @@ concurrency:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Check out the repository
@@ -25,8 +23,16 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Test
-        run: npm test
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate committed distribution
+        run: |
+          npm run validate:artifact
+          node --test test/release-config.test.js
+
+      - name: Validate, build, typecheck, and test
+        run: npm run check
 
       - name: Lint the package
         run: npx --yes publint@0.3.24
@@ -34,7 +40,18 @@ jobs:
       - name: Pack and smoke-test the executable
         shell: bash
         run: |
-          package_file=$(npm pack --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s)[0].filename))")
+          package_root=$(mktemp -d)
           install_root=$(mktemp -d)
-          npm install --global --prefix "$install_root" "./$package_file"
-          "$install_root/bin/gbot" --help
+          npm pack --pack-destination "$package_root"
+          package_files=("$package_root"/*.tgz)
+          test -f "${package_files[0]}"
+          test "${#package_files[@]}" -eq 1
+          npm install --global --prefix "$install_root" "${package_files[0]}"
+          # npm global bins are prefix/bin on Unix and prefix/ itself on Windows.
+          bin_dir="$install_root/bin"
+          if [ ! -e "$bin_dir/gbot" ]; then
+            bin_dir="$install_root"
+          fi
+          "$bin_dir/gbot" --help
+          "$bin_dir/grok-bot" --help
+          "$bin_dir/gbot-install" --help
