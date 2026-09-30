@@ -1,3 +1,27 @@
+# ImL1s fork of grok-bot-cli
+
+This repository is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli). It is synced to upstream 0.11.2 and keeps the fork's stdin send, normalized thread output, and 15 second send deadline. It also adds explicit account selection: `--account <label>`, `GBOT_ACCOUNT`, and `gbot accounts`.
+
+Install this fork from git:
+
+```sh
+npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.1
+```
+
+Or clone the repository and run `npm install` then `npm link` inside it. The sections below are the upstream README, unchanged apart from the account-selection notes already in Install.
+
+## 這個 fork
+
+這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2，並保留 fork 修正：stdin 送訊、正規化 thread，以及 15 秒送出期限。另外加上帳號選擇：`--account <label>`、`GBOT_ACCOUNT`、`gbot accounts`。
+
+從 git 安裝：
+
+```sh
+npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.1
+```
+
+或 clone 後在目錄裡 `npm install`，再 `npm link`。下面是上游 README。
+
 # grok-bot-cli
 
 [![npm version](https://img.shields.io/npm/v/grok-bot-cli.svg)](https://www.npmjs.com/package/grok-bot-cli)
