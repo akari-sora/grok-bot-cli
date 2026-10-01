@@ -135,7 +135,7 @@ Use this fork with trinity-cli: https://gitlab.com/aa22396584/trinity-cli
 
 ### Platforms
 
-Linux unit tests run in CI on the grok-box runner (`node:22-slim`). Windows unit tests run on a GitLab.com hosted Windows runner when compute minutes are available. macOS is checked locally. Upstream Codex and Claude sockets stay Unix-only.
+Linux unit tests run in CI on the grok-box runner (`node:22-slim`). Windows unit tests run on a GitLab.com hosted Windows runner when compute minutes are available. macOS is checked locally. Tracked text stays LF (`.gitattributes`), so a Windows checkout does not rewrite plugin command frontmatter to CRLF. The Windows unit job loads the MCP client with a `file://` URL because Node rejects a `C:` path in `import()`. Upstream Codex and Claude sockets stay Unix-only.
 
 ## 繁體中文
 
@@ -268,4 +268,4 @@ gbot thread Researcher --after "<cursor>" --json
 
 ### 平台
 
-Linux 單元測試在 grok-box runner 的 CI 跑（`node:22-slim`）。Windows 單元測試在有計算分鐘時跑 GitLab.com 的託管 Windows runner。macOS 在本機確認。上游的 Codex 與 Claude socket 仍只有 Unix。
+Linux 單元測試在 grok-box runner 的 CI 跑（`node:22-slim`）。Windows 單元測試在有計算分鐘時跑 GitLab.com 的託管 Windows runner。macOS 在本機確認。追蹤的文字檔維持 LF（`.gitattributes`），Windows checkout 不會把 plugin 指令的 frontmatter 改成 CRLF。Windows 單元測試用 `file://` 載入 MCP client，因為 Node 的 `import()` 不接受 `C:` 路徑。上游的 Codex 與 Claude socket 仍只有 Unix。

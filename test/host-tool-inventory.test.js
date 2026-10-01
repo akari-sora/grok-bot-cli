@@ -3,10 +3,25 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
+
+// Node's ESM loader treats `C:\...` as a URL with protocol `c:`.
+function esmImportHref(resolved) {
+  return resolved.includes('://') ? resolved : pathToFileURL(resolved).href;
+}
+
+test('absolute paths become file URLs before ESM import', () => {
+  assert.equal(esmImportHref('file:///already.js'), 'file:///already.js');
+  const drive = esmImportHref('C:\\pkg\\client.js');
+  assert.notEqual(drive, 'C:\\pkg\\client.js');
+  assert.match(drive, /^file:\/\//);
+  if (process.platform === 'win32') assert.match(drive, /^file:\/\/\/C:\//i);
+  assert.equal(esmImportHref('/pkg/client.js'), pathToFileURL('/pkg/client.js').href);
+});
 
 const sdk = createRequire(import.meta.resolve('agent-bundle/api'));
-const { Client } = await import(sdk.resolve('@modelcontextprotocol/client'));
-const { StdioClientTransport } = await import(sdk.resolve('@modelcontextprotocol/client/stdio'));
+const { Client } = await import(esmImportHref(sdk.resolve('@modelcontextprotocol/client')));
+const { StdioClientTransport } = await import(esmImportHref(sdk.resolve('@modelcontextprotocol/client/stdio')));
 const config = JSON.parse(await readFile(new URL('../artifact/.mcp.json', import.meta.url), 'utf8'));
 const entry = config.mcpServers['grok-bot'].args[0].replace('${CLAUDE_PLUGIN_ROOT}', resolve('artifact'));
 const codex = ['codex_new', 'codex_send', 'codex_threads', 'codex_wait', 'codex_watch', 'gbot_codex_respond'];
