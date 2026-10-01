@@ -1,6 +1,6 @@
 # Fork CI. npm publish stays on upstream.
-# Linux jobs stay on the project runner. The Windows job uses a GitLab.com
-# hosted runner and must not inherit the grok-box tags.
+# Linux jobs stay on the project runner. The Windows job uses the self-hosted
+# runner and must not inherit the grok-box tags.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -20,18 +20,52 @@ unit:
     - npm run build
     - npm run test:unit
 
-# Hosted Windows spends shared minutes. Always on tags, merge requests, and
-# manual web runs. On main, only when shipped code, tests, or packaging change.
-# A commit that only touches this file still runs Linux and skips Windows.
-# Do not cache node_modules: uploading it costs more minutes than npm ci.
-unit-windows:
-  tags: [saas-windows-medium-amd64]
+# Self-hosted Windows. Tags, manual web runs, and main pushes that change
+# shipped code, tests, or packaging. A CI-only push still runs Linux only.
+# Merge requests are manual: that runner accepts protected refs only.
+# Use Node already on PATH. Download Node 22 into the build dir only when it
+# is missing. Do not cache node_modules.
+.windows_node: &windows_node
   interruptible: true
   timeout: 20m
+  variables:
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm-cache"
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: npm-cache
+    paths:
+      - .npm-cache
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $env:NPM_CONFIG_CACHE = Join-Path $env:CI_PROJECT_DIR ".npm-cache"
+      if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        $sums = (Invoke-RestMethod "https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt") -split "`n"
+        $name = (($sums | Where-Object { $_ -match "win-x64\.zip$" } | Select-Object -First 1) -split "\s+")[1].Trim()
+        if (-not $name) { throw "node win-x64 zip not listed" }
+        $zip = Join-Path $env:CI_PROJECT_DIR $name
+        Invoke-WebRequest "https://nodejs.org/dist/latest-v22.x/$name" -OutFile $zip
+        $dest = Join-Path $env:CI_PROJECT_DIR "node-win"
+        Expand-Archive $zip -DestinationPath $dest -Force
+        $nodeHome = (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName
+        $env:Path = "$nodeHome;$env:Path"
+      }
+      node -v
+      npm ci
+      npm run build
+      npm run test:unit
+
+unit-windows:
+  <<: *windows_node
+  tags: [windows, hx370]
   needs:
     - job: unit
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_COMMIT_BRANCH == "main"
@@ -43,17 +77,28 @@ unit-windows:
         - scripts/**/*
         - package.json
         - package-lock.json
-  script:
-    - |
-      $ErrorActionPreference = "Stop"
-      $sums = (Invoke-RestMethod "https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt") -split "`n"
-      $name = (($sums | Where-Object { $_ -match "win-x64\.zip$" } | Select-Object -First 1) -split "\s+")[1].Trim()
-      if (-not $name) { throw "node win-x64 zip not listed" }
-      Invoke-WebRequest "https://nodejs.org/dist/latest-v22.x/$name" -OutFile $name
-      Expand-Archive $name -DestinationPath node-win -Force
-      $nodeHome = (Get-ChildItem node-win -Directory | Select-Object -First 1).FullName
-      $env:Path = "$nodeHome;$env:Path"
-      node -v
-      npm ci
-      npm run build
-      npm run test:unit
+
+# Same tests on a GitLab-hosted runner. Starts only when someone plays it.
+windows:hosted:
+  <<: *windows_node
+  tags: [saas-windows-medium-amd64]
+  allow_failure: true
+  needs:
+    - job: unit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - src/**/*
+        - bin/**/*
+        - test/**/*
+        - tests/**/*
+        - scripts/**/*
+        - package.json
+        - package-lock.json
+      when: manual
