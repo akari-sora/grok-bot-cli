@@ -11,7 +11,8 @@ const test = nodeTest;
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 test("unix-only suites are exactly the files that import the Windows skip helper", () => {
-  assert.equal(win32Test, nodeTest);
+  if (process.platform === "win32") assert.notEqual(win32Test, nodeTest);
+  else assert.equal(win32Test, nodeTest);
   const listed = new Set(UNIX_ONLY_TEST_FILES);
   const files = readdirSync(join(root, "test")).filter((name) => name.endsWith(".test.js"));
   for (const name of files) {
