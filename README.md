@@ -23,6 +23,10 @@ Manage [Grok Bot](https://cursor.com/help/grok-bot/plans) agents, groups, and me
 
 ## Install
 
+The command below is the upstream npm package name and this fork must not use it; download `grok-bot-cli-0.11.2.tgz` and run `npm install -g` on that file (tarball steps in [FORK.md](FORK.md); `npm ci` is for a clone, not this section).
+
+下面這行是上游套件名稱，本 fork 不要用。改看 [FORK.md](FORK.md) 的 tarball 步驟：下載 `grok-bot-cli-0.11.2.tgz` 再 `npm install -g`。`npm ci` 不是這段。
+
 ```sh
 npm install --global grok-bot-cli
 ```
