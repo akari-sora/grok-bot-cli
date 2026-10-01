@@ -2,7 +2,7 @@
 
 ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. The package version string stays `0.11.2`. The fork revision is the git tag.
 
-Upstream still owns the npm package. Install from git, not `npm install -g grok-bot-cli`.
+Upstream still owns the npm package. Install from git, not `npm install -g grok-bot-cli`. GitLab (https://gitlab.com/aa22396584/grok-bot-cli) is the primary remote. GitHub (https://github.com/ImL1s/grok-bot-cli) is a mirror.
 
 ## English
 
@@ -13,13 +13,13 @@ Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on
 macOS or Linux:
 
 ```sh
-npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.2
+npm install -g git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2
 ```
 
 Windows PowerShell:
 
 ```powershell
-npm install -g "github:ImL1s/grok-bot-cli#v0.11.2-iml1s.2"
+npm install -g "git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2"
 ```
 
 npm creates `gbot.cmd` on Windows, so `gbot` works from PowerShell and cmd. Quote the spec so `#` is not a comment.
@@ -157,18 +157,18 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 ### 安裝
 
-需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。
+需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。GitHub（https://github.com/ImL1s/grok-bot-cli）只是鏡像。
 
 macOS 或 Linux：
 
 ```sh
-npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.2
+npm install -g git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm install -g "github:ImL1s/grok-bot-cli#v0.11.2-iml1s.2"
+npm install -g "git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2"
 ```
 
 Windows 上 npm 會建立 `gbot.cmd`，PowerShell 與 cmd 都能執行 `gbot`。規格請加引號，避免 `#` 被當成註解。
