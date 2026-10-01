@@ -30,9 +30,11 @@ Remove-Item grok-bot-cli-0.11.2.tgz
 
 npm creates `gbot.cmd` on Windows, so `gbot` works from PowerShell and cmd.
 
-From a clone (any OS, after `npm install`):
+From a clone (any OS). `dist/` is not in git, so build before linking:
 
 ```sh
+npm ci
+npm run build
 npm link
 ```
 
@@ -42,7 +44,7 @@ npm link
 gbot --version
 ```
 
-This prints `0.11.2`. That is the upstream package version, not the fork tag.
+This prints `gbot 0.11.2`. That is the upstream package version, not the fork tag.
 
 Upgrade by downloading the same `.tgz` and installing it again. Uninstall:
 
@@ -185,9 +187,11 @@ Remove-Item grok-bot-cli-0.11.2.tgz
 
 Windows 上 npm 會建立 `gbot.cmd`，PowerShell 與 cmd 都能執行 `gbot`。
 
-從本機 clone（先 `npm install`）：
+從本機 clone。`dist/` 不在 git 裡，要先建置再 link：
 
 ```sh
+npm ci
+npm run build
 npm link
 ```
 
@@ -197,7 +201,7 @@ npm link
 gbot --version
 ```
 
-輸出是 `0.11.2`，這是上游套件版本，不是 fork 標籤。
+輸出是 `gbot 0.11.2`，這是上游套件版本，不是 fork 標籤。
 
 升級就再下載同一個 `.tgz` 後安裝。移除：
 
