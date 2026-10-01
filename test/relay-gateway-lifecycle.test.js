@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";

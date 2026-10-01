@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test from './helpers/win32-test.js';
 import { openClaudeChannel, sendToClaude } from '../src/core/claude-channel.js';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import createClaudeChannel from '../src/mcp/claude-channel.ts';

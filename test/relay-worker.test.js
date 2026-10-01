@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import { relayProfile } from "../src/core/relay/profile.js";
 import { runRelayWorker } from "../src/core/relay/worker.js";
 import { relayRequest } from "../src/core/relay/control.js";

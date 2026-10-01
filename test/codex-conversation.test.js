@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import { fakeAppServer } from "./helpers/codex-server.js";
 import { openCodexConversation } from "../src/core/codex/conversation.js";
 const final = {id:"final-1",type:"agentMessage",phase:"final_answer",text:"final answer"};

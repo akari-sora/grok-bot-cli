@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import { fakeAppServer, createCodexFixtureHome } from "./helpers/codex-server.js";
 
 import { decodeFrame, encodeFrame, websocketAccept, connectCodexAppServer, sendToCodexThread, startCodexThread, codexSocketPath, codexStatus, detectDesktopPrivateAppServer, unreachableMessage, looksLikeGrokBotBox, boxUnreachableMessage } from "../src/core/codex-bridge.js";

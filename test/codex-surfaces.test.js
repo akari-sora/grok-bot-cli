@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import test from 'node:test';
+import test from './helpers/win32-test.js';
 import { fakeAppServer } from './helpers/codex-server.js';
 const handlers={initialize:(_,ok)=>ok({}),'thread/list':(_,ok)=>ok({data:[],nextCursor:null}),'thread/resume':(p,ok)=>ok({thread:{id:p.threadId,status:{type:'idle'}}}),'turn/start':(_,ok)=>ok({turn:{id:'turn-1',status:'inProgress'}}),'turn/steer':(p,ok)=>ok({turnId:p.expectedTurnId}),'thread/turns/list':(_,ok)=>ok({data:[{id:'turn-1',status:'inProgress'}],nextCursor:null}),'thread/items/list':(_,ok)=>ok({data:[],nextCursor:null})};
 const fixtureEnv=home=>({...process.env,GROK_BOT_TEST:'1',CODEX_HOME:home,CODEX_APP_SERVER_SOCK:'',GROK_BOT_CODEX_THREADS:'',GROK_BOT_CODEX_EXPERIMENTAL:''});

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { openRelayEngine } from "../src/core/relay/engine.js";
 import { openRelayState } from "../src/core/relay/state.js";

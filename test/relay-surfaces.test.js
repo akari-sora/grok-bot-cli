@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, lstat, cp } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import { fakeAppServer } from "./helpers/codex-server.js";
 import { relayRequest } from "../src/core/relay/control.js";
 

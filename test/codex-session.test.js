@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test from "./helpers/win32-test.js";
 import * as bridge from "../src/core/codex-bridge.js";
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 15));
