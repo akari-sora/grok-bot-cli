@@ -18,6 +18,8 @@ if (visible.includes("--stdin")) {
   // The rendered command runs in a worker that does not receive this process's
   // stdin. Capture it here, before that worker starts, and hand over a private file.
   const chunks = [];
+  // Windows consoles leave stdin paused until it is resumed.
+  process.stdin.resume();
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
   scratch = mkdtempSync(join(tmpdir(), "gbot-stdin-"));
   const file = join(scratch, "message");
@@ -31,13 +33,24 @@ const child = spawn(process.execPath, [real, ...argv], {
   env,
   stdio: ["ignore", "inherit", "inherit"],
 });
-const stop = (signal) => child.kill(signal);
+const stop = (signal) => {
+  try {
+    child.kill(signal);
+  } catch {
+    child.kill();
+  }
+};
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 child.on("exit", (code, signal) => {
   if (scratch) rmSync(scratch, { recursive: true, force: true });
   if (signal) {
-    process.kill(process.pid, signal);
+    // Windows rejects some signals with EINVAL; still exit.
+    try {
+      process.kill(process.pid, signal);
+    } catch {
+      process.exit(1);
+    }
     return;
   }
   process.exit(code ?? 1);

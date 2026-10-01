@@ -1,8 +1,21 @@
 ---
 name: talk-to-grok-bot
-description: Message Grok Bot, Codex threads, or opted-in local Claude Code channels. Use when handing off to a named bot/group or posting a status note agents watch — not for work you can finish yourself.
+description: >
+  Message Grok Bot with the gbot CLI or grok-bot MCP tools: stdin send, normalized
+  threads, thread --after, and --account / GBOT_ACCOUNT. Use when handing off to a
+  named bot or posting a status note agents watch — not for work you can finish
+  yourself. 用 gbot 傳訊、讀 thread、選帳號或 stdin 送出時使用。Reply in the user's language.
 ---
 # Talk to Grok Bot
+
+Reply in the user's language.
+
+Fork CLI (this install is ImL1s's fork; details in `FORK.md`):
+
+1. If several Grok Bot logins are saved, pass `--account <label>` after the subcommand, or set `GBOT_ACCOUNT`. `gbot accounts` lists labels only. `gbot --account` before the subcommand is an unknown option.
+2. Send exact text with `gbot send <bot> --stdin` (default off). Do not combine it with a positional message.
+3. Read with `gbot --json thread <bot> --normalized` (default off; requires `--json`) or `gbot thread <bot> --after <cursor> --json`. `--after` JSON includes `cursor`, `entryCount`, and `gapReset`.
+4. A send that returns `delivery: "unknown"` may have landed. Read the thread. Do not send again.
 
 The `grok-bot` MCP server and `gbot` CLI share Grok gateway access. Codex and
 Claude tools use **local sockets only** on the user's registered machines.

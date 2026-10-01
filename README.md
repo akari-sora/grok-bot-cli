@@ -1,26 +1,15 @@
-# ImL1s fork of grok-bot-cli
+# About this fork / 關於這個 fork
 
-This repository is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli). It is synced to upstream 0.11.2 and keeps the fork's stdin send, normalized thread output, and 15 second send deadline. It also adds explicit account selection: `--account <label>`, `GBOT_ACCOUNT`, and `gbot accounts`.
+This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, and per-OS setup are in [FORK.md](FORK.md). The rest of this file is the upstream README.
 
-Install this fork from git:
+這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread 與各平台設定見 [FORK.md](FORK.md)。以下是上游 README。
 
-```sh
-npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.1
-```
+## Related projects / 相關專案
 
-Or clone the repository and run `npm install` then `npm link` inside it. The sections below are the upstream README, unchanged apart from the account-selection notes already in Install.
-
-## 這個 fork
-
-這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2，並保留 fork 修正：stdin 送訊、正規化 thread，以及 15 秒送出期限。另外加上帳號選擇：`--account <label>`、`GBOT_ACCOUNT`、`gbot accounts`。
-
-從 git 安裝：
-
-```sh
-npm install -g github:ImL1s/grok-bot-cli#v0.11.2-iml1s.1
-```
-
-或 clone 後在目錄裡 `npm install`，再 `npm link`。下面是上游 README。
+- trinity-cli — one CLI over three always-on agents (Your dot, Grok Bot, Muse): https://gitlab.com/aa22396584/trinity-cli
+- chatgpt-dot-cli — ChatGPT Your dot: https://gitlab.com/aa22396584/chatgpt-dot-cli
+- grok-bot-cli (this fork, `gbot`) — Grok Bot: https://gitlab.com/aa22396584/grok-bot-cli (mirror https://github.com/ImL1s/grok-bot-cli)
+- muse-web-cli — Meta Muse via the web: https://gitlab.com/aa22396584/muse-web-cli
 
 # grok-bot-cli
 

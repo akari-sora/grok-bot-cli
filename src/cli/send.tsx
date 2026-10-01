@@ -38,7 +38,7 @@ export const config = {
       envelope: { description: 'Prepend the [gbot …] header', type: 'boolean' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
-      account: { description: 'Saved Grok Bot login to use when several are stored', type: 'string' },
+      account: { description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT', type: 'string' },
       historyDir: {
         description: 'Directory containing history.jsonl',
         type: 'string',
@@ -49,6 +49,7 @@ export const config = {
       },
       message: { items: { type: 'string' }, type: 'array' },
       stdin: {
+        default: false,
         description: 'Read the message from stdin instead of the process arguments',
         type: 'boolean',
       },

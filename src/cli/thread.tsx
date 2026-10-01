@@ -15,16 +15,17 @@ export const config = {
   inputJsonSchema: {
     additionalProperties: false,
     properties: {
-      after: { description: 'Return entries after this opaque entry id', type: 'string' },
+      after: { description: 'Return entries after this opaque entry id. No default', type: 'string' },
       dir: { description: 'Agents directory for --files mode', type: 'string' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       full: { description: 'Show full entry text in human output', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
-      account: { description: 'Saved Grok Bot login to use when several are stored', type: 'string' },
+      account: { description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT', type: 'string' },
       historyDir: { description: 'Directory containing history.jsonl', type: 'string' },
       limit: { default: 40, description: 'How many trailing entries to return (1-200)', type: 'number' },
       noHistory: { description: 'Skip local history for this command', type: 'boolean' },
       normalized: {
+        default: false,
         description: 'With --json, emit { target, messages: [{ id, role, text }] }',
         type: 'boolean',
       },

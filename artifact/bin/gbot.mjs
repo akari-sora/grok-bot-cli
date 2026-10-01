@@ -6500,7 +6500,7 @@ var __webpack_modules__ = {
         var _core_store_js__rspack_import_1 = __webpack_require__("./src/core/store.js");
         var _gbot_js__rspack_import_2 = __webpack_require__("./src/gbot.ts");
         const backendFlagsSchema = zod__rspack_import_3.Ikc({
-            account: zod__rspack_import_3.YjP().min(1).optional().describe('Saved Grok Bot login to use when several are stored'),
+            account: zod__rspack_import_3.YjP().min(1).optional().describe('Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT'),
             dir: zod__rspack_import_3.YjP().min(1).optional().describe('Agents directory for --files mode'),
             files: zod__rspack_import_3.zMY().optional().describe('Force the on-disk agents store'),
             gateway: zod__rspack_import_3.zMY().optional().describe('Force the live gateway')
@@ -6776,7 +6776,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     avatarColor: {
@@ -6848,7 +6848,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     ref: {
@@ -6912,7 +6912,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     ref: {
@@ -6977,7 +6977,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     }
                 },
@@ -7032,7 +7032,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     avatarColor: {
@@ -8602,7 +8602,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     }
                 },
@@ -8701,7 +8701,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     bot: {
@@ -8770,7 +8770,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     avatarColor: {
@@ -8854,7 +8854,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     ref: {
@@ -8920,7 +8920,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     ref: {
@@ -8986,7 +8986,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     }
                 },
@@ -9041,7 +9041,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     ref: {
@@ -9107,7 +9107,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     bot: {
@@ -9176,7 +9176,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     group: {
@@ -9248,7 +9248,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     avatarColor: {
@@ -9456,7 +9456,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     historyDir: {
@@ -9474,6 +9474,7 @@ var __webpack_modules__ = {
                         type: 'array'
                     },
                     stdin: {
+                        default: false,
                         description: 'Read the message from stdin instead of the process arguments',
                         type: 'boolean'
                     },
@@ -9657,7 +9658,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     path: {
@@ -9725,7 +9726,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     }
                 },
@@ -9777,7 +9778,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     skill: {
@@ -9831,7 +9832,7 @@ var __webpack_modules__ = {
                 additionalProperties: false,
                 properties: {
                     after: {
-                        description: 'Return entries after this opaque entry id',
+                        description: 'Return entries after this opaque entry id. No default',
                         type: 'string'
                     },
                     dir: {
@@ -9851,7 +9852,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored',
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
                         type: 'string'
                     },
                     historyDir: {
@@ -9868,6 +9869,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     normalized: {
+                        default: false,
                         description: 'With --json, emit { target, messages: [{ id, role, text }] }',
                         type: 'boolean'
                     },
@@ -41792,7 +41794,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -41872,7 +41874,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -41926,7 +41928,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -41980,7 +41982,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -42025,7 +42027,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43113,7 +43115,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43157,7 +43159,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43218,7 +43220,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43306,7 +43308,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43360,7 +43362,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43414,7 +43416,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43459,7 +43461,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43513,7 +43515,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43574,7 +43576,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43635,7 +43637,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43792,7 +43794,7 @@ var __webpack_modules__ = {
                         "exitCode": "result",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43919,6 +43921,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
+                                "defaultValue": false,
                                 "description": "Read the message from stdin instead of the process arguments",
                                 "key": "stdin",
                                 "kind": "boolean",
@@ -43947,7 +43950,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44001,7 +44004,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44046,7 +44049,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44100,7 +44103,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored",
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44108,7 +44111,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Return entries after this opaque entry id",
+                                "description": "Return entries after this opaque entry id. No default",
                                 "key": "after",
                                 "kind": "string",
                                 "option": "after",
@@ -44173,6 +44176,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
+                                "defaultValue": false,
                                 "description": "With --json, emit { target, messages: [{ id, role, text }] }",
                                 "key": "normalized",
                                 "kind": "boolean",
@@ -49084,6 +49088,26 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_stream__rspack_import_1 = __webpack_require__("node:stream");
         var _store_js__rspack_import_2 = __webpack_require__("./src/core/store.js");
         const MAX_STDIN_MESSAGE_BYTES = 64 * 1024;
+        function decodeStdinBytes(bytes) {
+            if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+                return new TextDecoder("utf-8", {
+                    fatal: true
+                }).decode(bytes.subarray(3));
+            }
+            if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+                return new TextDecoder("utf-16le", {
+                    fatal: true
+                }).decode(bytes.subarray(2));
+            }
+            if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+                return new TextDecoder("utf-16be", {
+                    fatal: true
+                }).decode(bytes.subarray(2));
+            }
+            return new TextDecoder("utf-8", {
+                fatal: true
+            }).decode(bytes);
+        }
         async function readCommandStdin() {
             const file = process.env.GBOT_STDIN_FILE;
             if (typeof file === "string" && file) {
@@ -49107,12 +49131,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (byteLength === 0) throw new _store_js__rspack_import_2.AD("stdin message must not be empty.");
             let message;
             try {
-                message = new TextDecoder("utf-8", {
-                    fatal: true
-                }).decode(Buffer.concat(chunks));
+                message = decodeStdinBytes(Buffer.concat(chunks));
             } catch  {
                 throw new _store_js__rspack_import_2.AD("stdin message must be valid UTF-8.");
             }
+            if (message.length === 0) throw new _store_js__rspack_import_2.AD("stdin message must not be empty.");
             if (message.includes("\0")) throw new _store_js__rspack_import_2.AD("stdin message must not contain a NUL byte.");
             if (message.trim() !== message) {
                 throw new _store_js__rspack_import_2.AD("stdin message must not have surrounding whitespace.");

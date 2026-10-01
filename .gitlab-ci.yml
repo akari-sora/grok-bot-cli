@@ -1,4 +1,6 @@
-# Fork CI on the grok-box on-demand runner. npm publish stays on upstream.
+# Fork CI. npm publish stays on upstream.
+# Linux jobs stay on the project runner. The Windows job uses a GitLab.com
+# hosted runner and must not inherit the grok-box tags.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -8,12 +10,39 @@ workflow:
     - if: $CI_COMMIT_TAG
 
 default:
-  tags: [grok-box, ondemand, grok-bot-cli]
   interruptible: true
 
 unit:
+  tags: [grok-box, ondemand, grok-bot-cli]
   image: node:22-slim
   script:
     - npm ci
     - npm run build
     - npm run test:unit
+
+unit-windows:
+  tags: [saas-windows-medium-amd64]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+  cache:
+    key:
+      files:
+        - package-lock.json
+      prefix: windows-node22
+    paths:
+      - node_modules/
+  script:
+    - |
+      $ErrorActionPreference = "Stop"
+      $sums = (Invoke-RestMethod "https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt") -split "`n"
+      $name = (($sums | Where-Object { $_ -match "win-x64\.zip$" } | Select-Object -First 1) -split "\s+")[1].Trim()
+      if (-not $name) { throw "node win-x64 zip not listed" }
+      Invoke-WebRequest "https://nodejs.org/dist/latest-v22.x/$name" -OutFile $name
+      Expand-Archive $name -DestinationPath node-win -Force
+      $nodeHome = (Get-ChildItem node-win -Directory | Select-Object -First 1).FullName
+      $env:Path = "$nodeHome;$env:Path"
+      node -v
+      npm ci
+      npm run build
+      npm run test:unit
