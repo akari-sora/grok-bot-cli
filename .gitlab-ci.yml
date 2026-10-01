@@ -20,18 +20,29 @@ unit:
     - npm run build
     - npm run test:unit
 
+# Hosted Windows spends shared minutes. Always on tags, merge requests, and
+# manual web runs. On main, only when shipped code, tests, or packaging change.
+# A commit that only touches this file still runs Linux and skips Windows.
+# Do not cache node_modules: uploading it costs more minutes than npm ci.
 unit-windows:
   tags: [saas-windows-medium-amd64]
+  interruptible: true
+  timeout: 20m
+  needs:
+    - job: unit
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_TAG
-  cache:
-    key:
-      files:
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - src/**/*
+        - bin/**/*
+        - test/**/*
+        - tests/**/*
+        - scripts/**/*
+        - package.json
         - package-lock.json
-      prefix: windows-node22
-    paths:
-      - node_modules/
   script:
     - |
       $ErrorActionPreference = "Stop"
