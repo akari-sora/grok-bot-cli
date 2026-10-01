@@ -1,6 +1,6 @@
 # Fork CI. npm publish stays on upstream.
-# Linux jobs stay on the project runner. The Windows job uses the self-hosted
-# runner and must not inherit the grok-box tags.
+# Linux jobs use LINUX_RUNNER_TAG. The Windows job uses WINDOWS_RUNNER_TAG
+# and must not inherit the Linux tag.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -9,11 +9,17 @@ workflow:
     - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
 
+# Defaults are GitLab.com runners. Override LINUX_RUNNER_TAG and
+# WINDOWS_RUNNER_TAG in project CI/CD settings to use your own.
+variables:
+  LINUX_RUNNER_TAG: saas-linux-small-amd64
+  WINDOWS_RUNNER_TAG: saas-windows-medium-amd64
+
 default:
   interruptible: true
 
 unit:
-  tags: [grok-box, ondemand, grok-bot-cli]
+  tags: [$LINUX_RUNNER_TAG]
   image: node:22-slim
   script:
     - npm ci
@@ -59,7 +65,7 @@ unit:
 
 unit-windows:
   <<: *windows_node
-  tags: [windows, hx370]
+  tags: [$WINDOWS_RUNNER_TAG]
   needs:
     - job: unit
   rules:
