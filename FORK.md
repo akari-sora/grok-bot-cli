@@ -6,6 +6,10 @@ Upstream still owns the npm package. Do not `npm install -g grok-bot-cli`. GitLa
 
 ## English
 
+### Disclaimer
+
+Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, Cursor (Anysphere), or the upstream author. "Grok" and "Grok Bot" belong to their owners. `gbot` uses your own Grok Bot login and an undocumented gateway that can change or break at any time. Automated use may be limited by the Grok Bot terms; check them, and use it at your own risk. Report fork bugs here, not upstream.
+
 ### Install
 
 Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on the same OS user.
@@ -132,6 +136,24 @@ Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. 
 
 Do not put tokens, account keys, or message text into tickets or shell history. History is off unless `GROK_BOT_HISTORY=on`. Do not resend after `delivery: "unknown"`. Do not ask a bot to delete files, message other people, buy anything, or change account settings unless you mean that exact action. Codex and Claude channel commands need a local Unix socket; upstream rejects them on Windows (`windows-unsupported` / no Unix sockets).
 
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `bots list`, `send`, or `thread` says no Grok Bot login, or that no agents directory was found | Sign in once in the Grok Bot app as the same OS user, then run `gbot accounts`. `gbot doctor` shows where it looked. |
+| Several logins, no choice | `gbot accounts`, then `--account "<label>"` after the subcommand, or set `GBOT_ACCOUNT`. |
+| `Unknown option: --account.` | Put `--account` after the subcommand. |
+| Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
+| `delivery: "unknown"` | Read the thread. Do not send again. |
+| `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
+
+### Privacy
+
+- `gbot` talks only to the Cursor backend and the Grok Bot gateway URL the app saved (or `GROK_BOT_GATEWAY_URL`). It sends no telemetry.
+- It reads the Grok Bot app's encrypted gateway descriptor and decrypts it with the OS secret store (Keychain, `secret-tool`, or DPAPI). It never writes them and never prints tokens.
+- It writes nothing unless you turn history on. `GROK_BOT_HISTORY=on` appends plain-text messages to `~/.grok-bot-cli/history.jsonl` (or `GROK_BOT_HISTORY_DIR`). Delete that file to remove it.
+- Uninstalling the package leaves the app login untouched; sign out in the Grok Bot app to remove it.
+
 ### Related projects / 相關專案
 
 - trinity-cli — one CLI over three always-on agents (Your dot, Grok Bot, Muse): https://gitlab.com/aa22396584/trinity-cli
@@ -142,6 +164,12 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 Use this fork with trinity-cli: https://gitlab.com/aa22396584/trinity-cli
 
 ### Platforms
+
+| OS | Node.js | Status | Evidence |
+| --- | --- | --- | --- |
+| macOS | 22.19+ and 24 | Supported | Checked locally: unit, route, and type checks |
+| Linux | 22.19+ | Supported | Unit tests in GitLab CI (`node:22-slim`). 23 desktop-shim tests skip because the image has no `python3` |
+| Windows | 22.19+ | Supported except Codex/Claude channels and the relay | Unit tests in GitLab CI. Unix-socket suites skip, listed below |
 
 CI uses GitLab.com runners by default. Maintainers can point jobs at their own runners by setting the CI/CD variables `LINUX_RUNNER_TAG` and `WINDOWS_RUNNER_TAG`. Linux unit tests run in CI (`node:22-slim`). Windows unit tests run when that runner is available. macOS is checked locally. Both jobs pass the same `test/*.test.js` list to `node --test`. Tracked text stays LF (`.gitattributes`), so a Windows checkout does not rewrite plugin command frontmatter to CRLF. The Windows unit job loads the MCP client with a `file://` URL because Node rejects a `C:` path in `import()`. Upstream Codex and Claude sockets stay Unix-only.
 
@@ -162,6 +190,10 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 - `test/relay-worker.test.js`
 
 ## 繁體中文
+
+### 聲明
+
+非官方專案。這個 fork 與 xAI、Cursor（Anysphere）或上游作者沒有關係，也沒有得到他們的背書或支援。「Grok」與「Grok Bot」屬於各自的所有者。`gbot` 用你自己的 Grok Bot 登入和未公開的 gateway，隨時可能改變或失效。自動化使用可能受 Grok Bot 條款限制，請自行確認，風險自負。fork 的問題回報到這裡，不要回報給上游。
 
 ### 安裝
 
@@ -289,6 +321,24 @@ gbot thread Researcher --after "<cursor>" --json
 
 不要把 token、帳號鍵或訊息正文貼進工單或 shell 歷史。除非 `GROK_BOT_HISTORY=on`，否則不寫歷史。`delivery: "unknown"` 之後不要重送。除非你就是要做那件事，否則不要叫 bot 刪檔、傳訊給別人、購買，或改帳號設定。Codex 與 Claude channel 需要本機 Unix socket；上游在 Windows 上會拒絕（`windows-unsupported`，沒有 Unix socket）。
 
+### 疑難排解
+
+| 症狀 | 修法 |
+| --- | --- |
+| `bots list`、`send` 或 `thread` 說沒有 Grok Bot 登入，或找不到 agents 目錄 | 用同一個系統使用者在 Grok Bot app 登入一次，再跑 `gbot accounts`。`gbot doctor` 會列出它找過的位置。 |
+| 有多個登入、選不出來 | `gbot accounts`，再把 `--account "<標籤>"` 放在子命令後面，或設 `GBOT_ACCOUNT`。 |
+| `Unknown option: --account.` | 把 `--account` 放到子命令後面。 |
+| Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
+| `delivery: "unknown"` | 先讀 thread，不要重送。 |
+| 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
+
+### 隱私
+
+- `gbot` 只連 Cursor 後端和 app 存下的 Grok Bot gateway 網址（或 `GROK_BOT_GATEWAY_URL`）。沒有遙測。
+- 它讀 Grok Bot app 加密的 gateway descriptor，用系統的密鑰儲存（Keychain、`secret-tool` 或 DPAPI）解密。它不寫這些檔，也不印 token。
+- 除非打開歷史，否則它不寫任何檔。`GROK_BOT_HISTORY=on` 會把訊息明文附加到 `~/.grok-bot-cli/history.jsonl`（或 `GROK_BOT_HISTORY_DIR`）。刪掉那個檔就清掉了。
+- 移除套件不會動到 app 的登入；要移除登入，在 Grok Bot app 登出。
+
 ### 相關專案
 
 - trinity-cli — 一個 CLI 管三個常駐 agent（Your dot、Grok Bot、Muse）：https://gitlab.com/aa22396584/trinity-cli
@@ -299,6 +349,12 @@ gbot thread Researcher --after "<cursor>" --json
 與 trinity-cli 一起用：https://gitlab.com/aa22396584/trinity-cli
 
 ### 平台
+
+| 系統 | Node.js | 狀態 | 依據 |
+| --- | --- | --- | --- |
+| macOS | 22.19+ 與 24 | 支援 | 在本機檢查：單元、路由、型別 |
+| Linux | 22.19+ | 支援 | GitLab CI 跑單元測試（`node:22-slim`）。映像檔沒有 `python3`，23 則 desktop-shim 測試略過 |
+| Windows | 22.19+ | 支援；Codex／Claude channel 與 relay 除外 | GitLab CI 跑單元測試。需要 Unix socket 的測試略過，清單在下面 |
 
 CI 預設使用 GitLab.com 的 runner。維護者可設定 CI/CD 變數 `LINUX_RUNNER_TAG` 與 `WINDOWS_RUNNER_TAG`，把 job 指到自己的 runner。Linux 單元測試在 CI 跑（`node:22-slim`）。Windows 單元測試在該 runner 可用時執行。macOS 在本機確認。兩個 job 都把同一份 `test/*.test.js` 清單交給 `node --test`。追蹤的文字檔維持 LF（`.gitattributes`），Windows checkout 不會把 plugin 指令的 frontmatter 改成 CRLF。Windows 單元測試用 `file://` 載入 MCP client，因為 Node 的 `import()` 不接受 `C:` 路徑。上游的 Codex 與 Claude socket 仍只有 Unix。
 

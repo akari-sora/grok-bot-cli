@@ -30,7 +30,7 @@ test("unix-only suites are exactly the files that import the Windows skip helper
 test("Windows collection skips unix-only tests and still runs portable files", () => {
   const env = { ...process.env, GBOT_UNIT_SKIP_UNIX_ONLY: "1", GROK_BOT_TEST: "1" };
   delete env.NODE_TEST_CONTEXT;
-  const skipped = spawnSync(process.execPath, ["--test", "test/claude-channel.test.js"], {
+  const skipped = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "test/claude-channel.test.js"], {
     cwd: root,
     env,
     encoding: "utf8",
@@ -41,7 +41,7 @@ test("Windows collection skips unix-only tests and still runs portable files", (
   assert.match(skipped.stdout, /private Claude channel delivers correlated replies/);
   assert.match(skipped.stdout, new RegExp(UNIX_ONLY_SKIP_REASON.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
-  const portable = spawnSync(process.execPath, ["--test", "test/codex-commands.test.js"], {
+  const portable = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "test/codex-commands.test.js"], {
     cwd: root,
     env,
     encoding: "utf8",

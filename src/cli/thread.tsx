@@ -54,7 +54,7 @@ export const inputSchema = backendFlagsSchema
 
 export const resultSchema = z.record(z.string(), z.json());
 
-const threadValue = (out: { cursor?: string; entryCount?: number; gapReset?: boolean }, normalized: boolean) => {
+const threadValue = (out: object & { cursor?: string; entryCount?: number; gapReset?: boolean }, normalized: boolean) => {
   if (!normalized) return out;
   const stable = normalizeTranscript(out);
   if (out.cursor === undefined && out.entryCount === undefined && out.gapReset === undefined) return stable;

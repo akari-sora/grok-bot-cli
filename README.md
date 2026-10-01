@@ -1,8 +1,16 @@
 # About this fork / 關於這個 fork
 
-This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, and per-OS setup are in [FORK.md](FORK.md). The rest of this file is the upstream README.
+[![pipeline](https://gitlab.com/aa22396584/grok-bot-cli/badges/main/pipeline.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines)
+[![release](https://gitlab.com/aa22396584/grok-bot-cli/-/badges/release.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/releases)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread 與各平台設定見 [FORK.md](FORK.md)。以下是上游 README。
+This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, per-OS setup, privacy, troubleshooting, and the platform matrix are in [FORK.md](FORK.md). The rest of this file is the upstream README.
+
+Unofficial: not affiliated with, endorsed by, or supported by xAI, Cursor (Anysphere), or the upstream author. It uses your own Grok Bot login and an undocumented gateway; automated use may be limited by the Grok Bot terms, so use it at your own risk. Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+
+這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread、各平台設定、隱私、疑難排解與平台表見 [FORK.md](FORK.md)。以下是上游 README。
+
+非官方：與 xAI、Cursor（Anysphere）或上游作者沒有關係，也沒有得到他們的背書或支援。它用你自己的 Grok Bot 登入和未公開的 gateway；自動化使用可能受 Grok Bot 條款限制，風險自負。參與開發見 [CONTRIBUTING.md](CONTRIBUTING.md)，安全問題見 [SECURITY.md](SECURITY.md)。
 
 ## Related projects / 相關專案
 

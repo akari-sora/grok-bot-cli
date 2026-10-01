@@ -11,6 +11,20 @@ function chooseBackend(opts) {
   return "files";
 }
 
+// Without --dir/--files the files backend is only a fallback for running inside a
+// Grok Bot computer. Anywhere else, finding nothing means there is no login yet.
+function resolveFilesRoot(opts) {
+  try {
+    return files.resolveAgentsRoot(opts.root);
+  } catch (err) {
+    if (opts.root || opts.files || !(err instanceof files.StoreError)) throw err;
+    throw new files.StoreError(
+      "No Grok Bot login found. Sign in once in the Grok Bot app, then run `gbot accounts`.\n" +
+        "Run `gbot doctor` to see where gbot looked. Inside a Grok Bot computer, pass --dir or set GROK_BOT_AGENTS_DIR.",
+    );
+  }
+}
+
 export async function openBackend(opts) {
   const kind = chooseBackend(opts);
   if (kind === "gateway") {
@@ -35,7 +49,7 @@ export async function openBackend(opts) {
       removeSkill: (skillRef) => gw.removeSkill(session, skillRef),
     };
   }
-  const root = files.resolveAgentsRoot(opts.root);
+  const root = resolveFilesRoot(opts);
   return {
     kind,
     root,

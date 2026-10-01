@@ -28792,6 +28792,14 @@ var __webpack_modules__ = {
             if (forceGw || !forceFiles && _gateway_js__rspack_import_1.nF()) return "gateway";
             return "files";
         }
+        function resolveFilesRoot(opts) {
+            try {
+                return _store_js__rspack_import_0.v1(opts.root);
+            } catch (err) {
+                if (opts.root || opts.files || !(err instanceof _store_js__rspack_import_0.AD)) throw err;
+                throw new _store_js__rspack_import_0.AD("No Grok Bot login found. Sign in once in the Grok Bot app, then run `gbot accounts`.\n" + "Run `gbot doctor` to see where gbot looked. Inside a Grok Bot computer, pass --dir or set GROK_BOT_AGENTS_DIR.");
+            }
+        }
         async function openBackend(opts) {
             const kind = chooseBackend(opts);
             if (kind === "gateway") {
@@ -28818,7 +28826,7 @@ var __webpack_modules__ = {
                     removeSkill: (skillRef)=>_gateway_js__rspack_import_1.uX(session, skillRef)
                 };
             }
-            const root = _store_js__rspack_import_0.v1(opts.root);
+            const root = resolveFilesRoot(opts);
             return {
                 kind,
                 root,

@@ -1,5 +1,27 @@
 # grok-bot-cli
 
+## Fork changes (ImL1s)
+
+Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
+
+### Unreleased
+
+- A first run without a Grok Bot login says to sign in to the Grok Bot app and run `gbot accounts`, instead of pointing at a macOS agents directory. `--dir` and `--files` keep the old error.
+- The unit suite passes on Node 24: the Windows-collection test asks Node for TAP output.
+- `npm run typecheck` passes again.
+- Windows unit tests collect the same files as Linux and skip the Unix-socket suites listed in FORK.md.
+- Docs: install from the release package file, disclaimer, privacy, troubleshooting, and platform matrix in FORK.md; CONTRIBUTING.md, SECURITY.md, issue and merge request templates. LICENSE names the fork's changes next to the upstream notice.
+
+### 0.11.2-iml1s.2
+
+- Windows checkouts keep LF, and the Windows unit job imports MCP clients by `file://` URL.
+- `send --stdin` accepts a UTF-8 or UTF-16 byte-order mark. FORK.md documents the fork.
+
+### 0.11.2-iml1s.1
+
+- Synced to upstream 0.11.2. Kept the fork's `send --stdin`, `--json thread --normalized`, `thread --after`, and 15 second send deadline.
+- Account selection: `gbot accounts`, `--account` after the subcommand, and `GBOT_ACCOUNT`.
+
 ## 0.11.2
 
 ### Patch Changes
