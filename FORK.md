@@ -2,7 +2,7 @@
 
 ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. The package version string stays `0.11.2`. The fork revision is the git tag.
 
-Upstream still owns the npm package. Install from git, not `npm install -g grok-bot-cli`. GitLab (https://gitlab.com/aa22396584/grok-bot-cli) is the primary remote. GitHub (https://github.com/ImL1s/grok-bot-cli) is a mirror.
+Upstream still owns the npm package. Do not `npm install -g grok-bot-cli`. GitLab (https://gitlab.com/aa22396584/grok-bot-cli) is the primary remote. The GitHub mirror is not a public install source.
 
 ## English
 
@@ -10,19 +10,25 @@ Upstream still owns the npm package. Install from git, not `npm install -g grok-
 
 Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on the same OS user.
 
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.2` release and install that file.
+
 macOS or Linux:
 
 ```sh
-npm install -g git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz"
+npm install -g ./grok-bot-cli-0.11.2.tgz
+rm -f grok-bot-cli-0.11.2.tgz
 ```
 
 Windows PowerShell:
 
 ```powershell
-npm install -g "git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2"
+irm "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+npm install -g .\grok-bot-cli-0.11.2.tgz
+Remove-Item grok-bot-cli-0.11.2.tgz
 ```
 
-npm creates `gbot.cmd` on Windows, so `gbot` works from PowerShell and cmd. Quote the spec so `#` is not a comment.
+npm creates `gbot.cmd` on Windows, so `gbot` works from PowerShell and cmd.
 
 From a clone (any OS, after `npm install`):
 
@@ -38,7 +44,7 @@ gbot --version
 
 This prints `0.11.2`. That is the upstream package version, not the fork tag.
 
-Upgrade by installing the same git spec again. Uninstall:
+Upgrade by downloading the same `.tgz` and installing it again. Uninstall:
 
 ```sh
 npm uninstall -g grok-bot-cli
@@ -128,7 +134,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 
 - trinity-cli — one CLI over three always-on agents (Your dot, Grok Bot, Muse): https://gitlab.com/aa22396584/trinity-cli
 - chatgpt-dot-cli — ChatGPT Your dot: https://gitlab.com/aa22396584/chatgpt-dot-cli
-- grok-bot-cli (this fork, `gbot`) — Grok Bot: https://gitlab.com/aa22396584/grok-bot-cli (mirror https://github.com/ImL1s/grok-bot-cli)
+- grok-bot-cli (this fork, `gbot`) — Grok Bot: https://gitlab.com/aa22396584/grok-bot-cli
 - muse-web-cli — Meta Muse via the web: https://gitlab.com/aa22396584/muse-web-cli
 
 Use this fork with trinity-cli: https://gitlab.com/aa22396584/trinity-cli
@@ -157,21 +163,27 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 ### 安裝
 
-需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。GitHub（https://github.com/ImL1s/grok-bot-cli）只是鏡像。
+需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
+
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.2` 附的套件檔再安裝。
 
 macOS 或 Linux：
 
 ```sh
-npm install -g git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz"
+npm install -g ./grok-bot-cli-0.11.2.tgz
+rm -f grok-bot-cli-0.11.2.tgz
 ```
 
 Windows PowerShell：
 
 ```powershell
-npm install -g "git+https://gitlab.com/aa22396584/grok-bot-cli.git#v0.11.2-iml1s.2"
+irm "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+npm install -g .\grok-bot-cli-0.11.2.tgz
+Remove-Item grok-bot-cli-0.11.2.tgz
 ```
 
-Windows 上 npm 會建立 `gbot.cmd`，PowerShell 與 cmd 都能執行 `gbot`。規格請加引號，避免 `#` 被當成註解。
+Windows 上 npm 會建立 `gbot.cmd`，PowerShell 與 cmd 都能執行 `gbot`。
 
 從本機 clone（先 `npm install`）：
 
@@ -187,7 +199,7 @@ gbot --version
 
 輸出是 `0.11.2`，這是上游套件版本，不是 fork 標籤。
 
-升級就再安裝一次同一個 git 規格。移除：
+升級就再下載同一個 `.tgz` 後安裝。移除：
 
 ```sh
 npm uninstall -g grok-bot-cli
@@ -277,7 +289,7 @@ gbot thread Researcher --after "<cursor>" --json
 
 - trinity-cli — 一個 CLI 管三個常駐 agent（Your dot、Grok Bot、Muse）：https://gitlab.com/aa22396584/trinity-cli
 - chatgpt-dot-cli — ChatGPT Your dot：https://gitlab.com/aa22396584/chatgpt-dot-cli
-- grok-bot-cli（這個 fork，`gbot`）— Grok Bot：https://gitlab.com/aa22396584/grok-bot-cli（鏡像 https://github.com/ImL1s/grok-bot-cli）
+- grok-bot-cli（這個 fork，`gbot`）— Grok Bot：https://gitlab.com/aa22396584/grok-bot-cli
 - muse-web-cli — 網頁上的 Meta Muse：https://gitlab.com/aa22396584/muse-web-cli
 
 與 trinity-cli 一起用：https://gitlab.com/aa22396584/trinity-cli
