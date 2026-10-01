@@ -8,7 +8,7 @@ This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/Script
 
 - trinity-cli — one CLI over three always-on agents (Your dot, Grok Bot, Muse): https://gitlab.com/aa22396584/trinity-cli
 - chatgpt-dot-cli — ChatGPT Your dot: https://gitlab.com/aa22396584/chatgpt-dot-cli
-- grok-bot-cli (this fork, `gbot`) — Grok Bot: https://gitlab.com/aa22396584/grok-bot-cli (mirror https://github.com/ImL1s/grok-bot-cli)
+- grok-bot-cli (this fork, `gbot`) — Grok Bot: https://gitlab.com/aa22396584/grok-bot-cli
 - muse-web-cli — Meta Muse via the web: https://gitlab.com/aa22396584/muse-web-cli
 
 # grok-bot-cli
