@@ -66,6 +66,7 @@ const recordSchema = z.strictObject({
     "paused",
   ]),
   reason,
+  detail: z.string().max(1024).optional(),
   turnId: relayId.nullable(),
   requestId: relayId.nullable(),
   messageId: relayId.nullable(),

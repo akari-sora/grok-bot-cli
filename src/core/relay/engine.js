@@ -14,6 +14,7 @@ import {
 import { createIntake } from "./intake.js";
 import { withCodexSender } from "../sender-prefix.js";
 import { createCompletion } from "./completion.js";
+import { errorDetail } from "./detail.js";
 import {
   connectGateway,
   resolveRef,
@@ -113,8 +114,12 @@ export async function openRelayEngine({
     return binding?.state === "running";
   };
   const change = async (section, value) => state.commit([op(section, value)]);
-  const update = async (id, patch) =>
-    change("records", { ...state.read().records[id], ...patch });
+  // State payloads must be JSON-safe: a patch value of undefined clears the key instead of storing it.
+  const update = async (id, patch) => {
+    const next = { ...state.read().records[id], ...patch };
+    for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+    return change("records", next);
+  };
   const { envelope, newRecord } = createRecordFactory({ env, clock });
   const { baseline, poll } = createIntake({
     state,
@@ -205,6 +210,7 @@ export async function openRelayEngine({
       }
     } catch (error) {
       result = {
+        detail: errorDetail(error),
         delivery: error.delivery === "rejected" ? "rejected" : "unknown",
         reason:
           error.delivery === "rejected"
@@ -230,6 +236,11 @@ export async function openRelayEngine({
           : delivery === "rejected"
             ? (result.reason ?? "rejected").slice(0, 1024)
             : null,
+      // Why it was not delivered (daemon error text), so a bare reason code is never all the caller sees.
+      detail:
+        delivery === "accepted"
+          ? undefined
+          : errorDetail(result.detail ?? result.error ?? result.message),
     });
     return state.read().records[id];
   }
