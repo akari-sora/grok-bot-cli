@@ -4,7 +4,7 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
-### Unreleased
+### 0.11.2-iml1s.3
 
 - Grok Bot app gateway descriptor version 3 is supported using the version 2 entries layout; unknown descriptor versions continue to be rejected.
 - A first run without a Grok Bot login says to sign in to the Grok Bot app and run `gbot accounts`, instead of pointing at a macOS agents directory. `--dir` and `--files` keep the old error.
