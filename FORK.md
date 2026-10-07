@@ -14,12 +14,12 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on the same OS user.
 
-Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.2` release and install that file.
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.3` release and install that file.
 
 macOS or Linux:
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell:
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -199,12 +199,12 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
 
-不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.2` 附的套件檔再安裝。
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.3` 附的套件檔再安裝。
 
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -212,7 +212,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/95fd5079c4507af7f3f8e61dd04ce6f3/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
