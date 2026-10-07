@@ -44475,10 +44475,10 @@ var __webpack_modules__ = {
             return "";
         }
         function savedEntries(wrapped) {
-            if (wrapped.version != null && wrapped.version !== 1 && wrapped.version !== 2) {
+            if (wrapped.version != null && wrapped.version !== 1 && wrapped.version !== 2 && wrapped.version !== 3) {
                 throw new GrokBotGatewaySessionError("UNSUPPORTED_VERSION", `Unsupported Grok Bot gateway descriptor version ${wrapped.version}.`);
             }
-            if (wrapped.version === 2) {
+            if (wrapped.version === 2 || wrapped.version === 3) {
                 return Object.entries(wrapped.entries ?? {}).map(([id, entry])=>({
                         id,
                         encrypted: entry?.encrypted,

@@ -168,6 +168,60 @@ test("rejects a version 2 descriptor with ambiguous entries", () => {
   );
 });
 
+test("loads a version 3 Grok Bot gateway entry", () => {
+  const home = writeWrappedDescriptor({
+    version: 3,
+    entries: {
+      primary: {
+        encrypted: ENCRYPTED_DESCRIPTOR,
+        savedAtMs: 1_787_000_000_000,
+      },
+    },
+  });
+
+  const session = loadGrokBotGatewaySession({
+    platform: "darwin",
+    home,
+    getKeychainPassword: () => "demo-password",
+  });
+
+  assert.deepEqual(session, {
+    gatewayUrl: "https://box.example",
+    gatewayToken: "gateway-token",
+    headers: { "x-anyrun-network-token": "route-token" },
+  });
+});
+
+test("rejects a version 3 descriptor with ambiguous entries", () => {
+  const home = writeWrappedDescriptor({
+    version: 3,
+    entries: {
+      first: { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 1 },
+      second: { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 2 },
+    },
+  });
+
+  assert.throws(
+    () => loadGrokBotGatewaySession({
+      platform: "darwin",
+      home,
+      getKeychainPassword: () => "demo-password",
+    }),
+    (error) => {
+      assert.equal(error.name, "GrokBotGatewaySessionError");
+      assert.equal(error.code, "AMBIGUOUS_ENTRIES");
+      assert.match(error.message, /multiple saved gateway entries/i);
+      assert.match(error.message, /--account <label>/);
+      assert.match(error.message, /GBOT_ACCOUNT=<label>/);
+      assert.match(error.message, /first/);
+      assert.match(error.message, /second/);
+      assert.match(error.message, /last saved/);
+      assert.doesNotMatch(error.message, /gateway-token|djEw/);
+      return true;
+    },
+  );
+});
+
 function encryptDarwinDescriptor(value, password = "demo-password") {
   const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
   const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
@@ -256,6 +310,49 @@ test("a single saved login still loads when no account is chosen", () => {
   assert.equal(session.gatewayUrl, "https://box.example");
 });
 
+test("a single saved login in version 3 loads when no account is chosen", () => {
+  const home = writeWrappedDescriptor({
+    version: 3,
+    entries: { "8b7f0d1600000000000000000000000000000000000000000000000000000001": { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 1 } },
+  });
+  const session = loadGrokBotGatewaySession({
+    platform: "darwin",
+    home,
+    env: {},
+    getKeychainPassword: () => "demo-password",
+  });
+  assert.equal(session.gatewayUrl, "https://box.example");
+});
+
+test("selects a version 3 saved login by 64-char hex id prefix or full id", () => {
+  const id1 = "8b7f0d1600000000000000000000000000000000000000000000000000000001";
+  const id2 = "9c8e1f2700000000000000000000000000000000000000000000000000000002";
+  const home = writeWrappedDescriptor({
+    version: 3,
+    entries: {
+      [id1]: { encrypted: ENCRYPTED_DESCRIPTOR, savedAtMs: 10 },
+      [id2]: { encrypted: SECOND_LOGIN, savedAtMs: 20 },
+    },
+  });
+  const options = {
+    platform: "darwin",
+    home,
+    getKeychainPassword: () => "demo-password",
+  };
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: id1 }).gatewayUrl,
+    "https://box.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: "8b7f0d16" }).gatewayUrl,
+    "https://box.example",
+  );
+  assert.equal(
+    loadGrokBotGatewaySession({ ...options, account: "9c8e1f27" }).gatewayUrl,
+    "https://other.example",
+  );
+});
+
 test("an unknown account lists the labels and does not open that login", () => {
   const home = twoLogins();
   assert.throws(
@@ -298,7 +395,7 @@ test("rejects a gateway entry without an encrypted payload", () => {
 
 test("rejects an unsupported gateway descriptor version", () => {
   const home = writeWrappedDescriptor({
-    version: 3,
+    version: 4,
     encrypted: ENCRYPTED_DESCRIPTOR,
   });
 
@@ -311,7 +408,7 @@ test("rejects an unsupported gateway descriptor version", () => {
     (error) => {
       assert.equal(error.name, "GrokBotGatewaySessionError");
       assert.equal(error.code, "UNSUPPORTED_VERSION");
-      assert.match(error.message, /unsupported .*gateway descriptor version 3/i);
+      assert.match(error.message, /unsupported .*gateway descriptor version 4/i);
       return true;
     },
   );
