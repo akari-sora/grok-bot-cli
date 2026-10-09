@@ -35,7 +35,9 @@ test("test mode: a loopback gateway is served, a live gateway host is refused be
     result: { messageId: "m-loop" },
     delivery: "accepted",
     messageId: "m-loop",
+    clientNonce: received[1].body.clientNonce,
   });
+  assert.match(out.clientNonce, /^[0-9a-f-]{36}$/);
   assert.deepEqual(received.map((r) => r.url), ["/api/listAgents", "/api/sendPrompt"]);
   assert.equal(received[1].body.prompt, "hi");
 

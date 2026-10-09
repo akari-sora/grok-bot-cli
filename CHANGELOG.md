@@ -4,6 +4,13 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.4
+
+- Live sends are reported correctly: the cloud gateway answers `{"accepted":true}` without a `messageId`, which earlier versions reported as `delivery: "unknown"`. `accepted: true` or a string `messageId` now counts as accepted; anything else stays unknown.
+- Every send receipt and send error carries the `clientNonce` that was posted. `gbot reconcile <bot> --nonce <n>` looks for that nonce in the latest 200 transcript entries and never resends.
+- Gateway errors carry `kind` (`auth` for 401/403, `routing` for an unroutable 404, `unsupported` for `gateway/unknown-method`, `server`, `client`) and the host's `failureCode`.
+- Note: `sendPrompt` to an id that is not on the roster answers 409 but still creates an empty "New Agent" placeholder, so `send` keeps resolving the target first.
+
 ### 0.11.2-iml1s.3
 
 - Grok Bot app gateway descriptor version 3 is supported using the version 2 entries layout; unknown descriptor versions continue to be rejected.

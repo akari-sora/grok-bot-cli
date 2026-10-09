@@ -84,6 +84,7 @@ export function outcomeFromError(error, opts = {}) {
     for (const key of [
       "delivery", "reason", "mode", "threadId", "turnId", "targetId", "messageId",
       "correlationId", "refused", "hop", "hostId", "hostName", "hint", "code", "effect",
+      "clientNonce", "failureCode", "kind",
     ]) {
       if (error[key] !== undefined) out[key] = error[key];
     }

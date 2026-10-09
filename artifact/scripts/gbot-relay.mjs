@@ -23810,7 +23810,10 @@ var __webpack_modules__ = {
                     "hostName",
                     "hint",
                     "code",
-                    "effect"
+                    "effect",
+                    "clientNonce",
+                    "failureCode",
+                    "kind"
                 ]){
                     if (error[key] !== undefined) out[key] = error[key];
                 }
@@ -25044,11 +25047,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _url_policy_js__rspack_import_3 = __webpack_require__("./src/core/url-policy.js");
         var _grok_approvals_js__rspack_import_4 = __webpack_require__("./src/core/grok-approvals.js");
         class GatewayError extends Error {
-            constructor(message, { status, method } = {}){
+            constructor(message, info = {}){
                 super(message);
                 this.name = "GatewayError";
-                this.status = status;
-                this.method = method;
+                this.status = info.status;
+                this.method = info.method;
+                if (info.code !== undefined) this.code = info.code;
+                if (info.effect !== undefined) this.effect = info.effect;
+                if (info.failureCode !== undefined) this.failureCode = info.failureCode;
+                if (info.kind !== undefined) this.kind = info.kind;
             }
         }
         const GATEWAY_TIMEOUT_MS = 30000;
@@ -25242,6 +25249,35 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 signal
             });
         }
+        function redactDetail(detail, session) {
+            let text = (0, _url_policy_js__rspack_import_3.fp)(String(detail ?? "").slice(0, 300));
+            const secrets = [];
+            if (typeof session?.gatewayToken === "string") secrets.push(session.gatewayToken);
+            const headers = session?.gatewayHeaders;
+            if (headers && typeof headers === "object") {
+                for (const value of Object.values(headers)){
+                    if (typeof value === "string") secrets.push(value);
+                }
+            }
+            for (const secret of secrets){
+                if (secret.length >= 8) text = text.split(secret).join("<redacted>");
+            }
+            return text;
+        }
+        function failureKind(status, contentType, data) {
+            const failureCode = data && typeof data.failureCode === "string" && data.failureCode ? data.failureCode : undefined;
+            const type = String(contentType || "").toLowerCase();
+            let kind;
+            if (failureCode === "gateway/unknown-method") kind = "unsupported";
+            else if (status === 401 || status === 403) kind = "auth";
+            else if (status === 404 && type.includes("text/plain") && data && typeof data.raw === "string" && data.raw.includes("could not be routed")) kind = "routing";
+            else if (status >= 500) kind = "server";
+            else if (status >= 400 && status < 500) kind = "client";
+            return {
+                failureCode,
+                kind
+            };
+        }
         async function gatewayCall(session, method, body = {}, { signal } = {}) {
             assertGatewayActive(signal);
             const base = (0, _url_policy_js__rspack_import_3.Re)(session.gatewayUrl, {
@@ -25283,9 +25319,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!prompt) assertGatewayActive(signal);
             if (!res.ok) {
                 const detail = data.message || data.error || data.raw || res.statusText;
-                throw new GatewayError(method + " failed: " + res.status + " " + (0, _url_policy_js__rspack_import_3.fp)(String(detail).slice(0, 300)), {
+                const classified = failureKind(res.status, res.headers.get("content-type"), data);
+                throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
                     status: res.status,
-                    method
+                    method,
+                    ...classified.kind ? {
+                        kind: classified.kind
+                    } : {},
+                    ...classified.failureCode ? {
+                        failureCode: classified.failureCode
+                    } : {}
                 });
             }
             return data;
@@ -25552,6 +25595,26 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const next = group.memberIds.filter((id)=>id !== member.id);
             return setGroupMembers(session, group.id, next);
         }
+        function sendReceiptFrom(data) {
+            if (!data || typeof data !== "object") return {
+                accepted: false
+            };
+            const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : undefined;
+            if (data.accepted === true || messageId) return {
+                accepted: true,
+                ...messageId ? {
+                    messageId
+                } : {}
+            };
+            return {
+                accepted: false
+            };
+        }
+        function transcriptRows(data) {
+            if (Array.isArray(data)) return data;
+            if (data && typeof data === "object" && Array.isArray(data.entries)) return data.entries;
+            return [];
+        }
         async function sendPrompt(session, ref, prompt, extra = {}) {
             assertGatewayActive(extra.signal);
             const rec = await resolveRef(session, ref, {
@@ -25575,19 +25638,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 }
                 if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
                 if (err && err.targetId == null) err.targetId = rec.id;
+                if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
                 if (err && err.delivery === "unknown" && err instanceof Error && !/delivery unknown/.test(err.message)) {
                     err.message += " (delivery unknown; check the thread before resending)";
                 }
                 throw err;
             }
-            const messageId = data && typeof data === "object" && typeof data.messageId === "string" ? data.messageId : null;
+            const receipt = sendReceiptFrom(data);
+            const messageId = receipt.messageId;
             return {
                 target: rec,
                 result: data && typeof data === "object" ? data : {},
-                delivery: messageId ? "accepted" : "unknown",
+                delivery: receipt.accepted ? "accepted" : "unknown",
                 ...messageId ? {
                     messageId
-                } : {}
+                } : {},
+                clientNonce: body.clientNonce
             };
         }
         async function getTranscriptTail(session, ref, limit = 40) {
@@ -25600,6 +25666,34 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return {
                 target: rec,
                 transcript: data
+            };
+        }
+        async function reconcileDelivery(session, ref, clientNonce) {
+            if (typeof clientNonce !== "string" || clientNonce.length === 0) {
+                throw new GatewayError("A clientNonce is required to reconcile a delivery.");
+            }
+            const tail = await getTranscriptTail(session, ref, 200);
+            const entries = transcriptRows(tail?.transcript);
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                if (!entry || typeof entry !== "object") continue;
+                if (entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
+                const entryId = typeof entry.id === "string" ? entry.id : typeof entry.entryId === "string" ? entry.entryId : "";
+                return {
+                    target: tail.target,
+                    clientNonce,
+                    status: "delivered",
+                    entryId,
+                    ...typeof entry.seq === "number" ? {
+                        seq: entry.seq
+                    } : {}
+                };
+            }
+            return {
+                target: tail.target,
+                clientNonce,
+                status: "not-found-in-tail",
+                scanned: entries.length
             };
         }
         async function getThread(session, ref, rootId) {
