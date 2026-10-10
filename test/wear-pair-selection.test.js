@@ -171,3 +171,47 @@ test("incomplete or non-string descriptors are refused; no descriptor is null", 
   assert.throws(() => load(dir, counting()), (error) => error.code === "EMPTY_ENTRIES");
   assert.equal(loadGrokBotGatewaySelection({ platform: "aix", home: dir }), null);
 });
+
+test("placeholders never collide with a real label or id, so each selects exactly one login", (t) => {
+  const dir = home(t);
+  writeDescriptor(dir, {
+    [ENTRY_A]: descriptor({ email: SECRETS.token }),
+    [ENTRY_B]: descriptor({ email: "login 1" }),
+    "login 3": descriptor({ email: `x-${SECRETS.route}` }),
+  });
+  assert.throws(() => load(dir, counting()), (error) => {
+    const labels = error.logins.map((row) => row.label);
+    assert.deepEqual(labels, ["login 2", "login 1", "login 4"]);
+    assert.equal(new Set(labels).size, labels.length);
+    return true;
+  });
+  assert.equal(load(dir, { ...counting(), account: "login 2" }).id, ENTRY_A);
+  assert.equal(load(dir, { ...counting(), account: "login 1" }).id, ENTRY_B, "the real label keeps its meaning");
+  const third = load(dir, { ...counting(), account: "login 4" });
+  assert.deepEqual({ id: third.id, label: third.label }, { id: "login 3", label: "login 4" });
+});
+
+test("a login without an encrypted payload is not reported as a Keychain problem", (t) => {
+  const dir = home(t);
+  const path = writeDescriptor(dir, { [ENTRY_A]: descriptor() });
+  const wrapped = JSON.parse(readFileSync(path, "utf8"));
+  delete wrapped.entries[ENTRY_A].encrypted;
+  writeFileSync(path, JSON.stringify(wrapped));
+  let calls = 0;
+  const getKeychainPassword = () => {
+    calls += 1;
+    throw new Error("fake keychain denied");
+  };
+  assert.throws(() => load(dir, { getKeychainPassword }), (error) => error.code === "MISSING_ENCRYPTED_PAYLOAD");
+  assert.equal(calls, 0, "nothing to decrypt");
+  // One missing payload next to one decrypt failure: not every row failed to decrypt, so no UNREADABLE_ENTRIES.
+  writeDescriptor(dir, { [ENTRY_A]: descriptor(), [ENTRY_B]: descriptor({ email: "fake-second@example.com" }) });
+  const both = JSON.parse(readFileSync(path, "utf8"));
+  delete both.entries[ENTRY_A].encrypted;
+  writeFileSync(path, JSON.stringify(both));
+  assert.throws(() => load(dir, { getKeychainPassword, account: ENTRY_A }), (error) => error.code === "MISSING_ENCRYPTED_PAYLOAD");
+  assert.throws(() => load(dir, { getKeychainPassword, account: ENTRY_B }), (error) => error.code === "UNUSABLE_SESSION");
+  // Every row failing to decrypt is the secret-store case.
+  writeDescriptor(dir, { [ENTRY_A]: descriptor(), [ENTRY_B]: descriptor() });
+  assert.throws(() => load(dir, { getKeychainPassword, account: ENTRY_A }), (error) => error.code === "UNREADABLE_ENTRIES");
+});

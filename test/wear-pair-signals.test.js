@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -60,6 +60,11 @@ test("a production --code is refused by the wrapper before any worker starts", {
     [["wear", "pair", "192.168.1.20:40123", "--code", code.display, "--json"], { GROK_BOT_TEST: "" }],
     [["wear", "pair", "192.168.1.20:40123", `--code=${code.normalized}`], { GROK_BOT_TEST: "", NODE_ENV: "test" }],
     [["--json", "wear", "pair", "127.0.0.1:40123", "--code", code.normalized], { GROK_BOT_TEST: "true" }],
+    // An option is never taken as the --account value, and --code counts anywhere: after --help or after `--`.
+    [["wear", "pair", "--account", "--code", code.normalized, "192.168.1.20:40123"], { GROK_BOT_TEST: "" }],
+    [["wear", "pair", "--account", `--code=${code.normalized}`, "192.168.1.20:40123"], { GROK_BOT_TEST: "" }],
+    [["wear", "pair", "--help", "--code", code.normalized], { GROK_BOT_TEST: "" }],
+    [["wear", "pair", "192.168.1.20:40123", "--", "--code", code.normalized], { GROK_BOT_TEST: "" }],
   ]) {
     const result = await start(args, f.env(extra)).done;
     assert.equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);
@@ -126,6 +131,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
       outcome: "unknown",
       target: `127.0.0.1:${port}`,
     });
+    assert.match(result.stderr, /The session was already sent; the watch may have stored it\./);
     assert.equal((await fake.result).outcome, "paired", "the watch did store it");
   });
 }
@@ -135,3 +141,75 @@ test("Ctrl-C after the session was sent prints the unknown text in text mode", {
   assert.equal(result.status, 6, result.stderr);
   assert.match(result.stdout, /Sent; no confirmation\. Check the watch screen\./);
 });
+
+/** Children of `pid` (POSIX ps). */
+function childrenOf(pid) {
+  return execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" })
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([, ppid]) => ppid === pid)
+    .map(([child]) => child);
+}
+
+test("the worker killed (SIGKILL) after the session was sent: the wrapper still reports unknown (exit 6)", { skip, timeout: 30_000 }, async (t) => {
+  const f = setup(t);
+  const code = randomCode();
+  let run;
+  const fake = await startFakeWatch({
+    codeData: code.data,
+    behavior: {
+      beforeM4: async () => {
+        const workers = childrenOf(run.child.pid);
+        assert.equal(workers.length, 1, "one worker process");
+        process.kill(workers[0], "SIGKILL");
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      },
+    },
+  });
+  t.after(() => fake.close());
+  run = start(["wear", "pair", `127.0.0.1:${fake.port}`, "--code", code.normalized, "--json"], f.env());
+  const result = await run.done;
+  assert.equal(result.status, 6, result.stderr);
+  assert.equal(JSON.parse(result.stdout).outcome, "unknown");
+  assert.match(result.stderr, /The session was already sent; the watch may have stored it\./);
+  assert.deepEqual(f.pairDirs(), []);
+  assertNoSecrets(result, code);
+});
+
+for (const [name, block] of [
+  ["the directory is read-only", (dir) => chmodSync(dir, 0o500)],
+  ["`sent` already exists", (dir) => writeFileSync(join(dir, "sent"), "fake-blocker", { mode: 0o600 })],
+]) {
+  test(`the send cannot be recorded (${name}): nothing is sent, exit 1`, { skip, timeout: 30_000 }, async (t) => {
+    const f = setup(t);
+    const code = randomCode();
+    const fake = await startFakeWatch({
+      codeData: code.data,
+      behavior: {
+        // M1 arrived, so the worker has checked its directory; break it before M3 would be recorded.
+        beforeM2: async () => {
+          const dirs = f.pairDirs();
+          assert.equal(dirs.length, 1);
+          block(join(f.scratch, dirs[0]));
+        },
+      },
+    });
+    t.after(() => fake.close());
+    const result = await start(["wear", "pair", `127.0.0.1:${fake.port}`, "--code", code.normalized, "--json"], f.env()).done;
+    assert.equal(result.status, 1, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      category: "record-failed",
+      error: "Could not record the send; nothing was sent. Generate a new code on the watch and try again.",
+      exitCode: 1,
+    });
+    const seen = await fake.result;
+    assert.equal(seen.outcome, "network-error");
+    assert.equal(seen.bytesAfterM2, 0, "no M3 reached the watch");
+    assert.equal(seen.payload, undefined);
+    assert.doesNotMatch(result.stderr, /already sent/);
+    for (const dir of f.pairDirs()) chmodSync(join(f.scratch, dir), 0o700);
+    assert.deepEqual(f.pairDirs(), [], "the wrapper removed its pairing directory");
+    assertNoSecrets(result, code);
+  });
+}

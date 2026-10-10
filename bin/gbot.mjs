@@ -21,6 +21,7 @@ const PAIR_PROMPT = "Pairing code shown on the watch (input hidden): ";
 export const CODE_FLAG_REFUSED =
   "--code is accepted only in tests (GROK_BOT_TEST=1). Run gbot wear pair in a terminal and type the code at the prompt.";
 export const UNKNOWN_OUTCOME_TEXT = "Sent; no confirmation. Check the watch screen.";
+export const ALREADY_SENT_NOTICE = "The session was already sent; the watch may have stored it.";
 const PAIR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 const truthy = (value) => ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
@@ -58,22 +59,24 @@ export function parseWearTarget(text, { allowLoopback = false } = {}) {
 }
 
 /**
- * What the wrapper does for `gbot wear pair`: null for any other command; `{ help: true }` for --help (nothing to
- * prepare); `{ code: true }` when --code is given (tests only; refused here outside GROK_BOT_TEST=1); otherwise
- * `{ prompt }`, true when the address is a valid watch address (an invalid one is reported by the worker before
- * anyone types a code).
+ * What the wrapper does for `gbot wear pair`: null for any other command; `{ code: true }` when `--code` or
+ * `--code=…` appears anywhere after `wear pair` (even after --help, after --account or after `--`; tests only, refused
+ * here outside GROK_BOT_TEST=1); `{ help: true }` for --help (nothing to prepare); otherwise `{ prompt }`, true when
+ * the address is a valid watch address (an invalid one is reported by the worker before anyone types a code).
  */
 export function wearPairPlan(argv, env = process.env) {
   if (argv[0] !== "wear" || argv[1] !== "pair") return null;
+  const rest = argv.slice(2);
+  if (rest.some((token) => token === "--code" || token.startsWith("--code="))) return { code: true, prompt: false };
   const end = argv.indexOf("--");
   const visible = argv.slice(2, end === -1 ? argv.length : end);
   if (visible.includes("--help") || visible.includes("-h")) return { help: true, prompt: false };
   let target;
   for (let i = 0; i < visible.length; i += 1) {
     const token = visible[i];
-    if (token === "--code" || token.startsWith("--code=")) return { code: true, prompt: false };
     if (token === "--account") {
-      i += 1;
+      // Never take an option-looking token as the account value.
+      if (visible[i + 1] !== undefined && !visible[i + 1].startsWith("-")) i += 1;
       continue;
     }
     if (token.startsWith("-")) continue;
@@ -296,7 +299,9 @@ async function main() {
     const sent = pairDir ? readSentMarker(pairDir) : null;
     cleanup();
     if (sent && (signal !== null || ![0, 5, 6].includes(code))) {
-      // The session already left the computer; whatever ended the worker, the honest result is "unknown".
+      // The session already left the computer; whatever ended the worker, the honest result is "unknown". The
+      // worker's runtime may already have printed "Aborted." on stderr; this line follows it.
+      process.stderr.write(`${ALREADY_SENT_NOTICE}\n`);
       process.stdout.write(unknownOutcomeOutput(sent, visible), () => process.exit(6));
       return;
     }

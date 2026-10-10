@@ -67,6 +67,7 @@ const categories = [
   'no-answer',
   'auth',
   'aborted',
+  'record-failed',
   'internal',
 ] as const;
 type Category = (typeof categories)[number];
@@ -92,6 +93,7 @@ const EXIT: Record<Category, Failure['exitCode']> = {
   'no-answer': 4,
   auth: 4,
   aborted: 130,
+  'record-failed': 1,
   internal: 1,
 };
 
@@ -117,6 +119,7 @@ const MESSAGES = {
     'or run gbot doctor for details.',
   unusable: 'The selected Grok Bot login could not be read. Run gbot doctor --account <label> for details.',
   internal: 'Pairing failed because of an internal error.',
+  stateDir: 'The private pairing directory is missing or unsafe; nothing was sent. Run gbot wear pair again.',
   preflight: {
     shape: `The selected login's session is malformed, so the watch would reject it. ${KEEP_CODE}`,
     url: `The selected login's gateway URL is not one the watch accepts (https on a Cursor host). ${KEEP_CODE}`,
@@ -276,11 +279,17 @@ const pair = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
     return failure('preflight', MESSAGES.preflight[String(checkedSession.reason)] ?? MESSAGES.preflight.shape);
   }
 
+  // Started by the wrapper (bin/gbot.mjs): it reads `sent` to report an interrupted run honestly, so the send must
+  // be recordable. Checked before connecting (the code is not spent yet); the write itself fails closed below.
+  const managed = Boolean(process.env.GBOT_PAIR_STATE_DIR);
+  const dir = stateDir();
+  if (managed && !dir) return failure('internal', MESSAGES.stateDir);
+
   // Only the label and the target, so the user can still abort; never the token, headers, host or code. The label
   // and id are already masked when they alias a secret (loadGrokBotGatewaySelection).
   process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
 
-  const dir = stateDir();
+  // Any failure here (including an existing `sent`) throws, and pairWithWatch then does not send M3.
   const recordSending = (): void => {
     if (!dir) return;
     writeFileSync(join(dir, 'sent'), JSON.stringify({ account: label, id, target: target.target }), { flag: 'wx', mode: 0o600 });

@@ -10059,6 +10059,7 @@ var __webpack_modules__ = {
             'no-answer',
             'auth',
             'aborted',
+            'record-failed',
             'internal'
         ];
         const failureSchema = zod__rspack_import_6.Ikc({
@@ -10086,6 +10087,7 @@ var __webpack_modules__ = {
             'no-answer': 4,
             auth: 4,
             aborted: 130,
+            'record-failed': 1,
             internal: 1
         };
         const RECEIPT_EXIT = {
@@ -10104,6 +10106,7 @@ var __webpack_modules__ = {
             unreadable: 'Could not read the saved Grok Bot logins (Keychain or secret store access?). Allow access for this terminal, ' + 'or run gbot doctor for details.',
             unusable: 'The selected Grok Bot login could not be read. Run gbot doctor --account <label> for details.',
             internal: 'Pairing failed because of an internal error.',
+            stateDir: 'The private pairing directory is missing or unsafe; nothing was sent. Run gbot wear pair again.',
             preflight: {
                 shape: `The selected login's session is malformed, so the watch would reject it. ${KEEP_CODE}`,
                 url: `The selected login's gateway URL is not one the watch accepts (https on a Cursor host). ${KEEP_CODE}`,
@@ -10236,8 +10239,10 @@ var __webpack_modules__ = {
             if (!checkedSession.ok) {
                 return failure('preflight', MESSAGES.preflight[String(checkedSession.reason)] ?? MESSAGES.preflight.shape);
             }
-            process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
+            const managed = Boolean(process.env.GBOT_PAIR_STATE_DIR);
             const dir = stateDir();
+            if (managed && !dir) return failure('internal', MESSAGES.stateDir);
+            process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
             const recordSending = ()=>{
                 if (!dir) return;
                 (0, node_fs__rspack_import_1.writeFileSync)((0, node_path__rspack_import_2.join)(dir, 'sent'), JSON.stringify({
@@ -45148,15 +45153,28 @@ var __webpack_modules__ = {
                 const text = String(value).toLowerCase();
                 return secrets.some((secret)=>text === secret || secret.length >= 4 && text.includes(secret));
             };
+            const taken = new Set(rows.flatMap((row)=>[
+                    String(row.label).toLowerCase(),
+                    String(row.id).toLowerCase()
+                ]));
             return rows.map((row, index)=>{
-                const placeholder = `login ${index + 1}`;
                 const idMasked = aliases(row.id);
                 const labelMasked = aliases(row.label) || row.label === row.id && idMasked;
+                if (!idMasked && !labelMasked) return {
+                    ...row,
+                    shownId: row.id,
+                    shownLabel: row.label,
+                    masked: false
+                };
+                let n = index + 1;
+                while(taken.has(`login ${n}`))n += 1;
+                const placeholder = `login ${n}`;
+                taken.add(placeholder);
                 return {
                     ...row,
                     shownId: idMasked ? placeholder : row.id,
                     shownLabel: labelMasked ? placeholder : row.label,
-                    masked: idMasked || labelMasked
+                    masked: true
                 };
             });
         }
@@ -45169,7 +45187,7 @@ var __webpack_modules__ = {
                 if (visible.length === 1) return visible[0];
                 throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + shownLoginLines(visible), visible);
             }
-            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && row.shownLabel === selector);
+            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && (row.shownLabel === selector || row.shownId === selector));
             if (matches.length === 1) return matches[0];
             throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + shownLoginLines(visible), visible);
         }
@@ -45192,7 +45210,7 @@ var __webpack_modules__ = {
                     unprotectData: unprotect
                 });
             const rows = decorateEntries(savedEntries(wrapped), decrypt);
-            if (rows.length > 0 && rows.every((row)=>!row.descriptor || typeof row.descriptor !== "object")) {
+            if (rows.length > 0 && rows.every((row)=>row.decryptError)) {
                 throw new GrokBotGatewaySessionError("UNREADABLE_ENTRIES", "Could not read the saved Grok Bot logins (Keychain or secret store access?).");
             }
             const selector = typeof account === "string" ? account.trim() : "";
@@ -50332,6 +50350,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "no-answer": "The watch did not answer (version mismatch or it is busy), or this computer is on a different subnet than the " + "watch (the watch closes connections from other subnets). Generate a new code on the watch and try again.",
             auth: "Wrong code, or this is not your watch. Generate a new code on the watch; never reuse an old one.",
             payload: "The session is too large or malformed for the watch.",
+            "record-failed": "Could not record the send; nothing was sent. Generate a new code on the watch and try again.",
             usage: "Invalid pairing request.",
             aborted: "Pairing was cancelled."
         });
@@ -50920,7 +50939,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (signal?.aborted) throw fail("aborted");
                 try {
                     onSending?.();
-                } catch  {}
+                } catch  {
+                    throw new WearPairError("record-failed");
+                }
                 try {
                     await write(socket, frame(m3), limits.writeMs);
                 } catch  {

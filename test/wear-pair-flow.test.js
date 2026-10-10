@@ -185,17 +185,19 @@ test("abort after M3 was sent resolves unknown, never aborted", async (t) => {
   assert.equal((await fake.result).outcome, "paired", "the watch did store it");
 });
 
-test("an error after M3 was sent resolves unknown; onSending errors never stop the send", async (t) => {
-  const { code, fake } = await watch(t, { behavior: { omitM4: true } });
-  const result = await pairWithWatch({
-    host: fake.host,
-    port: fake.port,
-    code: code.normalized,
-    payload,
-    onSending: () => { throw new Error("fake hook failure"); },
-  });
-  assert.deepEqual(result, { outcome: "unknown" });
-  assert.equal((await fake.result).payload, payload.toString("utf8"));
+test("a failing onSending hook fails closed: record-failed, and no M3 reaches the watch", async (t) => {
+  for (const failure of [new Error("fake EACCES"), Object.assign(new Error("fake EEXIST"), { code: "EEXIST" })]) {
+    const { code, fake } = await watch(t);
+    await assert.rejects(
+      pairWithWatch({ host: fake.host, port: fake.port, code: code.normalized, payload, onSending: () => { throw failure; } }),
+      fails("record-failed"),
+    );
+    const seen = await fake.result;
+    assert.equal(seen.outcome, "network-error");
+    assert.equal(seen.bytesAfterM2, 0, "nothing was sent after M2");
+    assert.equal(seen.payload, undefined);
+  }
+  assert.match(PAIR_MESSAGES["record-failed"], /Could not record the send; nothing was sent\./);
 });
 
 test("abort before M3 stays aborted and onSending never runs", async (t) => {

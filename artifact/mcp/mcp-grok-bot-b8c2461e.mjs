@@ -61958,15 +61958,28 @@ var __webpack_modules__ = {
                 const text = String(value).toLowerCase();
                 return secrets.some((secret)=>text === secret || secret.length >= 4 && text.includes(secret));
             };
+            const taken = new Set(rows.flatMap((row)=>[
+                    String(row.label).toLowerCase(),
+                    String(row.id).toLowerCase()
+                ]));
             return rows.map((row, index)=>{
-                const placeholder = `login ${index + 1}`;
                 const idMasked = aliases(row.id);
                 const labelMasked = aliases(row.label) || row.label === row.id && idMasked;
+                if (!idMasked && !labelMasked) return {
+                    ...row,
+                    shownId: row.id,
+                    shownLabel: row.label,
+                    masked: false
+                };
+                let n = index + 1;
+                while(taken.has(`login ${n}`))n += 1;
+                const placeholder = `login ${n}`;
+                taken.add(placeholder);
                 return {
                     ...row,
                     shownId: idMasked ? placeholder : row.id,
                     shownLabel: labelMasked ? placeholder : row.label,
-                    masked: idMasked || labelMasked
+                    masked: true
                 };
             });
         }
@@ -61979,7 +61992,7 @@ var __webpack_modules__ = {
                 if (visible.length === 1) return visible[0];
                 throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + shownLoginLines(visible), visible);
             }
-            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && row.shownLabel === selector);
+            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && (row.shownLabel === selector || row.shownId === selector));
             if (matches.length === 1) return matches[0];
             throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + shownLoginLines(visible), visible);
         }
@@ -62002,7 +62015,7 @@ var __webpack_modules__ = {
                     unprotectData: unprotect
                 });
             const rows = decorateEntries(savedEntries(wrapped), decrypt);
-            if (rows.length > 0 && rows.every((row)=>!row.descriptor || typeof row.descriptor !== "object")) {
+            if (rows.length > 0 && rows.every((row)=>row.decryptError)) {
                 throw new GrokBotGatewaySessionError("UNREADABLE_ENTRIES", "Could not read the saved Grok Bot logins (Keychain or secret store access?).");
             }
             const selector = typeof account === "string" ? account.trim() : "";

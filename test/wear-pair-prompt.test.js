@@ -124,7 +124,15 @@ test("wrapper prompts only for `wear pair <valid ip:port>` without --help or --c
   assert.deepEqual(wearPairPlan(["wear", "pair", "-h"], prod), { help: true, prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code", "fake"], testEnv), { code: true, prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code=fake"], prod), { code: true, prompt: false });
-  assert.deepEqual(wearPairPlan(["wear", "pair", "--", "--code"], prod), { prompt: false }, "after -- it is a positional");
+  for (const argv of [
+    ["wear", "pair", "--account", "--code", "fake", "192.168.1.5:40000"],
+    ["wear", "pair", "--account", "--code=fake", "192.168.1.5:40000"],
+    ["wear", "pair", "--help", "--code", "fake"],
+    ["wear", "pair", "192.168.1.5:40000", "--", "--code", "fake"],
+  ]) {
+    assert.deepEqual(wearPairPlan(argv, prod), { code: true, prompt: false }, argv.join(" "));
+  }
+  assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "--json", "192.168.1.5:40000"], prod), { prompt: true }, "an option is never an account value");
   assert.deepEqual(wearPairPlan(["wear", "pair"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "8.8.8.8:40000"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "192.168.1.5:40000"], prod), { prompt: false });

@@ -419,7 +419,9 @@ function sessionSecrets(rows) {
 /**
  * Labels and ids are printed; a login whose label or id equals or contains a token, a routing header value or a
  * gateway host (of any saved login) is shown as "login <n>" instead. Containment counts for secrets of 4 or more
- * characters, case-insensitively.
+ * characters, case-insensitively. Each placeholder is unique, case-insensitively, against every real label and id
+ * and every other placeholder (n starts at the row's position and moves up until it is free), so it always selects
+ * exactly one login.
  */
 function maskSecretAliases(rows) {
   const secrets = sessionSecrets(rows);
@@ -427,15 +429,20 @@ function maskSecretAliases(rows) {
     const text = String(value).toLowerCase();
     return secrets.some((secret) => text === secret || (secret.length >= 4 && text.includes(secret)));
   };
+  const taken = new Set(rows.flatMap((row) => [String(row.label).toLowerCase(), String(row.id).toLowerCase()]));
   return rows.map((row, index) => {
-    const placeholder = `login ${index + 1}`;
     const idMasked = aliases(row.id);
     const labelMasked = aliases(row.label) || (row.label === row.id && idMasked);
+    if (!idMasked && !labelMasked) return { ...row, shownId: row.id, shownLabel: row.label, masked: false };
+    let n = index + 1;
+    while (taken.has(`login ${n}`)) n += 1;
+    const placeholder = `login ${n}`;
+    taken.add(placeholder);
     return {
       ...row,
       shownId: idMasked ? placeholder : row.id,
       shownLabel: labelMasked ? placeholder : row.label,
-      masked: idMasked || labelMasked,
+      masked: true,
     };
   });
 }
@@ -460,7 +467,8 @@ function chooseSavedEntryByFlag(rows, selector) {
       visible,
     );
   }
-  const matches = visible.filter((row) => matchesSelector(row, selector) || (row.masked && row.shownLabel === selector));
+  const matches = visible.filter((row) =>
+    matchesSelector(row, selector) || (row.masked && (row.shownLabel === selector || row.shownId === selector)));
   if (matches.length === 1) return matches[0];
   throw selectionError(
     matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES",
@@ -511,7 +519,9 @@ export function loadGrokBotGatewaySelection({
     unprotectData: unprotect,
   });
   const rows = decorateEntries(savedEntries(wrapped), decrypt);
-  if (rows.length > 0 && rows.every((row) => !row.descriptor || typeof row.descriptor !== "object")) {
+  // Only when every saved login failed to decrypt; a login without an encrypted payload is a different problem
+  // (MISSING_ENCRYPTED_PAYLOAD when it is selected).
+  if (rows.length > 0 && rows.every((row) => row.decryptError)) {
     throw new GrokBotGatewaySessionError(
       "UNREADABLE_ENTRIES",
       "Could not read the saved Grok Bot logins (Keychain or secret store access?).",

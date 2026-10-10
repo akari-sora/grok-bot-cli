@@ -67,6 +67,7 @@ export const PAIR_MESSAGES = Object.freeze({
     "watch (the watch closes connections from other subnets). Generate a new code on the watch and try again.",
   auth: "Wrong code, or this is not your watch. Generate a new code on the watch; never reuse an old one.",
   payload: "The session is too large or malformed for the watch.",
+  "record-failed": "Could not record the send; nothing was sent. Generate a new code on the watch and try again.",
   usage: "Invalid pairing request.",
   aborted: "Pairing was cancelled.",
 });
@@ -667,12 +668,13 @@ function outcomeOf(status) {
  * from preflightSession). The code is checked before any network I/O; M3 is sent only after tagW verifies; there
  * are no retries. Resolves `{ outcome }` with outcome `paired`, `rejected`, `storage-failed` or `unknown`. Throws
  * WearPairError with category `typo` / `invalid-code` (before any I/O), `unreachable` (connect failed),
- * `no-answer` (no well-formed M2 in time), `auth` (bad tagW or watch key), `payload`, `usage`, or `aborted` (the
- * signal fired before the session was sent).
+ * `no-answer` (no well-formed M2 in time), `auth` (bad tagW or watch key), `payload`, `usage`, `aborted` (the
+ * signal fired before the session was sent) or `record-failed` (`onSending` threw; nothing was sent).
  *
- * Once the M3 write has started the session may have reached the watch, so from then on nothing throws: an abort,
- * a write or read error, a deadline or an invalid M4 all resolve `{ outcome: "unknown" }`. `onSending` (optional)
- * is called synchronously just before that write; its exceptions are ignored.
+ * `onSending` (optional) is called synchronously just before the M3 write, so the caller can record that the session
+ * is about to leave. It fails closed: if it throws, M3 is not sent. Once the M3 write has started the session may
+ * have reached the watch, so from then on nothing throws: an abort, a write or read error, a deadline or an invalid
+ * M4 all resolve `{ outcome: "unknown" }`.
  */
 /**
  * @param {{ host: string, port: number, code: string, payload: Uint8Array,
@@ -728,12 +730,13 @@ export async function pairWithWatch({
     reader.expect(SIZES.m4);
     const m3 = handshake.sealM3(payload);
     if (signal?.aborted) throw fail("aborted");
-    // From here the session may leave the computer: every ending is a result, `unknown` unless M4 verifies.
     try {
       onSending?.();
     } catch {
-      // The hook is advisory (the CLI records that the session was sent); it never stops the send.
+      // The caller could not record the send, so it could not report it honestly later: do not send.
+      throw new WearPairError("record-failed");
     }
+    // From here the session may leave the computer: every ending is a result, `unknown` unless M4 verifies.
     try {
       await write(socket, frame(m3), limits.writeMs);
     } catch {
