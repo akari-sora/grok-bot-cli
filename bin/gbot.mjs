@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 // worker without this process's stdin. It never goes into argv or an environment value: the worker gets the path
 // of a 0600 file in a fresh 0700 directory (GBOT_PAIR_CODE_FILE), reads it and deletes it, and this process
 // removes the directory on every exit path it can handle: normal exit, errors, SIGINT, SIGTERM and SIGHUP (SIGKILL
-// or power loss can leave it behind). `--code` is for tests only and is refused here, anywhere on a `wear pair`
-// command line and before any worker starts, unless GROK_BOT_TEST=1. The same directory (GBOT_PAIR_STATE_DIR) receives `sent` from the worker just before the
+// or power loss can leave it behind). `--code` is for tests only and is refused here, anywhere on any gbot command
+// line (no other command has a `--code` option) and before any worker starts, unless GROK_BOT_TEST=1. The same directory (GBOT_PAIR_STATE_DIR) receives `sent` from the worker just before the
 // session leaves the computer; if the worker then ends without its own result (Ctrl-C, a signal, a crash), this
 // process reports `unknown` (exit 6) instead of "cancelled".
 // These helpers are exported for tests; importing this file runs nothing.
@@ -23,6 +23,15 @@ export const CODE_FLAG_REFUSED =
 export const UNKNOWN_OUTCOME_TEXT = "Sent; no confirmation. Check the watch screen.";
 export const ALREADY_SENT_NOTICE = "The session was already sent; the watch may have stored it.";
 const PAIR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+/**
+ * True when argv carries `--code` or `--code=…` anywhere (any command, any position, also after `--`) outside
+ * GROK_BOT_TEST=1. Only `wear pair` has a `--code` option, and it is for tests; refusing it everywhere means a
+ * production pairing code never reaches a worker's argv, however the command line is arranged.
+ */
+export function refusesCodeFlag(argv, env = process.env) {
+  return env.GROK_BOT_TEST !== "1" && argv.some((token) => token === "--code" || token.startsWith("--code="));
+}
 
 const truthy = (value) => ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 
@@ -226,7 +235,7 @@ async function main() {
   process.stderr.on("error", () => {});
 
   const plan = wearPairPlan(argv, process.env);
-  if (plan?.code && process.env.GROK_BOT_TEST !== "1") {
+  if (refusesCodeFlag(argv, process.env)) {
     // Refused before any worker starts: a production --code never travels further than this process.
     if (visible.includes("--json")) {
       process.stdout.write(`${JSON.stringify({ category: "usage", error: CODE_FLAG_REFUSED, exitCode: 2 })}\n`);

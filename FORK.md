@@ -158,7 +158,7 @@ Type the code at the prompt. Input is hidden (echo off), at most 32 characters; 
 | 130 | Ctrl-C (SIGINT) before the session was sent. | — |
 | 143 | SIGTERM before the session was sent. | — |
 
-For tests only, `--code <code>` and `GBOT_TEST_KEYCHAIN_PASSWORD` are honoured when `GROK_BOT_TEST=1`. Without it the wrapper refuses `--code` or `--code=…` anywhere on a `wear pair` command line (before or after `wear pair`, also after `--account`, `--help` or `--`) with exit 2 before any worker starts, so the value is never passed on. In test mode (`GROK_BOT_TEST` or `NODE_ENV=test`) `wear pair` never reads the Keychain, `secret-tool` or DPAPI, and loopback addresses are allowed. `src/core/wear-pair.js` imports Node built-ins only, because the watch repository vendors it for a cross-language test. The known-answer vectors in `test/fixtures/` are copied from the watch repository; `test/fixtures/wear-pair-vectors.sha256` records their source and SHA-256.
+For tests only, `--code <code>` and `GBOT_TEST_KEYCHAIN_PASSWORD` are honoured when `GROK_BOT_TEST=1`. Without it the wrapper refuses `--code` or `--code=…` anywhere on any `gbot` command line (no other command has a `--code` option; any position, also after `--account`, `--help` or `--`) with exit 2 before any worker starts, so the value is never passed on. A message word that is literally `--code` therefore has to go through `send --stdin`. In test mode (`GROK_BOT_TEST` or `NODE_ENV=test`) `wear pair` never reads the Keychain, `secret-tool` or DPAPI, and loopback addresses are allowed. `src/core/wear-pair.js` imports Node built-ins only, because the watch repository vendors it for a cross-language test. The known-answer vectors in `test/fixtures/` are copied from the watch repository; `test/fixtures/wear-pair-vectors.sha256` records their source and SHA-256.
 
 ### Exit codes and common errors
 
@@ -382,7 +382,7 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | 130 | 送出前按 Ctrl-C（SIGINT）。 | — |
 | 143 | 送出前收到 SIGTERM。 | — |
 
-僅供測試：`GROK_BOT_TEST=1` 時才接受 `--code <碼>` 與 `GBOT_TEST_KEYCHAIN_PASSWORD`。沒有它時，只要 `wear pair` 命令列上任何位置出現 `--code` 或 `--code=…`（`wear pair` 之前或之後，包括 `--account`、`--help` 或 `--` 之後），wrapper 都會在啟動任何 worker 前拒絕（結束碼 2），這個值不會被往下傳。測試模式（`GROK_BOT_TEST` 或 `NODE_ENV=test`）下，`wear pair` 不讀 Keychain、`secret-tool` 或 DPAPI，並允許 loopback 位址。`src/core/wear-pair.js` 只 import Node 內建模組，因為手錶 repo 會把它原樣收錄做跨語言測試。`test/fixtures/` 裡的已知答案向量複製自手錶 repo；來源與 SHA-256 記在 `test/fixtures/wear-pair-vectors.sha256`。
+僅供測試：`GROK_BOT_TEST=1` 時才接受 `--code <碼>` 與 `GBOT_TEST_KEYCHAIN_PASSWORD`。沒有它時，只要任何 `gbot` 命令列上任何位置出現 `--code` 或 `--code=…`（其他命令都沒有 `--code` 選項；任何位置，包括 `--account`、`--help` 或 `--` 之後），wrapper 都會在啟動任何 worker 前拒絕（結束碼 2），這個值不會被往下傳。因此訊息裡剛好是 `--code` 的字詞要改用 `send --stdin` 送出。測試模式（`GROK_BOT_TEST` 或 `NODE_ENV=test`）下，`wear pair` 不讀 Keychain、`secret-tool` 或 DPAPI，並允許 loopback 位址。`src/core/wear-pair.js` 只 import Node 內建模組，因為手錶 repo 會把它原樣收錄做跨語言測試。`test/fixtures/` 裡的已知答案向量複製自手錶 repo；來源與 SHA-256 記在 `test/fixtures/wear-pair-vectors.sha256`。
 
 ### 結束碼與常見錯誤
 

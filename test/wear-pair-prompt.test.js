@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   PAIR_CODE_MAX,
+  refusesCodeFlag,
   UNKNOWN_OUTCOME_TEXT,
   makePairDir,
   readHiddenCode,
@@ -136,6 +137,20 @@ test("wrapper prompts only for `wear pair <valid ip:port>` without --help or --c
   }
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "--json", "192.168.1.5:40000"], prod), { prompt: true }, "an option is never an account value");
   assert.equal(wearPairPlan(["send", "Researcher", "wear", "pair", "--code", "fake"], prod), null, "a message is not a wear pair command");
+  // Refusal is independent of the command shape: any --code / --code=… outside GROK_BOT_TEST=1.
+  for (const argv of [
+    ["wear", "--code", "fake", "pair", "192.168.1.5:40000"],
+    ["-x", "v", "--code", "fake", "wear", "pair", "192.168.1.5:40000"],
+    ["send", "Researcher", "--", "--code=fake"],
+    ["--code"],
+  ]) {
+    assert.equal(refusesCodeFlag(argv, prod), true, argv.join(" "));
+    assert.equal(refusesCodeFlag(argv, { NODE_ENV: "test", GROK_BOT_TEST: "true" }), true, "only GROK_BOT_TEST=1 allows it");
+    assert.equal(refusesCodeFlag(argv, testEnv), false);
+  }
+  for (const argv of [["send", "Researcher", "--codex-thread-id", "fake"], ["send", "Researcher", "code"], ["wear", "pair", "192.168.1.5:40000"]]) {
+    assert.equal(refusesCodeFlag(argv, prod), false, argv.join(" "));
+  }
   assert.equal(wearPairPlan(["--account", "fake", "wear", "pair", "192.168.1.5:40000"], prod), null, "options before the command: nothing to prepare");
   assert.deepEqual(wearPairPlan(["wear", "pair"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "8.8.8.8:40000"], prod), { prompt: false });
