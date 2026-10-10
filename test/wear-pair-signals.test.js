@@ -65,6 +65,9 @@ test("a production --code is refused by the wrapper before any worker starts", {
     [["wear", "pair", "--account", `--code=${code.normalized}`, "192.168.1.20:40123"], { GROK_BOT_TEST: "" }],
     [["wear", "pair", "--help", "--code", code.normalized], { GROK_BOT_TEST: "" }],
     [["wear", "pair", "192.168.1.20:40123", "--", "--code", code.normalized], { GROK_BOT_TEST: "" }],
+    // And before `wear pair`.
+    [["--code", code.normalized, "wear", "pair", "192.168.1.20:40123"], { GROK_BOT_TEST: "" }],
+    [["--json", `--code=${code.normalized}`, "wear", "pair", "192.168.1.20:40123"], { GROK_BOT_TEST: "" }],
   ]) {
     const result = await start(args, f.env(extra)).done;
     assert.equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);

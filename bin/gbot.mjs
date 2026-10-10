@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 // worker without this process's stdin. It never goes into argv or an environment value: the worker gets the path
 // of a 0600 file in a fresh 0700 directory (GBOT_PAIR_CODE_FILE), reads it and deletes it, and this process
 // removes the directory on every exit path it can handle: normal exit, errors, SIGINT, SIGTERM and SIGHUP (SIGKILL
-// or power loss can leave it behind). `--code` is for tests only and is refused here, before any worker starts,
-// unless GROK_BOT_TEST=1. The same directory (GBOT_PAIR_STATE_DIR) receives `sent` from the worker just before the
+// or power loss can leave it behind). `--code` is for tests only and is refused here, anywhere on a `wear pair`
+// command line and before any worker starts, unless GROK_BOT_TEST=1. The same directory (GBOT_PAIR_STATE_DIR) receives `sent` from the worker just before the
 // session leaves the computer; if the worker then ends without its own result (Ctrl-C, a signal, a crash), this
 // process reports `unknown` (exit 6) instead of "cancelled".
 // These helpers are exported for tests; importing this file runs nothing.
@@ -59,15 +59,35 @@ export function parseWearTarget(text, { allowLoopback = false } = {}) {
 }
 
 /**
+ * Where `wear pair` starts in argv, or -1. Only options (and a bare word right after a `--option`, which may be its
+ * value) may come before it, so `gbot --code X wear pair …` counts, while `gbot send Bot wear pair` (a message) does
+ * not.
+ */
+function wearPairIndex(argv) {
+  for (let i = 0; i < argv.length - 1; i += 1) {
+    if (argv[i] === "wear" && argv[i + 1] === "pair") return i;
+    const token = argv[i];
+    if (token === "--") return -1;
+    if (token.startsWith("-")) continue;
+    const previous = argv[i - 1];
+    if (previous !== undefined && previous.startsWith("--") && !previous.includes("=")) continue;
+    return -1;
+  }
+  return -1;
+}
+
+/**
  * What the wrapper does for `gbot wear pair`: null for any other command; `{ code: true }` when `--code` or
- * `--code=…` appears anywhere after `wear pair` (even after --help, after --account or after `--`; tests only, refused
- * here outside GROK_BOT_TEST=1); `{ help: true }` for --help (nothing to prepare); otherwise `{ prompt }`, true when
- * the address is a valid watch address (an invalid one is reported by the worker before anyone types a code).
+ * `--code=…` appears anywhere on the command line (before or after `wear pair`, after --help, after --account or
+ * after `--`; tests only, refused here outside GROK_BOT_TEST=1); null when other options come before `wear pair`
+ * (the CLI shell rejects them; nothing to prepare); `{ help: true }` for --help; otherwise `{ prompt }`, true when the
+ * address is a valid watch address (an invalid one is reported by the worker before anyone types a code).
  */
 export function wearPairPlan(argv, env = process.env) {
-  if (argv[0] !== "wear" || argv[1] !== "pair") return null;
-  const rest = argv.slice(2);
-  if (rest.some((token) => token === "--code" || token.startsWith("--code="))) return { code: true, prompt: false };
+  const at = wearPairIndex(argv);
+  if (at === -1) return null;
+  if (argv.some((token) => token === "--code" || token.startsWith("--code="))) return { code: true, prompt: false };
+  if (at !== 0) return null;
   const end = argv.indexOf("--");
   const visible = argv.slice(2, end === -1 ? argv.length : end);
   if (visible.includes("--help") || visible.includes("-h")) return { help: true, prompt: false };

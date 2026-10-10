@@ -129,10 +129,14 @@ test("wrapper prompts only for `wear pair <valid ip:port>` without --help or --c
     ["wear", "pair", "--account", "--code=fake", "192.168.1.5:40000"],
     ["wear", "pair", "--help", "--code", "fake"],
     ["wear", "pair", "192.168.1.5:40000", "--", "--code", "fake"],
+    ["--code", "fake", "wear", "pair", "192.168.1.5:40000"],
+    ["--code=fake", "wear", "pair", "192.168.1.5:40000", "--json"],
   ]) {
     assert.deepEqual(wearPairPlan(argv, prod), { code: true, prompt: false }, argv.join(" "));
   }
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "--json", "192.168.1.5:40000"], prod), { prompt: true }, "an option is never an account value");
+  assert.equal(wearPairPlan(["send", "Researcher", "wear", "pair", "--code", "fake"], prod), null, "a message is not a wear pair command");
+  assert.equal(wearPairPlan(["--account", "fake", "wear", "pair", "192.168.1.5:40000"], prod), null, "options before the command: nothing to prepare");
   assert.deepEqual(wearPairPlan(["wear", "pair"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "8.8.8.8:40000"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "192.168.1.5:40000"], prod), { prompt: false });
