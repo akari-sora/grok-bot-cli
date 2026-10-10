@@ -10101,6 +10101,7 @@ var __webpack_modules__ = {
             noTerminal: 'Run this in a terminal: gbot wear pair reads the pairing code from the keyboard with echo off.',
             codeFile: 'The pairing code hand-off file is missing or unsafe. Run gbot wear pair again in a terminal.',
             noLogin: 'No saved Grok Bot login. Open the Grok Bot app and sign in once, then run gbot accounts.',
+            unreadable: 'Could not read the saved Grok Bot logins (Keychain or secret store access?). Allow access for this terminal, ' + 'or run gbot doctor for details.',
             unusable: 'The selected Grok Bot login could not be read. Run gbot doctor --account <label> for details.',
             internal: 'Pairing failed because of an internal error.',
             preflight: {
@@ -10127,6 +10128,11 @@ var __webpack_modules__ = {
                 error,
                 exitCode: EXIT[category]
             });
+        const secretStoreOff = ()=>{
+            if (!testMode()) return '';
+            if (process.env.GROK_BOT_TEST === '1' && process.env.GBOT_TEST_KEYCHAIN_PASSWORD) return '';
+            return truthy(process.env.GROK_BOT_TEST) ? ' GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode).' : ' NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.';
+        };
         const secretStore = ()=>{
             if (!testMode()) return {};
             const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
@@ -10177,7 +10183,23 @@ var __webpack_modules__ = {
                 return failure('usage', `No saved Grok Bot login matches --account. Saved logins:\n${loginList(logins)}`);
             }
             if (code === 'EMPTY_ENTRIES') return failure('account', MESSAGES.noLogin);
-            return failure('account', MESSAGES.unusable);
+            if (code === 'UNREADABLE_ENTRIES') return failure('account', MESSAGES.unreadable + secretStoreOff());
+            return failure('account', MESSAGES.unusable + secretStoreOff());
+        };
+        const stateDir = ()=>{
+            const dir = process.env.GBOT_PAIR_STATE_DIR;
+            if (typeof dir !== 'string' || !dir || !(0, node_path__rspack_import_2.basename)(dir).startsWith('gbot-pair-')) return undefined;
+            try {
+                const stat = (0, node_fs__rspack_import_1.lstatSync)(dir);
+                if (!stat.isDirectory()) return undefined;
+                if (process.platform !== 'win32') {
+                    if ((stat.mode & 63) !== 0) return undefined;
+                    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return undefined;
+                }
+                return dir;
+            } catch  {
+                return undefined;
+            }
         };
         const pair = async (input, signal)=>{
             const file = process.env.GBOT_PAIR_CODE_FILE;
@@ -10215,13 +10237,26 @@ var __webpack_modules__ = {
                 return failure('preflight', MESSAGES.preflight[String(checkedSession.reason)] ?? MESSAGES.preflight.shape);
             }
             process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
+            const dir = stateDir();
+            const recordSending = ()=>{
+                if (!dir) return;
+                (0, node_fs__rspack_import_1.writeFileSync)((0, node_path__rspack_import_2.join)(dir, 'sent'), JSON.stringify({
+                    account: label,
+                    id,
+                    target: target.target
+                }), {
+                    flag: 'wx',
+                    mode: 384
+                });
+            };
             try {
                 const { outcome } = await (0, _core_wear_pair_js__rspack_import_4.oN)({
                     host: target.host,
                     port: target.port,
                     code: checked.code,
                     payload: checkedSession.payload,
-                    signal
+                    signal,
+                    onSending: recordSending
                 });
                 const known = outcomes.includes(outcome) ? outcome : 'unknown';
                 return {
@@ -45077,10 +45112,53 @@ var __webpack_modules__ = {
         function selectionError(code, message, rows) {
             const error = new GrokBotGatewaySessionError(code, message);
             error.logins = rows.map((row)=>({
-                    label: row.label,
+                    label: row.shownLabel,
                     lastSaved: row.lastSaved
                 }));
             return error;
+        }
+        function shownLoginLines(rows) {
+            return rows.map((row)=>"  " + row.shownLabel + (row.lastSaved ? " (last saved)" : "")).join("\n");
+        }
+        function sessionSecrets(rows) {
+            const secrets = new Set();
+            const add = (value)=>{
+                if (typeof value !== "string") return;
+                const trimmed = value.trim().toLowerCase();
+                if (trimmed) secrets.add(trimmed);
+            };
+            for (const row of rows){
+                const descriptor = row.descriptor;
+                if (!descriptor || typeof descriptor !== "object") continue;
+                add(descriptor.token);
+                if (descriptor.headers && typeof descriptor.headers === "object") {
+                    for (const value of Object.values(descriptor.headers))add(value);
+                }
+                if (typeof descriptor.baseUrl === "string") {
+                    add(/^\s*[a-z][a-z0-9+.-]*:\/\/(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]+)/i.exec(descriptor.baseUrl)?.[1]);
+                }
+            }
+            return [
+                ...secrets
+            ];
+        }
+        function maskSecretAliases(rows) {
+            const secrets = sessionSecrets(rows);
+            const aliases = (value)=>{
+                const text = String(value).toLowerCase();
+                return secrets.some((secret)=>text === secret || secret.length >= 4 && text.includes(secret));
+            };
+            return rows.map((row, index)=>{
+                const placeholder = `login ${index + 1}`;
+                const idMasked = aliases(row.id);
+                const labelMasked = aliases(row.label) || row.label === row.id && idMasked;
+                return {
+                    ...row,
+                    shownId: idMasked ? placeholder : row.id,
+                    shownLabel: labelMasked ? placeholder : row.label,
+                    masked: idMasked || labelMasked
+                };
+            });
         }
         function chooseSavedEntryByFlag(rows, selector) {
             if (rows.length === 0) {
@@ -45089,11 +45167,11 @@ var __webpack_modules__ = {
             const visible = markLastSaved(rows);
             if (!selector) {
                 if (visible.length === 1) return visible[0];
-                throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + loginLines(visible), visible);
+                throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + shownLoginLines(visible), visible);
             }
-            const matches = visible.filter((row)=>matchesSelector(row, selector));
+            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && row.shownLabel === selector);
             if (matches.length === 1) return matches[0];
-            throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + loginLines(visible), visible);
+            throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + shownLoginLines(visible), visible);
         }
         function loadGrokBotGatewaySelection({ platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, appData, account, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
             if (!SUPPORTED_PLATFORMS.has(platform)) return null;
@@ -45113,8 +45191,12 @@ var __webpack_modules__ = {
                     getKeychainPassword: password,
                     unprotectData: unprotect
                 });
+            const rows = decorateEntries(savedEntries(wrapped), decrypt);
+            if (rows.length > 0 && rows.every((row)=>!row.descriptor || typeof row.descriptor !== "object")) {
+                throw new GrokBotGatewaySessionError("UNREADABLE_ENTRIES", "Could not read the saved Grok Bot logins (Keychain or secret store access?).");
+            }
             const selector = typeof account === "string" ? account.trim() : "";
-            const selected = chooseSavedEntryByFlag(decorateEntries(savedEntries(wrapped), decrypt), selector);
+            const selected = chooseSavedEntryByFlag(maskSecretAliases(rows), selector);
             if (typeof selected.encrypted !== "string" || !selected.encrypted) {
                 throw new GrokBotGatewaySessionError("MISSING_ENCRYPTED_PAYLOAD", "Grok Bot gateway descriptor is missing an encrypted payload.");
             }
@@ -45126,8 +45208,8 @@ var __webpack_modules__ = {
                 throw new GrokBotGatewaySessionError("INCOMPLETE_DESCRIPTOR", "Decrypted Grok Bot gateway descriptor is incomplete.");
             }
             return {
-                id: selected.id,
-                label: selected.label,
+                id: selected.shownId,
+                label: selected.shownLabel,
                 session: {
                     gatewayUrl: baseUrl.replace(/\/$/, ""),
                     gatewayToken: token,
@@ -50247,7 +50329,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             typo: "The code has a typo (check the last character).",
             "invalid-code": "That is not a pairing code. Type the 13 characters shown on the watch, like ABCD-EFGH-JKMN-P.",
             unreachable: "Could not reach the watch. Check that this computer and the watch are on the same Wi-Fi network, that the " + "network does not isolate clients from each other, and (macOS) that this terminal app is allowed under " + "System Settings > Privacy & Security > Local Network. If the watch already shows a failure, generate a new code.",
-            "no-answer": "The watch did not answer (version mismatch or it is busy). Generate a new code on the watch and try again.",
+            "no-answer": "The watch did not answer (version mismatch or it is busy), or this computer is on a different subnet than the " + "watch (the watch closes connections from other subnets). Generate a new code on the watch and try again.",
             auth: "Wrong code, or this is not your watch. Generate a new code on the watch; never reuse an old one.",
             payload: "The session is too large or malformed for the watch.",
             usage: "Invalid pairing request.",
@@ -50742,26 +50824,35 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 this.#limit = 2 + size;
             }
         }
-        function connect(host, port, ms) {
+        function connect(createConnection, host, port, ms, signal) {
             return new Promise((resolve, reject)=>{
-                const socket = node_net__rspack_import_2["default"].connect({
+                const socket = createConnection({
                     host,
                     port,
                     family: 4,
                     noDelay: true
                 });
-                const timer = setTimeout(()=>{
-                    socket.destroy();
-                    reject(new Error("deadline"));
-                }, ms);
-                socket.once("connect", ()=>{
+                let settled = false;
+                let timer;
+                const done = (error)=>{
+                    if (settled) return;
+                    settled = true;
                     clearTimeout(timer);
-                    resolve(socket);
-                });
-                socket.once("error", ()=>{
-                    clearTimeout(timer);
-                    socket.destroy();
-                    reject(new Error("connect"));
+                    signal?.removeEventListener("abort", onAbort);
+                    if (error) {
+                        socket.destroy();
+                        reject(error);
+                    } else {
+                        resolve(socket);
+                    }
+                };
+                const onAbort = ()=>done(new Error("aborted"));
+                timer = setTimeout(()=>done(new Error("deadline")), ms);
+                socket.once("connect", ()=>done(null));
+                socket.once("error", ()=>done(new Error("connect")));
+                if (signal?.aborted) onAbort();
+                else signal?.addEventListener("abort", onAbort, {
+                    once: true
                 });
             });
         }
@@ -50781,7 +50872,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (status === STATUS.storage) return "storage-failed";
             return "unknown";
         }
-        async function pairWithWatch({ host, port, code, payload, timeouts = {}, signal }) {
+        async function pairWithWatch({ host, port, code, payload, timeouts = {}, signal, onSending, createConnection = node_net__rspack_import_2["default"].createConnection }) {
             const checked = checkCode(code);
             if (checked.error) throw new WearPairError(checked.error);
             if (typeof host !== "string" || node_net__rspack_import_2["default"].isIPv4(host) === false || !Number.isInteger(port) || port < 1 || port > 65535) {
@@ -50806,7 +50897,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const fail = (category)=>new WearPairError(signal?.aborted ? "aborted" : category);
             try {
                 try {
-                    socket = await connect(host, port, limits.connectMs);
+                    socket = await connect(createConnection, host, port, limits.connectMs, signal);
                 } catch  {
                     throw fail("unreachable");
                 }
@@ -50826,10 +50917,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 handshake.acceptM2(m2);
                 reader.expect(SIZES.m4);
                 const m3 = handshake.sealM3(payload);
+                if (signal?.aborted) throw fail("aborted");
+                try {
+                    onSending?.();
+                } catch  {}
                 try {
                     await write(socket, frame(m3), limits.writeMs);
                 } catch  {
-                    if (signal?.aborted) throw fail("aborted");
                     return {
                         outcome: "unknown"
                     };
@@ -50838,7 +50932,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 try {
                     m4 = await reader.read(SIZES.m4, limits.m4Ms);
                 } catch  {
-                    if (signal?.aborted) throw fail("aborted");
                     return {
                         outcome: "unknown"
                     };

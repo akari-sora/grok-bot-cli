@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { PAIR_CODE_MAX, readHiddenCode, wearPairPlan, writeCodeHandoff } from "../bin/gbot.mjs";
+import {
+  PAIR_CODE_MAX,
+  UNKNOWN_OUTCOME_TEXT,
+  makePairDir,
+  readHiddenCode,
+  readSentMarker,
+  unknownOutcomeOutput,
+  wearPairPlan,
+  writeCodeHandoff,
+} from "../bin/gbot.mjs";
 import { startFakeWatch } from "./helpers/fake-watch.js";
 import { cliEnv, descriptor, ENTRY_A, randomCode, writeDescriptor } from "./helpers/wear-pair-fixture.js";
 
@@ -111,10 +120,11 @@ test("wrapper prompts only for `wear pair <valid ip:port>` without --help or --c
   assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--account", "fake@example.com", "--json"], prod), { prompt: true });
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "fake@example.com", "192.168.1.5:40000"], prod), { prompt: true });
   assert.deepEqual(wearPairPlan(["wear", "pair", "--", "192.168.1.5:40000"], prod), { prompt: true });
-  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--help"], prod), { prompt: false });
-  assert.deepEqual(wearPairPlan(["wear", "pair", "-h"], prod), { prompt: false });
-  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code", "fake"], testEnv), { prompt: false });
-  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code=fake"], prod), { prompt: false });
+  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--help"], prod), { help: true, prompt: false });
+  assert.deepEqual(wearPairPlan(["wear", "pair", "-h"], prod), { help: true, prompt: false });
+  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code", "fake"], testEnv), { code: true, prompt: false });
+  assert.deepEqual(wearPairPlan(["wear", "pair", "192.168.1.5:40000", "--code=fake"], prod), { code: true, prompt: false });
+  assert.deepEqual(wearPairPlan(["wear", "pair", "--", "--code"], prod), { prompt: false }, "after -- it is a positional");
   assert.deepEqual(wearPairPlan(["wear", "pair"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "8.8.8.8:40000"], prod), { prompt: false });
   assert.deepEqual(wearPairPlan(["wear", "pair", "--account", "192.168.1.5:40000"], prod), { prompt: false });
@@ -126,15 +136,38 @@ test("wrapper prompts only for `wear pair <valid ip:port>` without --help or --c
 test("code hand-off: 0600 file in a fresh 0700 directory, never overwritten", (t) => {
   const parent = mkdtempSync(join(tmpdir(), "gbot-wear-handoff-"));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
-  const { dir, file } = writeCodeHandoff(Buffer.from("fake-code"), parent);
+  const dir = makePairDir(parent);
+  const file = writeCodeHandoff(dir, Buffer.from("fake-code"));
   assert.match(dir, /gbot-pair-[^/\\]+$/);
+  assert.equal(file, join(dir, "code"));
   assert.equal(readFileSync(file, "latin1"), "fake-code");
   if (process.platform !== "win32") {
     assert.equal(statSync(dir).mode & 0o777, 0o700);
     assert.equal(statSync(file).mode & 0o777, 0o600);
   }
-  const second = writeCodeHandoff(Buffer.from("fake-other"), parent);
-  assert.notEqual(second.dir, dir);
+  assert.throws(() => writeCodeHandoff(dir, Buffer.from("fake-other")), /EEXIST/);
+  assert.notEqual(makePairDir(parent), dir);
+});
+
+test("sent marker and the wrapper's unknown result in every output mode", (t) => {
+  const parent = mkdtempSync(join(tmpdir(), "gbot-wear-sent-"));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const dir = makePairDir(parent);
+  assert.equal(readSentMarker(dir), null);
+  writeFileSync(join(dir, "sent"), "fake-not-json");
+  assert.equal(readSentMarker(dir), null);
+  writeFileSync(join(dir, "sent"), JSON.stringify({ account: "fake@example.com", id: 7, target: "192.168.1.5:40000" }));
+  assert.equal(readSentMarker(dir), null, "every field must be a string");
+  const sent = { account: "fake@example.com", id: "fake-id", target: "192.168.1.5:40000" };
+  writeFileSync(join(dir, "sent"), JSON.stringify(sent));
+  assert.deepEqual(readSentMarker(dir), sent);
+  const value = { account: sent.account, exitCode: 6, id: sent.id, outcome: "unknown", target: sent.target };
+  assert.deepEqual(JSON.parse(unknownOutcomeOutput(sent, ["wear", "pair", "--json"])), value);
+  const event = JSON.parse(unknownOutcomeOutput(sent, ["wear", "pair", "--ndjson"]));
+  assert.equal(event.type, "complete");
+  assert.deepEqual(event.document.value, value);
+  assert.equal(unknownOutcomeOutput(sent, ["wear", "pair"]), `${UNKNOWN_OUTCOME_TEXT}\n`);
+  assert.equal(UNKNOWN_OUTCOME_TEXT, "Sent; no confirmation. Check the watch screen.");
 });
 
 test("importing the wrapper runs nothing", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,12 +11,13 @@ import { ENTRY_A, ENTRY_B, SECRETS, cliEnv, descriptor, randomCode, typoOf, writ
 
 // End to end through the real wrapper (bin/gbot.mjs -> dist/bin/gbot.mjs). Run `npm run build` first.
 const WRAPPER = fileURLToPath(new URL("../bin/gbot.mjs", import.meta.url));
+const CLI = fileURLToPath(new URL("../dist/bin/gbot.mjs", import.meta.url));
 const skip = process.platform === "win32" ? "fixture descriptors are macOS/Linux-shaped" : false;
 const platform = process.platform === "linux" ? "linux" : "darwin";
 
-function run(args, env) {
+function run(args, env, entry = WRAPPER) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [WRAPPER, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [entry, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -205,9 +206,44 @@ test("wear pair never reads the OS secret store in test mode", { skip }, async (
   delete env.GBOT_TEST_KEYCHAIN_PASSWORD;
   const result = await run(["wear", "pair", target, "--code", code.normalized, "--json"], env);
   assert.equal(result.status, 1, result.stderr);
-  assert.equal(JSON.parse(result.stdout).category, "account");
+  const value = JSON.parse(result.stdout);
+  assert.equal(value.category, "account");
+  assert.match(value.error, /Could not read the saved Grok Bot logins \(Keychain or secret store access\?\)/);
+  assert.match(value.error, /GROK_BOT_TEST is set, so gbot does not read the Keychain/);
+  assert.doesNotMatch(value.error, new RegExp(ENTRY_A), "no ids listed");
   assert.equal(fake.connections(), 0);
   assertNoSecrets(result, code);
+});
+
+test("NODE_ENV=test alone turns the secret store off, and the message says so", { skip }, async (t) => {
+  const home = setup(t);
+  const { code, fake, target } = await pairing(t);
+  // The wrapper refuses --code here, so hand the worker a code file the way the wrapper would.
+  const dir = mkdtempSync(join(tmpdir(), "gbot-pair-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "code");
+  writeFileSync(file, code.display, { mode: 0o600 });
+  const result = await run(["wear", "pair", target, "--json"], cliEnv(home, { GROK_BOT_TEST: "", NODE_ENV: "test", GBOT_PAIR_CODE_FILE: file }), CLI);
+  assert.equal(result.status, 1, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.equal(value.category, "account");
+  assert.match(value.error, /NODE_ENV=test is set, so gbot does not read the Keychain or secret store \(test mode\); unset NODE_ENV/);
+  assert.equal(existsSync(file), false, "the worker read and deleted the code file");
+  assert.equal(fake.connections(), 0);
+  assertNoSecrets(result, code);
+});
+
+test("a login whose label is its own token is shown and sent as \"login 1\"", { skip }, async (t) => {
+  const home = setup(t, { [ENTRY_A]: descriptor({ email: SECRETS.token }) });
+  const { code, fake, target } = await pairing(t);
+  const result = await run(["wear", "pair", target, "--code", code.normalized, "--json"], cliEnv(home));
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { account: "login 1", exitCode: 0, id: ENTRY_A, outcome: "paired", target });
+  assert.match(result.stderr, /Sending Grok Bot login login 1 to the watch/);
+  assert.equal((await fake.result).payload, expectedPayload("login 1"));
+  assertNoSecrets(result, code);
+  const text = await run(["wear", "pair", target, "--code", code.normalized], cliEnv(home));
+  assertNoSecrets(text, code);
 });
 
 test("wear pair --help does not prompt and documents the command", { skip }, async (t) => {

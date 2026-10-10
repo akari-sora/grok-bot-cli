@@ -108,8 +108,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * - codeData: the 12 data symbols the watch shows (the computer must type them plus the check symbol);
  * - limits: { preM1Ms, m3Ms, writeMs, attemptMs } (defaults as on the watch: 5 s, 10 s, 5 s, 180 s);
  * - behavior: { tamperM2: "tag" | "nonce" | "key" | "length" | "trailing", silent, trickleMs, omitM4, status,
- *   beforeM2: async () => void } — a forced `status` skips the import check; otherwise the payload is checked with
- *   the watch's import rules (status 0 when accepted, 1 when rejected).
+ *   beforeM2: async () => void, beforeM4: async () => void } — a forced `status` skips the import check; otherwise
+ *   the payload is checked with the watch's import rules (status 0 when accepted, 1 when rejected). `beforeM4` runs
+ *   after M3 was authenticated and stored, before the receipt is written (to hold M4 back).
  * Resolves `{ host, port, connections(), result, close() }`; `result` resolves once with
  * `{ outcome, payload?, bytesAfterM2 }`, outcome one of paired | rejected | storage-failed | auth-failed |
  * network-error | timed-out | silent.
@@ -214,7 +215,8 @@ export async function startFakeWatch({ codeData, limits = {}, behavior = {} } = 
       }
       status = preflightSession(parsed).ok ? 0 : 1;
     }
-    if (!behavior.omitM4) {
+    if (behavior.beforeM4) await behavior.beforeM4();
+    if (!behavior.omitM4 && !conn.closed) {
       await conn.write(frame(Buffer.concat([Buffer.from([status]), tagAck(keys, th, m3, status)])), lim.writeMs);
     }
     socket.end();

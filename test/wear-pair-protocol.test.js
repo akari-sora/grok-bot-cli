@@ -18,6 +18,7 @@ import {
   isValidPublicKey,
   normalizeCode,
   parseTarget,
+  tagWatch,
   transcriptHash,
 } from "../src/core/wear-pair.js";
 import { parseWearTarget } from "../bin/gbot.mjs";
@@ -176,14 +177,52 @@ test("every rejected public key in the vector file is refused before ECDH", () =
   }
 });
 
-test("fresh key, nonce and IV per attempt", () => {
-  const a = new ClientHandshake({ codeData: "7QF3MXPZR2D4" });
-  const b = new ClientHandshake({ codeData: "7QF3MXPZR2D4" });
-  assert.notEqual(a.m1().toString("hex"), b.m1().toString("hex"));
-  assert.notEqual(a.m1().subarray(5, 70).toString("hex"), b.m1().subarray(5, 70).toString("hex"));
-  assert.notEqual(a.m1().subarray(70).toString("hex"), b.m1().subarray(70).toString("hex"));
+/** The watch side of one exchange, with a fixed watch key and nonce so only the computer's randomness varies. */
+function fixedWatchAnswer(m1, codeData) {
+  const v = vectors.vectors[0];
+  const ecdh = crypto.createECDH("prime256v1");
+  ecdh.setPrivateKey(hex(v.watchPrivate));
+  const watchPublic = ecdh.getPublicKey(null, "uncompressed");
+  const watchNonce = hex(v.watchNonce);
+  const th = transcriptHash(m1, watchPublic, watchNonce);
+  const raw = ecdh.computeSecret(m1.subarray(5, 70));
+  const keys = deriveKeys(Buffer.concat([Buffer.alloc(32 - raw.length), raw]), codeData, th);
+  return { m2: Buffer.concat([watchPublic, watchNonce, tagWatch(keys, th)]), keys };
+}
+
+test("fresh key, nonce, keys and IV per attempt: two complete handshakes up to M3 share nothing", () => {
+  const codeData = "7QF3MXPZR2D4";
+  const payload = Buffer.from(vectors.vectors[0].payload, "utf8");
+  const runs = [0, 1].map(() => {
+    const handshake = new ClientHandshake({ codeData });
+    const m1 = handshake.m1();
+    const { m2, keys } = fixedWatchAnswer(m1, codeData);
+    handshake.acceptM2(m2);
+    const m3 = handshake.sealM3(payload);
+    return {
+      publicKey: m1.subarray(5, 70).toString("hex"),
+      nonce: m1.subarray(70, 86).toString("hex"),
+      keys: Object.values(keys).map((key) => key.toString("hex")),
+      tagC: m3.subarray(0, 32).toString("hex"),
+      iv: m3.subarray(32, 44).toString("hex"),
+      ciphertext: m3.subarray(44).toString("hex"),
+    };
+  });
+  const [a, b] = runs;
+  assert.equal(a.iv.length, 24);
+  for (const field of ["publicKey", "nonce", "tagC", "iv", "ciphertext"]) assert.notEqual(a[field], b[field], field);
+  for (let i = 0; i < 4; i += 1) assert.notEqual(a.keys[i], b.keys[i], `key ${i}`);
+  assert.equal(new Set([...a.keys, ...b.keys]).size, 8, "all eight derived keys differ");
   assert.throws(() => new ClientHandshake({ codeData: "7QF3MXPZR2D" }), TypeError);
   assert.throws(() => new ClientHandshake({ codeData: "7QF3MXPZR2DU" }), TypeError);
+});
+
+test("k_enc seals exactly one message", () => {
+  const codeData = "7QF3MXPZR2D4";
+  const handshake = new ClientHandshake({ codeData });
+  handshake.acceptM2(fixedWatchAnswer(handshake.m1(), codeData).m2);
+  handshake.sealM3(Buffer.from("fake-one"));
+  assert.throws(() => handshake.sealM3(Buffer.from("fake-two")), /before a verified M2/);
 });
 
 test("framing writes u16 big-endian lengths within 1..32768", () => {

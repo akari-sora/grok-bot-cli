@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,11 +9,19 @@ import { fileURLToPath } from "node:url";
 // `gbot wear pair`: the pairing code is typed here, at a hidden prompt, because the rendered command runs in a
 // worker without this process's stdin. It never goes into argv or an environment value: the worker gets the path
 // of a 0600 file in a fresh 0700 directory (GBOT_PAIR_CODE_FILE), reads it and deletes it, and this process
-// removes the directory on every exit path it can handle (SIGKILL or power loss can leave it behind).
+// removes the directory on every exit path it can handle: normal exit, errors, SIGINT, SIGTERM and SIGHUP (SIGKILL
+// or power loss can leave it behind). `--code` is for tests only and is refused here, before any worker starts,
+// unless GROK_BOT_TEST=1. The same directory (GBOT_PAIR_STATE_DIR) receives `sent` from the worker just before the
+// session leaves the computer; if the worker then ends without its own result (Ctrl-C, a signal, a crash), this
+// process reports `unknown` (exit 6) instead of "cancelled".
 // These helpers are exported for tests; importing this file runs nothing.
 
 export const PAIR_CODE_MAX = 32;
 const PAIR_PROMPT = "Pairing code shown on the watch (input hidden): ";
+export const CODE_FLAG_REFUSED =
+  "--code is accepted only in tests (GROK_BOT_TEST=1). Run gbot wear pair in a terminal and type the code at the prompt.";
+export const UNKNOWN_OUTCOME_TEXT = "Sent; no confirmation. Check the watch screen.";
+const PAIR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 const truthy = (value) => ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 
@@ -50,19 +58,20 @@ export function parseWearTarget(text, { allowLoopback = false } = {}) {
 }
 
 /**
- * Whether this invocation is `gbot wear pair` and needs the hidden prompt. No prompt for --help, for --code
- * (tests; the worker refuses it outside GROK_BOT_TEST=1), or when the address is missing or invalid (the worker
- * reports that before anyone types a code).
+ * What the wrapper does for `gbot wear pair`: null for any other command; `{ help: true }` for --help (nothing to
+ * prepare); `{ code: true }` when --code is given (tests only; refused here outside GROK_BOT_TEST=1); otherwise
+ * `{ prompt }`, true when the address is a valid watch address (an invalid one is reported by the worker before
+ * anyone types a code).
  */
 export function wearPairPlan(argv, env = process.env) {
   if (argv[0] !== "wear" || argv[1] !== "pair") return null;
   const end = argv.indexOf("--");
   const visible = argv.slice(2, end === -1 ? argv.length : end);
-  if (visible.includes("--help") || visible.includes("-h")) return { prompt: false };
+  if (visible.includes("--help") || visible.includes("-h")) return { help: true, prompt: false };
   let target;
   for (let i = 0; i < visible.length; i += 1) {
     const token = visible[i];
-    if (token === "--code" || token.startsWith("--code=")) return { prompt: false };
+    if (token === "--code" || token.startsWith("--code=")) return { code: true, prompt: false };
     if (token === "--account") {
       i += 1;
       continue;
@@ -71,8 +80,7 @@ export function wearPairPlan(argv, env = process.env) {
     if (target === undefined) target = token;
   }
   if (target === undefined && end !== -1) target = argv[end + 1];
-  if (!parseWearTarget(target, { allowLoopback: pairTestMode(env) })) return { prompt: false };
-  return { prompt: true };
+  return { prompt: parseWearTarget(target, { allowLoopback: pairTestMode(env) }) !== null };
 }
 
 /**
@@ -136,17 +144,39 @@ export function readHiddenCode({ input = process.stdin, output = process.stderr,
   });
 }
 
-/** Writes the code to `<fresh 0700 dir>/code` with mode 0600 and returns both paths. */
-export function writeCodeHandoff(code, parent = tmpdir()) {
-  const dir = mkdtempSync(join(parent, "gbot-pair-"));
+/** A fresh private (0700) `gbot-pair-*` directory for one `wear pair` run. */
+export function makePairDir(parent = tmpdir()) {
+  return mkdtempSync(join(parent, "gbot-pair-"));
+}
+
+/** Writes the code to `<dir>/code` with mode 0600 (never over an existing file) and returns the path. */
+export function writeCodeHandoff(dir, code) {
   const file = join(dir, "code");
+  writeFileSync(file, code, { mode: 0o600, flag: "wx" });
+  return file;
+}
+
+/** The `{ account, id, target }` the worker recorded just before sending the session, or null. */
+export function readSentMarker(dir) {
   try {
-    writeFileSync(file, code, { mode: 0o600, flag: "wx" });
-  } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
-    throw error;
+    const value = JSON.parse(readFileSync(join(dir, "sent"), "utf8"));
+    const { account, id, target } = value ?? {};
+    if ([account, id, target].every((field) => typeof field === "string")) return { account, id, target };
+  } catch {
+    // No marker: the session was not sent.
   }
-  return { dir, file };
+  return null;
+}
+
+/** The `unknown` result in the output mode the user asked for (same value as the route's receipt). */
+export function unknownOutcomeOutput(sent, visible) {
+  const value = { account: sent.account, exitCode: 6, id: sent.id, outcome: "unknown", target: sent.target };
+  if (visible.includes("--ndjson")) {
+    const document = { root: { children: [{ kind: "text", text: UNKNOWN_OUTCOME_TEXT }], kind: "result" }, status: "success", value, version: 1 };
+    return `${JSON.stringify({ document, sequence: 0, type: "complete" })}\n`;
+  }
+  if (visible.includes("--json")) return `${JSON.stringify(value)}\n`;
+  return `${UNKNOWN_OUTCOME_TEXT}\n`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -160,15 +190,38 @@ async function main() {
 
   const visible = argv.slice(0, argv.indexOf("--") === -1 ? argv.length : argv.indexOf("--"));
   const env = { ...process.env };
-  // Only this wrapper may name a code file, and only for the invocation it prompted for.
+  // Only this wrapper may name a code file or pairing directory, and only for the run it prepared.
   delete env.GBOT_PAIR_CODE_FILE;
+  delete env.GBOT_PAIR_STATE_DIR;
   const scratch = [];
   const cleanup = () => {
     while (scratch.length > 0) rmSync(scratch.pop(), { recursive: true, force: true });
   };
   process.on("exit", cleanup);
+  // A hung-up terminal must not turn a write into an uncaught exception.
+  process.stdout.on("error", () => {});
+  process.stderr.on("error", () => {});
 
   const plan = wearPairPlan(argv, process.env);
+  if (plan?.code && process.env.GROK_BOT_TEST !== "1") {
+    // Refused before any worker starts: a production --code never travels further than this process.
+    if (visible.includes("--json")) {
+      process.stdout.write(`${JSON.stringify({ category: "usage", error: CODE_FLAG_REFUSED, exitCode: 2 })}\n`);
+    }
+    process.stderr.write(`${CODE_FLAG_REFUSED}\n`);
+    process.exit(2);
+  }
+  let pairDir;
+  if (plan && !plan.help) {
+    try {
+      pairDir = makePairDir();
+    } catch {
+      process.stderr.write("Could not create a private temporary directory for pairing. Nothing was sent.\n");
+      process.exit(1);
+    }
+    scratch.push(pairDir);
+    env.GBOT_PAIR_STATE_DIR = pairDir;
+  }
   if (plan?.prompt && process.stdin.isTTY) {
     const restoreAndExit = (code) => {
       try {
@@ -179,13 +232,10 @@ async function main() {
       cleanup();
       process.exit(code);
     };
-    const onSigint = () => restoreAndExit(130);
-    const onSigterm = () => restoreAndExit(143);
-    process.on("SIGINT", onSigint);
-    process.on("SIGTERM", onSigterm);
+    const onPromptSignal = (signal) => restoreAndExit(128 + (constants.signals[signal] ?? 0));
+    for (const signal of PAIR_SIGNALS) process.on(signal, onPromptSignal);
     const answer = await readHiddenCode({ input: process.stdin, output: process.stderr });
-    process.removeListener("SIGINT", onSigint);
-    process.removeListener("SIGTERM", onSigterm);
+    for (const signal of PAIR_SIGNALS) process.removeListener(signal, onPromptSignal);
     if (answer.status === "interrupt") restoreAndExit(130);
     if (answer.status !== "ok") {
       process.stderr.write(
@@ -196,9 +246,7 @@ async function main() {
       restoreAndExit(2);
     }
     try {
-      const handoff = writeCodeHandoff(answer.code);
-      scratch.push(handoff.dir);
-      env.GBOT_PAIR_CODE_FILE = handoff.file;
+      env.GBOT_PAIR_CODE_FILE = writeCodeHandoff(pairDir, answer.code);
     } catch {
       process.stderr.write("Could not hand the pairing code to gbot (temporary directory not writable). Nothing was sent.\n");
       restoreAndExit(1);
@@ -227,25 +275,35 @@ async function main() {
     env,
     stdio: ["ignore", "inherit", "inherit"],
   });
+  const forwarded = ["SIGINT", "SIGTERM", ...(plan ? ["SIGHUP"] : [])];
   const stop = (signal) => {
-    // A pending pairing code is useless once the user aborts; remove it now, not after the worker exits.
-    if (env.GBOT_PAIR_CODE_FILE) cleanup();
+    // A pending pairing code is useless once the user aborts: remove it now, not after the worker exits. The
+    // directory stays until the worker exits, so its `sent` marker can still be read.
+    if (env.GBOT_PAIR_CODE_FILE) rmSync(env.GBOT_PAIR_CODE_FILE, { force: true });
     try {
       child.kill(signal);
     } catch {
       child.kill();
     }
   };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  for (const signal of forwarded) process.on(signal, stop);
   child.on("error", () => {
     cleanup();
     process.stderr.write("Could not start gbot.\n");
     process.exit(1);
   });
   child.on("exit", (code, signal) => {
+    const sent = pairDir ? readSentMarker(pairDir) : null;
     cleanup();
+    if (sent && (signal !== null || ![0, 5, 6].includes(code))) {
+      // The session already left the computer; whatever ended the worker, the honest result is "unknown".
+      process.stdout.write(unknownOutcomeOutput(sent, visible), () => process.exit(6));
+      return;
+    }
     if (signal) {
+      // Re-raise the worker's signal on this process; our own handlers must go first or it would not exit.
+      for (const name of forwarded) process.removeAllListeners(name);
+      process.exitCode = 128 + (constants.signals[signal] ?? 0);
       // Windows rejects some signals with EINVAL; still exit.
       try {
         process.kill(process.pid, signal);

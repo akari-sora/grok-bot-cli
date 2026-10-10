@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { pairWithWatch, preflightSession } from "../src/core/wear-pair.js";
+import { PAIR_MESSAGES, pairWithWatch, preflightSession } from "../src/core/wear-pair.js";
 import { closedPort, startFakeWatch } from "./helpers/fake-watch.js";
 import { randomCode, typoOf } from "./helpers/wear-pair-fixture.js";
 
@@ -155,4 +156,113 @@ test("an abort signal stops the attempt", async (t) => {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 100);
   await assert.rejects(pairWithWatch({ host: fake.host, port: fake.port, code: code.normalized, payload, signal: controller.signal }), fails("aborted"));
+});
+
+test("abort after M3 was sent resolves unknown, never aborted", async (t) => {
+  const controller = new AbortController();
+  let sending = 0;
+  const { code, fake } = await watch(t, {
+    behavior: {
+      // The watch has the session; hold the receipt back and abort in that window.
+      beforeM4: async () => {
+        controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      },
+    },
+  });
+  const started = performance.now();
+  const result = await pairWithWatch({
+    host: fake.host,
+    port: fake.port,
+    code: code.normalized,
+    payload,
+    signal: controller.signal,
+    onSending: () => { sending += 1; },
+  });
+  assert.deepEqual(result, { outcome: "unknown" });
+  assert.equal(sending, 1, "onSending runs once, just before M3");
+  assert.ok(performance.now() - started < 900, "the abort ends the wait at once");
+  assert.equal((await fake.result).outcome, "paired", "the watch did store it");
+});
+
+test("an error after M3 was sent resolves unknown; onSending errors never stop the send", async (t) => {
+  const { code, fake } = await watch(t, { behavior: { omitM4: true } });
+  const result = await pairWithWatch({
+    host: fake.host,
+    port: fake.port,
+    code: code.normalized,
+    payload,
+    onSending: () => { throw new Error("fake hook failure"); },
+  });
+  assert.deepEqual(result, { outcome: "unknown" });
+  assert.equal((await fake.result).payload, payload.toString("utf8"));
+});
+
+test("abort before M3 stays aborted and onSending never runs", async (t) => {
+  const controller = new AbortController();
+  let sending = 0;
+  const { code, fake } = await watch(t, {
+    behavior: {
+      beforeM2: async () => {
+        controller.abort();
+      },
+    },
+  });
+  await assert.rejects(
+    pairWithWatch({ host: fake.host, port: fake.port, code: code.normalized, payload, signal: controller.signal, onSending: () => { sending += 1; } }),
+    fails("aborted"),
+  );
+  assert.equal(sending, 0);
+  assert.equal((await fake.result).bytesAfterM2, 0);
+});
+
+/** A socket that never connects, to stand in for a SYN that is never answered. */
+function hangingSocket() {
+  const socket = new EventEmitter();
+  socket.destroyed = false;
+  socket.destroy = () => { socket.destroyed = true; };
+  return socket;
+}
+
+test("abort during a connect that never completes destroys the socket at once", async () => {
+  const sockets = [];
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 50);
+  const started = performance.now();
+  await assert.rejects(
+    pairWithWatch({
+      host: "192.168.1.20",
+      port: 40000,
+      code: randomCode().normalized,
+      payload,
+      signal: controller.signal,
+      timeouts: { connectMs: 60_000 },
+      createConnection: (options) => {
+        assert.deepEqual({ host: options.host, port: options.port, family: options.family }, { host: "192.168.1.20", port: 40000, family: 4 });
+        const socket = hangingSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    }),
+    fails("aborted"),
+  );
+  assert.ok(performance.now() - started < 1_000, "returns promptly");
+  assert.equal(sockets.length, 1);
+  assert.equal(sockets[0].destroyed, true, "the connecting socket was destroyed");
+});
+
+test("a connect that never completes is unreachable at the connect deadline", async () => {
+  const socket = hangingSocket();
+  const started = performance.now();
+  await assert.rejects(
+    pairWithWatch({ host: "192.168.1.20", port: 40000, code: randomCode().normalized, payload, timeouts: { connectMs: 200 }, createConnection: () => socket }),
+    fails("unreachable"),
+  );
+  assert.ok(performance.now() - started < 2_000);
+  assert.equal(socket.destroyed, true);
+});
+
+test("the no-answer message names a different subnet as a cause", () => {
+  assert.match(PAIR_MESSAGES["no-answer"], /different subnet/);
+  assert.match(PAIR_MESSAGES["no-answer"], /closes connections from other subnets/);
 });

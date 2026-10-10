@@ -1,7 +1,7 @@
 import { Agent } from '@agent-bundle/runtime';
 import type { CliRouteConfig, CliRouteProps } from 'agent-bundle';
-import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { lstatSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import { loadGrokBotGatewaySelection } from '../../core/app-session.js';
@@ -112,6 +112,9 @@ const MESSAGES = {
   noTerminal: 'Run this in a terminal: gbot wear pair reads the pairing code from the keyboard with echo off.',
   codeFile: 'The pairing code hand-off file is missing or unsafe. Run gbot wear pair again in a terminal.',
   noLogin: 'No saved Grok Bot login. Open the Grok Bot app and sign in once, then run gbot accounts.',
+  unreadable:
+    'Could not read the saved Grok Bot logins (Keychain or secret store access?). Allow access for this terminal, ' +
+    'or run gbot doctor for details.',
   unusable: 'The selected Grok Bot login could not be read. Run gbot doctor --account <label> for details.',
   internal: 'Pairing failed because of an internal error.',
   preflight: {
@@ -138,6 +141,15 @@ const printable = (text: string): string =>
   }).join('');
 
 const failure = (category: Category, error: string): Failure => ({ category, error, exitCode: EXIT[category] });
+
+/** Why the OS secret store is off in this run, for the message when no login can be read; empty when it is on. */
+const secretStoreOff = (): string => {
+  if (!testMode()) return '';
+  if (process.env.GROK_BOT_TEST === '1' && process.env.GBOT_TEST_KEYCHAIN_PASSWORD) return '';
+  return truthy(process.env.GROK_BOT_TEST)
+    ? ' GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode).'
+    : ' NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.';
+};
 
 /**
  * OS secret access. Tests never reach the real Keychain, secret-tool or DPAPI: in test mode the store is disabled,
@@ -206,7 +218,29 @@ const accountFailure = (error: unknown, account: string | undefined): Failure =>
     return failure('usage', `No saved Grok Bot login matches --account. Saved logins:\n${loginList(logins)}`);
   }
   if (code === 'EMPTY_ENTRIES') return failure('account', MESSAGES.noLogin);
-  return failure('account', MESSAGES.unusable);
+  if (code === 'UNREADABLE_ENTRIES') return failure('account', MESSAGES.unreadable + secretStoreOff());
+  return failure('account', MESSAGES.unusable + secretStoreOff());
+};
+
+/**
+ * The wrapper's private directory (GBOT_PAIR_STATE_DIR): `sent` is written there just before the session leaves,
+ * so the wrapper can report `unknown` (exit 6) if the worker is interrupted afterwards. Only a private
+ * `gbot-pair-*` directory of this user is accepted.
+ */
+const stateDir = (): string | undefined => {
+  const dir = process.env.GBOT_PAIR_STATE_DIR;
+  if (typeof dir !== 'string' || !dir || !basename(dir).startsWith('gbot-pair-')) return undefined;
+  try {
+    const stat = lstatSync(dir);
+    if (!stat.isDirectory()) return undefined;
+    if (process.platform !== 'win32') {
+      if ((stat.mode & 0o077) !== 0) return undefined;
+      if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return undefined;
+    }
+    return dir;
+  } catch {
+    return undefined;
+  }
 };
 
 const pair = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Promise<Receipt | Failure> => {
@@ -242,9 +276,15 @@ const pair = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
     return failure('preflight', MESSAGES.preflight[String(checkedSession.reason)] ?? MESSAGES.preflight.shape);
   }
 
-  // Only the label and the target, so the user can still abort; never the token, headers, host or code.
+  // Only the label and the target, so the user can still abort; never the token, headers, host or code. The label
+  // and id are already masked when they alias a secret (loadGrokBotGatewaySelection).
   process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
 
+  const dir = stateDir();
+  const recordSending = (): void => {
+    if (!dir) return;
+    writeFileSync(join(dir, 'sent'), JSON.stringify({ account: label, id, target: target.target }), { flag: 'wx', mode: 0o600 });
+  };
   try {
     const { outcome } = await pairWithWatch({
       host: target.host,
@@ -252,6 +292,7 @@ const pair = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
       code: checked.code,
       payload: checkedSession.payload,
       signal,
+      onSending: recordSending,
     });
     const known = (outcomes as readonly string[]).includes(outcome) ? (outcome as Outcome) : 'unknown';
     return { account: label, exitCode: RECEIPT_EXIT[known], id, outcome: known, target: target.target };

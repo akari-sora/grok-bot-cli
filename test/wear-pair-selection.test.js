@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -98,7 +98,7 @@ test("--account matches a label case-insensitively for e-mails, an id, or a uniq
   });
 });
 
-test("a Keychain failure is asked once and reported as an unusable login, not as its message", (t) => {
+test("when no saved login can be decrypted the error says so (Keychain), asked once, listing nothing", (t) => {
   const dir = home(t);
   writeDescriptor(dir, {
     [ENTRY_A]: descriptor(),
@@ -109,9 +109,55 @@ test("a Keychain failure is asked once and reported as an unusable login, not as
     calls += 1;
     throw new Error("fake keychain denied");
   };
-  assert.throws(() => load(dir, { getKeychainPassword, account: ENTRY_A }), (error) => error.code === "UNUSABLE_SESSION");
-  assert.equal(calls, 1);
-  assert.throws(() => load(dir, { getKeychainPassword: () => "fake-wrong-password", account: ENTRY_A }), (error) => error.code === "UNUSABLE_SESSION");
+  for (const account of [ENTRY_A, "fake-nobody", undefined]) {
+    assert.throws(() => load(dir, { getKeychainPassword, account }), (error) => {
+      assert.equal(error.code, "UNREADABLE_ENTRIES");
+      assert.match(error.message, /Keychain/);
+      assert.equal(error.logins, undefined, "no ids are listed");
+      assert.doesNotMatch(error.message, new RegExp(`${ENTRY_A}|${ENTRY_B}|fake keychain denied`));
+      return true;
+    });
+  }
+  assert.equal(calls, 3, "once per call, not once per entry");
+  assert.throws(() => load(dir, { getKeychainPassword: () => "fake-wrong-password" }), (error) => error.code === "UNREADABLE_ENTRIES");
+});
+
+test("one unreadable login among readable ones is unusable only when it is selected", (t) => {
+  const dir = home(t);
+  const path = writeDescriptor(dir, {
+    [ENTRY_A]: descriptor(),
+    [ENTRY_B]: descriptor({ email: "fake-second@example.com" }),
+  });
+  const wrapped = JSON.parse(readFileSync(path, "utf8"));
+  wrapped.entries[ENTRY_B].encrypted = Buffer.from("v10fake-garbage").toString("base64");
+  writeFileSync(path, JSON.stringify(wrapped));
+  assert.equal(load(dir, { ...counting(), account: ENTRY_A }).id, ENTRY_A);
+  assert.throws(() => load(dir, { ...counting(), account: ENTRY_B }), (error) => error.code === "UNUSABLE_SESSION");
+});
+
+test("a label or id that equals or contains a secret is shown as login <n>", (t) => {
+  const dir = home(t);
+  writeDescriptor(dir, {
+    [ENTRY_A]: descriptor({ email: SECRETS.token }),
+    [SECRETS.route]: descriptor({ email: "fake-second@example.com" }),
+    "fake-third": descriptor({ displayName: `Pod ${SECRETS.host.toUpperCase()}`, email: undefined }),
+    "fake-fourth": descriptor({ email: "fake-fourth@example.com" }),
+  });
+  assert.throws(() => load(dir, counting()), (error) => {
+    assert.deepEqual(error.logins.map((row) => row.label), ["login 1", "fake-second@example.com", "login 3", "fake-fourth@example.com"]);
+    for (const secret of [SECRETS.token, SECRETS.route, SECRETS.host]) {
+      assert.equal(error.message.toLowerCase().includes(secret.toLowerCase()), false);
+    }
+    return true;
+  });
+  const masked = load(dir, { ...counting(), account: "login 1" });
+  assert.deepEqual({ id: masked.id, label: masked.label }, { id: ENTRY_A, label: "login 1" });
+  assert.equal(masked.session.gatewayToken, SECRETS.token, "only the shown label changes");
+  // The real label still selects; the id that aliases the routing secret is never returned.
+  assert.equal(load(dir, { ...counting(), account: SECRETS.token }).label, "login 1");
+  const second = load(dir, { ...counting(), account: "fake-second@example.com" });
+  assert.deepEqual({ id: second.id, label: second.label }, { id: "login 2", label: "fake-second@example.com" });
+  assert.equal(load(dir, { ...counting(), account: "fake-fourth@example.com" }).label, "fake-fourth@example.com");
 });
 
 test("incomplete or non-string descriptors are refused; no descriptor is null", (t) => {

@@ -62,7 +62,9 @@ export const PAIR_MESSAGES = Object.freeze({
     "Could not reach the watch. Check that this computer and the watch are on the same Wi-Fi network, that the " +
     "network does not isolate clients from each other, and (macOS) that this terminal app is allowed under " +
     "System Settings > Privacy & Security > Local Network. If the watch already shows a failure, generate a new code.",
-  "no-answer": "The watch did not answer (version mismatch or it is busy). Generate a new code on the watch and try again.",
+  "no-answer":
+    "The watch did not answer (version mismatch or it is busy), or this computer is on a different subnet than the " +
+    "watch (the watch closes connections from other subnets). Generate a new code on the watch and try again.",
   auth: "Wrong code, or this is not your watch. Generate a new code on the watch; never reuse an old one.",
   payload: "The session is too large or malformed for the watch.",
   usage: "Invalid pairing request.",
@@ -615,22 +617,30 @@ class FrameReader {
   }
 }
 
-function connect(host, port, ms) {
+/** TCP connect with an absolute deadline; an abort destroys the connecting socket at once. */
+function connect(createConnection, host, port, ms, signal) {
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ host, port, family: 4, noDelay: true });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error("deadline"));
-    }, ms);
-    socket.once("connect", () => {
+    const socket = createConnection({ host, port, family: 4, noDelay: true });
+    let settled = false;
+    let timer;
+    const done = (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve(socket);
-    });
-    socket.once("error", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      reject(new Error("connect"));
-    });
+      signal?.removeEventListener("abort", onAbort);
+      if (error) {
+        socket.destroy();
+        reject(error);
+      } else {
+        resolve(socket);
+      }
+    };
+    const onAbort = () => done(new Error("aborted"));
+    timer = setTimeout(() => done(new Error("deadline")), ms);
+    socket.once("connect", () => done(null));
+    socket.once("error", () => done(new Error("connect")));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -655,17 +665,31 @@ function outcomeOf(status) {
 /**
  * Runs one GBWP/1 attempt against the watch at `host:port` (an IPv4 literal) and sends `payload` (the UTF-8 JSON
  * from preflightSession). The code is checked before any network I/O; M3 is sent only after tagW verifies; there
- * are no retries. Resolves `{ outcome }` with outcome `paired`, `rejected`, `storage-failed` or `unknown` (M3 was
- * sent but no valid M4 arrived). Throws WearPairError with category `typo` / `invalid-code` (before any I/O),
- * `unreachable` (connect failed), `no-answer` (no well-formed M2 in time), `auth` (bad tagW or watch key),
- * `payload`, `usage` or `aborted`.
+ * are no retries. Resolves `{ outcome }` with outcome `paired`, `rejected`, `storage-failed` or `unknown`. Throws
+ * WearPairError with category `typo` / `invalid-code` (before any I/O), `unreachable` (connect failed),
+ * `no-answer` (no well-formed M2 in time), `auth` (bad tagW or watch key), `payload`, `usage`, or `aborted` (the
+ * signal fired before the session was sent).
+ *
+ * Once the M3 write has started the session may have reached the watch, so from then on nothing throws: an abort,
+ * a write or read error, a deadline or an invalid M4 all resolve `{ outcome: "unknown" }`. `onSending` (optional)
+ * is called synchronously just before that write; its exceptions are ignored.
  */
 /**
  * @param {{ host: string, port: number, code: string, payload: Uint8Array,
- *   timeouts?: Partial<{ connectMs: number, writeMs: number, m2Ms: number, m4Ms: number }>, signal?: AbortSignal }} options
+ *   timeouts?: Partial<{ connectMs: number, writeMs: number, m2Ms: number, m4Ms: number }>, signal?: AbortSignal,
+ *   onSending?: () => void, createConnection?: (options: net.NetConnectOpts) => net.Socket }} options
  * @returns {Promise<{ outcome: "paired" | "rejected" | "storage-failed" | "unknown" }>}
  */
-export async function pairWithWatch({ host, port, code, payload, timeouts = {}, signal }) {
+export async function pairWithWatch({
+  host,
+  port,
+  code,
+  payload,
+  timeouts = {},
+  signal,
+  onSending,
+  createConnection = net.createConnection,
+}) {
   const checked = checkCode(code);
   if (checked.error) throw new WearPairError(checked.error);
   if (typeof host !== "string" || net.isIPv4(host) === false || !Number.isInteger(port) || port < 1 || port > 65535) {
@@ -683,7 +707,7 @@ export async function pairWithWatch({ host, port, code, payload, timeouts = {}, 
   const fail = (category) => new WearPairError(signal?.aborted ? "aborted" : category);
   try {
     try {
-      socket = await connect(host, port, limits.connectMs);
+      socket = await connect(createConnection, host, port, limits.connectMs, signal);
     } catch {
       throw fail("unreachable");
     }
@@ -703,17 +727,23 @@ export async function pairWithWatch({ host, port, code, payload, timeouts = {}, 
     handshake.acceptM2(m2);
     reader.expect(SIZES.m4);
     const m3 = handshake.sealM3(payload);
+    if (signal?.aborted) throw fail("aborted");
+    // From here the session may leave the computer: every ending is a result, `unknown` unless M4 verifies.
+    try {
+      onSending?.();
+    } catch {
+      // The hook is advisory (the CLI records that the session was sent); it never stops the send.
+    }
     try {
       await write(socket, frame(m3), limits.writeMs);
     } catch {
-      if (signal?.aborted) throw fail("aborted");
       return { outcome: "unknown" };
     }
+    // An abort now destroys the socket, so the read below fails (-> unknown) unless a complete M4 already arrived.
     let m4;
     try {
       m4 = await reader.read(SIZES.m4, limits.m4Ms);
     } catch {
-      if (signal?.aborted) throw fail("aborted");
       return { outcome: "unknown" };
     }
     return { outcome: outcomeOf(handshake.openM4(m4)) };
