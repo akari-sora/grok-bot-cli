@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### Unreleased
+
+- `gbot wear pair <ip:port> [--account <label|id>]` sends the selected saved login's gateway session to the grok-bot-watch Wear OS app on the same network over GBWP/1 (ECDH P-256, HKDF-SHA256, AES-256-GCM, authenticated by the 60-bit code the watch shows). The code is typed at a hidden prompt and handed to the worker in a 0600 file, never in argv or an environment value. A typo in the check character is caught before any network access; the session is checked with the watch's own import rules before connecting; `GBOT_ACCOUNT` is ignored; nothing secret is printed. Exit codes 0/2/3/4/5/6 as listed in FORK.md.
+- `loadGrokBotGatewaySelection` reads the saved logins in one decrypt pass and asks the OS secret store once.
+
 ### 0.11.2-iml1s.3
 
 - Grok Bot app gateway descriptor version 3 is supported using the version 2 entries layout; unknown descriptor versions continue to be rejected.

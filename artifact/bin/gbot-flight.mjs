@@ -1,4 +1,5 @@
 import * as __rspack_external_node_async_hooks_4d8b1b4a from "node:async_hooks";
+import * as __rspack_external_node_buffer_4f2f74e0 from "node:buffer";
 import * as __rspack_external_node_child_process_cd435d64 from "node:child_process";
 import * as __rspack_external_node_crypto_2e7c4b46 from "node:crypto";
 import * as __rspack_external_node_fs_1b05aee1 from "node:fs";
@@ -11581,6 +11582,284 @@ var __webpack_modules__ = {
             resultSchema: resultSchema
         });
     },
+    "./src/cli/wear/pair.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
+        var _agent_bundle_runtime__rspack_import_7 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var node_fs__rspack_import_1 = __webpack_require__("node:fs");
+        var node_path__rspack_import_2 = __webpack_require__("node:path");
+        var zod__rspack_import_6 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_app_session_js__rspack_import_3 = __webpack_require__("./src/core/app-session.js");
+        var _core_wear_pair_js__rspack_import_4 = __webpack_require__("./src/core/wear-pair.js");
+        var _gbot_js__rspack_import_5 = __webpack_require__("./src/gbot.ts");
+        const config = {
+            description: 'Send the selected Grok Bot login to a Wear OS watch on this network (GBWP/1). Type the code the watch shows at the hidden prompt.',
+            exitCode: 'result',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    target: {
+                        description: 'The watch address shown on its screen, <ip>:<port>',
+                        type: 'string'
+                    },
+                    account: {
+                        description: 'Saved Grok Bot login to send when several are stored (label or id). GBOT_ACCOUNT is ignored here',
+                        type: 'string'
+                    },
+                    code: {
+                        description: 'Tests only (GROK_BOT_TEST=1): the pairing code. Otherwise gbot asks for it with echo off',
+                        type: 'string'
+                    }
+                },
+                required: [
+                    'target'
+                ],
+                type: 'object'
+            },
+            positionals: [
+                'target'
+            ]
+        };
+        const inputSchema = zod__rspack_import_6.Ikc({
+            account: zod__rspack_import_6.YjP().min(1).optional(),
+            code: zod__rspack_import_6.YjP().optional(),
+            target: zod__rspack_import_6.YjP()
+        }).strict();
+        const outcomes = [
+            'paired',
+            'rejected',
+            'storage-failed',
+            'unknown'
+        ];
+        const receiptSchema = zod__rspack_import_6.Ikc({
+            account: zod__rspack_import_6.YjP(),
+            exitCode: zod__rspack_import_6.KCZ([
+                zod__rspack_import_6.euz(0),
+                zod__rspack_import_6.euz(5),
+                zod__rspack_import_6.euz(6)
+            ]),
+            id: zod__rspack_import_6.YjP(),
+            outcome: zod__rspack_import_6.k5n(outcomes),
+            target: zod__rspack_import_6.YjP()
+        }).strict();
+        const categories = [
+            'usage',
+            'typo',
+            'invalid-code',
+            'account',
+            'preflight',
+            'unreachable',
+            'no-answer',
+            'auth',
+            'aborted',
+            'internal'
+        ];
+        const failureSchema = zod__rspack_import_6.Ikc({
+            category: zod__rspack_import_6.k5n(categories),
+            error: zod__rspack_import_6.YjP(),
+            exitCode: zod__rspack_import_6.KCZ([
+                zod__rspack_import_6.euz(1),
+                zod__rspack_import_6.euz(2),
+                zod__rspack_import_6.euz(3),
+                zod__rspack_import_6.euz(4),
+                zod__rspack_import_6.euz(130)
+            ])
+        }).strict();
+        const resultSchema = zod__rspack_import_6.KCZ([
+            receiptSchema,
+            failureSchema
+        ]);
+        const EXIT = {
+            usage: 2,
+            typo: 2,
+            'invalid-code': 2,
+            account: 1,
+            preflight: 1,
+            unreachable: 3,
+            'no-answer': 4,
+            auth: 4,
+            aborted: 130,
+            internal: 1
+        };
+        const RECEIPT_EXIT = {
+            paired: 0,
+            rejected: 5,
+            'storage-failed': 5,
+            unknown: 6
+        };
+        const KEEP_CODE = 'Nothing was sent, so the code on the watch is still valid.';
+        const MESSAGES = {
+            target: 'Give the address the watch shows as <ip>:<port>, for example 192.168.1.20:40123: a private IPv4 address ' + '(10/8, 172.16/12, 192.168/16, 100.64/10 or 169.254/16) and a port from 1024 to 65535.',
+            codeFlag: '--code is accepted only in tests (GROK_BOT_TEST=1). Run gbot wear pair in a terminal and type the code at the prompt.',
+            noTerminal: 'Run this in a terminal: gbot wear pair reads the pairing code from the keyboard with echo off.',
+            codeFile: 'The pairing code hand-off file is missing or unsafe. Run gbot wear pair again in a terminal.',
+            noLogin: 'No saved Grok Bot login. Open the Grok Bot app and sign in once, then run gbot accounts.',
+            unusable: 'The selected Grok Bot login could not be read. Run gbot doctor --account <label> for details.',
+            internal: 'Pairing failed because of an internal error.',
+            preflight: {
+                shape: `The selected login's session is malformed, so the watch would reject it. ${KEEP_CODE}`,
+                url: `The selected login's gateway URL is not one the watch accepts (https on a Cursor host). ${KEEP_CODE}`,
+                token: `The selected login's gateway token is not one the watch accepts. ${KEEP_CODE}`,
+                headers: `The selected login's routing headers are not ones the watch accepts. ${KEEP_CODE}`,
+                size: `The selected login's session is too large for the watch. ${KEEP_CODE}`
+            }
+        };
+        const truthy = (value)=>[
+                '1',
+                'true',
+                'yes'
+            ].includes((value ?? '').trim().toLowerCase());
+        const testMode = ()=>truthy(process.env.GROK_BOT_TEST) || process.env.NODE_ENV === 'test';
+        const printable = (text)=>Array.from(text, (char)=>{
+                const c = char.codePointAt(0) ?? 0;
+                const hidden = c < 0x20 || c >= 0x7f && c <= 0x9f || c === 0x2028 || c === 0x2029 || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069;
+                return hidden ? '?' : char;
+            }).join('');
+        const failure = (category, error)=>({
+                category,
+                error,
+                exitCode: EXIT[category]
+            });
+        const secretStore = ()=>{
+            if (!testMode()) return {};
+            const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
+            return {
+                getKeychainPassword: ()=>{
+                    if (typeof fixture === 'string' && fixture) return fixture;
+                    throw new Error('The OS secret store is disabled in test mode.');
+                },
+                unprotectData: ()=>{
+                    throw new Error('The OS secret store is disabled in test mode.');
+                }
+            };
+        };
+        const takeCodeFile = (path)=>{
+            try {
+                if ((0, node_path__rspack_import_2.basename)(path) !== 'code' || !(0, node_path__rspack_import_2.basename)((0, node_path__rspack_import_2.dirname)(path)).startsWith('gbot-pair-')) return failure('usage', MESSAGES.codeFile);
+                const stat = (0, node_fs__rspack_import_1.lstatSync)(path);
+                if (!stat.isFile() || stat.size > 128) return failure('usage', MESSAGES.codeFile);
+                if (process.platform !== 'win32') {
+                    if ((stat.mode & 63) !== 0) return failure('usage', MESSAGES.codeFile);
+                    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return failure('usage', MESSAGES.codeFile);
+                }
+                try {
+                    return (0, node_fs__rspack_import_1.readFileSync)(path).toString('latin1');
+                } finally{
+                    (0, node_fs__rspack_import_1.unlinkSync)(path);
+                }
+            } catch  {
+                return failure('usage', MESSAGES.codeFile);
+            }
+        };
+        const takeCode = (input, fromFile)=>{
+            if (input.code !== undefined) {
+                if (process.env.GROK_BOT_TEST !== '1') return failure('usage', MESSAGES.codeFlag);
+                return input.code;
+            }
+            return fromFile ?? failure('usage', MESSAGES.noTerminal);
+        };
+        const loginList = (logins)=>Array.isArray(logins) ? logins.map((row)=>`  ${printable(String(row.label))}${row.lastSaved ? ' (last saved)' : ''}`).join('\n') : '';
+        const accountFailure = (error, account)=>{
+            const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+            const logins = error && typeof error === 'object' && 'logins' in error ? error.logins : undefined;
+            if (code === 'AMBIGUOUS_ENTRIES') {
+                const lead = account ? 'More than one saved Grok Bot login matches --account.' : 'Several Grok Bot logins are saved.';
+                return failure('usage', `${lead} Choose one with --account <label>:\n${loginList(logins)}`);
+            }
+            if (code === 'UNKNOWN_ACCOUNT') {
+                return failure('usage', `No saved Grok Bot login matches --account. Saved logins:\n${loginList(logins)}`);
+            }
+            if (code === 'EMPTY_ENTRIES') return failure('account', MESSAGES.noLogin);
+            return failure('account', MESSAGES.unusable);
+        };
+        const pair = async (input, signal)=>{
+            const file = process.env.GBOT_PAIR_CODE_FILE;
+            const fromFile = typeof file === 'string' && file ? takeCodeFile(file) : undefined;
+            const target = (0, _core_wear_pair_js__rspack_import_4.hu)(input.target, {
+                allowLoopback: testMode()
+            });
+            if (!target) return failure('usage', MESSAGES.target);
+            const code = takeCode(input, fromFile);
+            if (typeof code !== 'string') return code;
+            const checked = (0, _core_wear_pair_js__rspack_import_4.q7)(code);
+            if (checked.code === undefined) return failure(checked.error, _core_wear_pair_js__rspack_import_4.EM[checked.error]);
+            const env = {
+                ...process.env
+            };
+            delete env.GBOT_ACCOUNT;
+            let selection;
+            try {
+                selection = (0, _core_app_session_js__rspack_import_3.Dm)({
+                    account: input.account,
+                    env,
+                    ...secretStore()
+                });
+            } catch (error) {
+                return accountFailure(error, input.account);
+            }
+            if (!selection) return failure('account', MESSAGES.noLogin);
+            const label = String(selection.label);
+            const id = String(selection.id);
+            const checkedSession = (0, _core_wear_pair_js__rspack_import_4.wF)({
+                ...selection.session,
+                label
+            });
+            if (!checkedSession.ok) {
+                return failure('preflight', MESSAGES.preflight[String(checkedSession.reason)] ?? MESSAGES.preflight.shape);
+            }
+            process.stderr.write(`Sending Grok Bot login ${printable(label)} to the watch at ${target.target} (Ctrl-C to abort).\n`);
+            try {
+                const { outcome } = await (0, _core_wear_pair_js__rspack_import_4.oN)({
+                    host: target.host,
+                    port: target.port,
+                    code: checked.code,
+                    payload: checkedSession.payload,
+                    signal
+                });
+                const known = outcomes.includes(outcome) ? outcome : 'unknown';
+                return {
+                    account: label,
+                    exitCode: RECEIPT_EXIT[known],
+                    id,
+                    outcome: known,
+                    target: target.target
+                };
+            } catch (error) {
+                if (error instanceof _core_wear_pair_js__rspack_import_4.Eh) {
+                    const category = categories.includes(error.category) ? error.category : 'internal';
+                    return failure(category, category === 'internal' ? MESSAGES.internal : _core_wear_pair_js__rspack_import_4.EM[category] ?? MESSAGES.internal);
+                }
+                return failure('internal', MESSAGES.internal);
+            }
+        };
+        const textOf = (value)=>{
+            if ('error' in value) return value.error;
+            if (value.outcome === 'paired') return `Paired ${printable(value.account)} with the watch at ${value.target}.`;
+            return _core_wear_pair_js__rspack_import_4.cT[value.outcome];
+        };
+        async function wearPair({ input, signal }) {
+            const value = await (0, _gbot_js__rspack_import_5.yF)(async ()=>{
+                try {
+                    return await pair(input, signal);
+                } catch  {
+                    return failure('internal', MESSAGES.internal);
+                }
+            });
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Result, {
+                value: value,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Text, {
+                    children: textOf(value)
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>wearPair
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/core/chatgpt-desktop/app-server-fallback.ts" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         var _codex_bridge_js__rspack_import_0 = __webpack_require__("./src/core/codex-bridge.js");
         var _errors_js__rspack_import_1 = __webpack_require__("./src/core/chatgpt-desktop/errors.ts");
@@ -15981,6 +16260,9 @@ var __webpack_modules__ = {
     },
     "node:async_hooks" (module) {
         module.exports = __rspack_external_node_async_hooks_4d8b1b4a;
+    },
+    "node:buffer" (module) {
+        module.exports = __rspack_external_node_buffer_4f2f74e0;
     },
     "node:child_process" (module) {
         module.exports = __rspack_external_node_child_process_cd435d64;
@@ -26193,6 +26475,86 @@ var __webpack_modules__ = {
                 headers: descriptor.headers ?? {}
             };
         }
+        function once(fn) {
+            let done = false;
+            let value;
+            let failure;
+            return (...args)=>{
+                if (!done) {
+                    done = true;
+                    try {
+                        value = fn(...args);
+                    } catch (error) {
+                        failure = {
+                            error
+                        };
+                    }
+                }
+                if (failure) throw failure.error;
+                return value;
+            };
+        }
+        function selectionError(code, message, rows) {
+            const error = new GrokBotGatewaySessionError(code, message);
+            error.logins = rows.map((row)=>({
+                    label: row.label,
+                    lastSaved: row.lastSaved
+                }));
+            return error;
+        }
+        function chooseSavedEntryByFlag(rows, selector) {
+            if (rows.length === 0) {
+                throw new GrokBotGatewaySessionError("EMPTY_ENTRIES", "Grok Bot gateway descriptor has no saved gateway entries.");
+            }
+            const visible = markLastSaved(rows);
+            if (!selector) {
+                if (visible.length === 1) return visible[0];
+                throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + loginLines(visible), visible);
+            }
+            const matches = visible.filter((row)=>matchesSelector(row, selector));
+            if (matches.length === 1) return matches[0];
+            throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + loginLines(visible), visible);
+        }
+        function loadGrokBotGatewaySelection({ platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, appData, account, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
+            if (!SUPPORTED_PLATFORMS.has(platform)) return null;
+            const effectiveEnv = sessionEnv({
+                env,
+                appData
+            });
+            const path = grokBotGatewayDescriptorPath(home, platform, effectiveEnv);
+            if (!(0, node_fs__rspack_import_2.existsSync)(path)) return null;
+            const wrapped = JSON.parse((0, node_fs__rspack_import_2.readFileSync)(path, "utf8"));
+            const password = once(getKeychainPassword);
+            const unprotect = once(unprotectData);
+            const decrypt = (encrypted)=>decryptEntry(encrypted, {
+                    platform,
+                    home,
+                    env: effectiveEnv,
+                    getKeychainPassword: password,
+                    unprotectData: unprotect
+                });
+            const selector = typeof account === "string" ? account.trim() : "";
+            const selected = chooseSavedEntryByFlag(decorateEntries(savedEntries(wrapped), decrypt), selector);
+            if (typeof selected.encrypted !== "string" || !selected.encrypted) {
+                throw new GrokBotGatewaySessionError("MISSING_ENCRYPTED_PAYLOAD", "Grok Bot gateway descriptor is missing an encrypted payload.");
+            }
+            if (selected.decryptError || !selected.descriptor || typeof selected.descriptor !== "object") {
+                throw new GrokBotGatewaySessionError("UNUSABLE_SESSION", "The selected Grok Bot login could not be decrypted.");
+            }
+            const { baseUrl, token, headers } = selected.descriptor;
+            if (typeof baseUrl !== "string" || !baseUrl || typeof token !== "string" || !token) {
+                throw new GrokBotGatewaySessionError("INCOMPLETE_DESCRIPTOR", "Decrypted Grok Bot gateway descriptor is incomplete.");
+            }
+            return {
+                id: selected.id,
+                label: selected.label,
+                session: {
+                    gatewayUrl: baseUrl.replace(/\/$/, ""),
+                    gatewayToken: token,
+                    headers: headers ?? {}
+                }
+            };
+        }
         function inspectGrokBotGatewaySession(options = {}) {
             if (!hasGrokBotGatewaySession(options)) {
                 return {
@@ -26216,6 +26578,7 @@ var __webpack_modules__ = {
             }
         }
         __webpack_require__.d(__webpack_exports__, {
+            Dm: ()=>loadGrokBotGatewaySelection,
             Nn: ()=>listGrokBotGatewayAccounts,
             Z2: ()=>loadGrokBotGatewaySession,
             ZN: ()=>hasGrokBotGatewaySession,
@@ -31269,6 +31632,657 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             M: USER_MACHINE_CODEX_CLAUDE_GUIDANCE
         });
     },
+    "./src/core/wear-pair.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_buffer__rspack_import_0 = __webpack_require__("node:buffer");
+        var node_crypto__rspack_import_1 = __webpack_require__("node:crypto");
+        var node_net__rspack_import_2 = __webpack_require__("node:net");
+        const PROTOCOL = "GBWP/1";
+        const MAGIC = node_buffer__rspack_import_0.Buffer.from("GBWP", "ascii");
+        const VERSION = 1;
+        const SIZES = Object.freeze({
+            publicKey: 65,
+            nonce: 16,
+            tag: 32,
+            iv: 12,
+            gcmTag: 16,
+            m1: 86,
+            m2: 113,
+            m3Overhead: 60,
+            m4: 33,
+            maxPayload: 16 * 1024,
+            maxFrame: 32 * 1024
+        });
+        const DEFAULT_TIMEOUTS = Object.freeze({
+            connectMs: 5000,
+            writeMs: 5000,
+            m2Ms: 15000,
+            m4Ms: 20000
+        });
+        const STATUS = Object.freeze({
+            ok: 0,
+            rejected: 1,
+            storage: 2
+        });
+        const PAIR_MESSAGES = Object.freeze({
+            typo: "The code has a typo (check the last character).",
+            "invalid-code": "That is not a pairing code. Type the 13 characters shown on the watch, like ABCD-EFGH-JKMN-P.",
+            unreachable: "Could not reach the watch. Check that this computer and the watch are on the same Wi-Fi network, that the " + "network does not isolate clients from each other, and (macOS) that this terminal app is allowed under " + "System Settings > Privacy & Security > Local Network. If the watch already shows a failure, generate a new code.",
+            "no-answer": "The watch did not answer (version mismatch or it is busy). Generate a new code on the watch and try again.",
+            auth: "Wrong code, or this is not your watch. Generate a new code on the watch; never reuse an old one.",
+            payload: "The session is too large or malformed for the watch.",
+            usage: "Invalid pairing request.",
+            aborted: "Pairing was cancelled."
+        });
+        const OUTCOME_MESSAGES = Object.freeze({
+            paired: "Paired. The watch stored the session.",
+            rejected: "The watch rejected the session. Generate a new code on the watch and try again.",
+            "storage-failed": "The watch could not store the session. Generate a new code on the watch and try again.",
+            unknown: "Sent; no confirmation. Check the watch screen."
+        });
+        class WearPairError extends Error {
+            constructor(category){
+                super(PAIR_MESSAGES[category] ?? "Pairing failed.");
+                this.name = "WearPairError";
+                this.category = category;
+            }
+        }
+        const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        const CODE_DATA_LENGTH = 12;
+        const CODE_INPUT_MAX = 32;
+        function codeCheckSymbol(data) {
+            const n = CODE_ALPHABET.length;
+            let factor = 2;
+            let sum = 0;
+            for(let i = data.length - 1; i >= 0; i -= 1){
+                let addend = factor * CODE_ALPHABET.indexOf(data[i]);
+                factor = factor === 2 ? 1 : 2;
+                addend = Math.floor(addend / n) + addend % n;
+                sum += addend;
+            }
+            return CODE_ALPHABET[(n - sum % n) % n];
+        }
+        function checkCode(input) {
+            if (typeof input !== "string" || input.length > CODE_INPUT_MAX) return {
+                error: "invalid-code"
+            };
+            let symbols = "";
+            for(let i = 0; i < input.length; i += 1){
+                const unit = input.charCodeAt(i);
+                if (unit > 0x7e) return {
+                    error: "invalid-code"
+                };
+                const raw = input[i];
+                if (raw === "-" || raw === " ") continue;
+                let c = raw.toUpperCase();
+                if (c === "I" || c === "L") c = "1";
+                else if (c === "O") c = "0";
+                if (!CODE_ALPHABET.includes(c)) return {
+                    error: "invalid-code"
+                };
+                symbols += c;
+            }
+            if (symbols.length !== CODE_DATA_LENGTH + 1) return {
+                error: "invalid-code"
+            };
+            if (codeCheckSymbol(symbols.slice(0, CODE_DATA_LENGTH)) !== symbols[CODE_DATA_LENGTH]) return {
+                error: "typo"
+            };
+            return {
+                code: symbols
+            };
+        }
+        function normalizeCode(input) {
+            return checkCode(input).code ?? null;
+        }
+        function isCodeData(data) {
+            if (typeof data !== "string" || data.length !== CODE_DATA_LENGTH) return false;
+            for (const c of data)if (!CODE_ALPHABET.includes(c)) return false;
+            return true;
+        }
+        const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])";
+        const TARGET_PATTERN = new RegExp(`^${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}:([1-9][0-9]{0,4})$`);
+        function parseTarget(text, { allowLoopback = false } = {}) {
+            if (typeof text !== "string" || text.length > 21) return null;
+            const match = TARGET_PATTERN.exec(text);
+            if (!match) return null;
+            const octets = match.slice(1, 5).map(Number);
+            const port = Number(match[5]);
+            if (port < 1024 || port > 65535) return null;
+            const [a, b] = octets;
+            const allowed = a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 127 && allowLoopback === true;
+            if (!allowed) return null;
+            const host = octets.join(".");
+            return {
+                host,
+                port,
+                target: `${host}:${port}`
+            };
+        }
+        const MAX_TOKEN_CHARS = 4096;
+        const MAX_HEADERS = 8;
+        const MAX_LABEL_UNITS = 64;
+        const HEADER_NAME = /^x-[a-z0-9-]{1,64}$/;
+        const FORBIDDEN_HEADERS = new Set([
+            "authorization",
+            "proxy-authorization",
+            "cookie",
+            "host",
+            "content-type"
+        ]);
+        const SPACE_SEPARATOR = /^\p{Zs}$/u;
+        function isKotlinWhitespace(unit) {
+            const c = unit.charCodeAt(0);
+            return c >= 0x09 && c <= 0x0d || c >= 0x1c && c <= 0x1f || c === 0x2028 || c === 0x2029 || SPACE_SEPARATOR.test(unit);
+        }
+        function kotlinTrim(value) {
+            let start = 0;
+            let end = value.length;
+            while(start < end && isKotlinWhitespace(value[start]))start += 1;
+            while(end > start && isKotlinWhitespace(value[end - 1]))end -= 1;
+            return value.slice(start, end);
+        }
+        const URL_PARTS = /^([^:/?#]+):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/;
+        const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/;
+        const PATH = /^(?:[A-Za-z0-9\-_.!~*'();/:@&=+$,]|%[0-9A-Fa-f]{2})*$/;
+        const URIC = /^(?:[A-Za-z0-9\-_.!~*'();/?:@&=+$,[\]]|%[0-9A-Fa-f]{2})*$/;
+        const HOST_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+        function watchGatewayUrl(url) {
+            const parts = URL_PARTS.exec(url);
+            if (!parts) return null;
+            const [, scheme, authority, path, query, fragment] = parts;
+            if (!SCHEME.test(scheme) || !PATH.test(path)) return null;
+            if (query !== undefined && !URIC.test(query)) return null;
+            if (fragment !== undefined && !URIC.test(fragment)) return null;
+            if (authority.includes("@")) return null;
+            const hostPort = /^([^:]+)(?::([0-9]*))?$/.exec(authority);
+            if (!hostPort) return null;
+            const [, host, port] = hostPort;
+            const labels = host.split(".");
+            if (!labels.every((label)=>HOST_LABEL.test(label))) return null;
+            if (labels.length > 1 && !/^[A-Za-z]/.test(labels[labels.length - 1])) return null;
+            if (port) {
+                const number = Number(port);
+                if (!(number >= 1 && number <= 65535)) return null;
+            }
+            if (scheme.toLowerCase() !== "https") return null;
+            const h = host.toLowerCase();
+            const allowed = h === "cursor.sh" || h === "cursor.com" || h.endsWith(".cursor.sh") || h.endsWith(".cursor.com") || h.endsWith(".cursorvm.com");
+            if (!allowed) return null;
+            return url.replace(/\/+$/, "");
+        }
+        function isVisibleAscii(value) {
+            for(let i = 0; i < value.length; i += 1){
+                const c = value.charCodeAt(i);
+                if (c < 0x21 || c > 0x7e) return false;
+            }
+            return true;
+        }
+        function isValidHeaderValue(value) {
+            if (value.length === 0 || value.length > MAX_TOKEN_CHARS) return false;
+            for(let i = 0; i < value.length; i += 1){
+                const c = value.charCodeAt(i);
+                if (c !== 0x09 && (c < 0x20 || c > 0x7e)) return false;
+            }
+            const first = value[0];
+            const last = value[value.length - 1];
+            return first !== " " && first !== "\t" && last !== " " && last !== "\t";
+        }
+        function truncateLabel(label, max = MAX_LABEL_UNITS) {
+            let out = "";
+            for (const codePoint of label){
+                if (out.length + codePoint.length > max) break;
+                out += codePoint;
+            }
+            return out;
+        }
+        function isPlainObject(value) {
+            return value !== null && typeof value === "object" && !Array.isArray(value);
+        }
+        function preflightSession(session) {
+            if (!isPlainObject(session)) return {
+                ok: false,
+                reason: "shape"
+            };
+            const { gatewayUrl, gatewayToken } = session;
+            const rawHeaders = session.headers === undefined ? {} : session.headers;
+            const rawLabel = session.label === undefined ? "" : session.label;
+            if (typeof gatewayUrl !== "string" || typeof gatewayToken !== "string" || typeof rawLabel !== "string") {
+                return {
+                    ok: false,
+                    reason: "shape"
+                };
+            }
+            if (!isPlainObject(rawHeaders)) return {
+                ok: false,
+                reason: "shape"
+            };
+            const headerEntries = Object.entries(rawHeaders);
+            if (headerEntries.some(([, value])=>typeof value !== "string")) return {
+                ok: false,
+                reason: "shape"
+            };
+            const url = watchGatewayUrl(kotlinTrim(gatewayUrl));
+            if (url === null) return {
+                ok: false,
+                reason: "url"
+            };
+            const token = kotlinTrim(gatewayToken);
+            if (token.length === 0 || token.length > MAX_TOKEN_CHARS || !isVisibleAscii(token)) return {
+                ok: false,
+                reason: "token"
+            };
+            if (headerEntries.length > MAX_HEADERS) return {
+                ok: false,
+                reason: "headers"
+            };
+            const headers = new Map();
+            for (const [key, value] of headerEntries){
+                const name = kotlinTrim(key).toLowerCase();
+                if (FORBIDDEN_HEADERS.has(name) || !HEADER_NAME.test(name)) return {
+                    ok: false,
+                    reason: "headers"
+                };
+                if (!isValidHeaderValue(value)) return {
+                    ok: false,
+                    reason: "headers"
+                };
+                headers.set(name, value);
+            }
+            const normalized = {
+                gatewayUrl: url,
+                gatewayToken: token,
+                headers: Object.fromEntries(headers),
+                label: truncateLabel(rawLabel)
+            };
+            const payload = buildSessionPayload(normalized);
+            if (payload.length > SIZES.maxPayload) return {
+                ok: false,
+                reason: "size"
+            };
+            return {
+                ok: true,
+                session: normalized,
+                payload
+            };
+        }
+        function buildSessionPayload({ gatewayUrl, gatewayToken, headers, label }) {
+            return node_buffer__rspack_import_0.Buffer.from(JSON.stringify({
+                gatewayUrl,
+                gatewayToken,
+                headers,
+                label
+            }), "utf8");
+        }
+        const P256_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
+        const P256_B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604bn;
+        function toBigInt(bytes) {
+            return BigInt("0x" + node_buffer__rspack_import_0.Buffer.from(bytes).toString("hex"));
+        }
+        function isValidPublicKey(bytes) {
+            if (!(bytes instanceof Uint8Array) || bytes.length !== SIZES.publicKey || bytes[0] !== 0x04) return false;
+            const x = toBigInt(bytes.subarray(1, 33));
+            const y = toBigInt(bytes.subarray(33, 65));
+            if (x >= P256_P || y >= P256_P) return false;
+            const lhs = y * y % P256_P;
+            const rhs = (x * x % P256_P * x % P256_P + (P256_P - 3n) * x + P256_B) % P256_P;
+            return lhs === rhs;
+        }
+        function sha256(...parts) {
+            const hash = node_crypto__rspack_import_1["default"].createHash("sha256");
+            for (const part of parts)hash.update(part);
+            return hash.digest();
+        }
+        function hmac(key, ...parts) {
+            const mac = node_crypto__rspack_import_1["default"].createHmac("sha256", key);
+            for (const part of parts)mac.update(part);
+            return mac.digest();
+        }
+        function hkdfExtract(salt, ikm) {
+            return hmac(salt.length === 0 ? node_buffer__rspack_import_0.Buffer.alloc(32) : salt, ikm);
+        }
+        function hkdfExpand(prk, info, length) {
+            if (!Number.isInteger(length) || length < 1 || length > 255 * 32) throw new RangeError("HKDF length");
+            const out = node_buffer__rspack_import_0.Buffer.alloc(length);
+            let block = node_buffer__rspack_import_0.Buffer.alloc(0);
+            for(let offset = 0, counter = 1; offset < length; offset += 32, counter += 1){
+                block = hmac(prk, block, info, node_buffer__rspack_import_0.Buffer.from([
+                    counter
+                ]));
+                block.copy(out, offset, 0, Math.min(32, length - offset));
+            }
+            return out;
+        }
+        function transcriptHash(m1, watchPublic, watchNonce) {
+            return sha256(m1, watchPublic, watchNonce);
+        }
+        function deriveKeys(sharedSecret, codeData, th) {
+            const prk = hkdfExtract(node_buffer__rspack_import_0.Buffer.from("GBWP1 code " + codeData, "ascii"), sharedSecret);
+            const expand = (label)=>hkdfExpand(prk, node_buffer__rspack_import_0.Buffer.concat([
+                    node_buffer__rspack_import_0.Buffer.from("GBWP1 " + label, "ascii"),
+                    th
+                ]), 32);
+            const keys = {
+                tagWatch: expand("tag watch"),
+                tagComputer: expand("tag computer"),
+                enc: expand("enc"),
+                ack: expand("ack")
+            };
+            prk.fill(0);
+            return keys;
+        }
+        const tagWatch = (keys, th)=>hmac(keys.tagWatch, node_buffer__rspack_import_0.Buffer.from("W"), th);
+        const tagComputer = (keys, th)=>hmac(keys.tagComputer, node_buffer__rspack_import_0.Buffer.from("C"), th);
+        const tagAck = (keys, th, m3, status)=>hmac(keys.ack, Buffer.from("A"), th, sha256(m3), Buffer.from([
+                status
+            ]));
+        function constantTimeEqual(a, b) {
+            return a.length === b.length && node_crypto__rspack_import_1["default"].timingSafeEqual(a, b);
+        }
+        function frame(body) {
+            if (body.length < 1 || body.length > SIZES.maxFrame) throw new RangeError("frame length");
+            const header = node_buffer__rspack_import_0.Buffer.alloc(2);
+            header.writeUInt16BE(body.length, 0);
+            return node_buffer__rspack_import_0.Buffer.concat([
+                header,
+                body
+            ]);
+        }
+        function leftPad32(bytes) {
+            if (bytes.length === 32) return node_buffer__rspack_import_0.Buffer.from(bytes);
+            if (bytes.length > 32) throw new RangeError("shared secret length");
+            return node_buffer__rspack_import_0.Buffer.concat([
+                node_buffer__rspack_import_0.Buffer.alloc(32 - bytes.length),
+                bytes
+            ]);
+        }
+        function wipeKeys(keys) {
+            if (!keys) return;
+            for (const key of Object.values(keys))key.fill(0);
+        }
+        class ClientHandshake {
+            #codeData;
+            #ecdh;
+            #m1;
+            #th = null;
+            #keys = null;
+            #m3Hash = null;
+            #state = "m1";
+            constructor({ codeData, privateKey, nonce }){
+                if (!isCodeData(codeData)) throw new TypeError("code data must be 12 pairing-code symbols");
+                this.#codeData = codeData;
+                this.#ecdh = node_crypto__rspack_import_1["default"].createECDH("prime256v1");
+                if (privateKey !== undefined) this.#ecdh.setPrivateKey(node_buffer__rspack_import_0.Buffer.from(privateKey));
+                else this.#ecdh.generateKeys();
+                const ownNonce = nonce === undefined ? node_crypto__rspack_import_1["default"].randomBytes(SIZES.nonce) : node_buffer__rspack_import_0.Buffer.from(nonce);
+                if (ownNonce.length !== SIZES.nonce) throw new RangeError("nonce length");
+                const publicKey = this.#ecdh.getPublicKey(null, "uncompressed");
+                this.#m1 = node_buffer__rspack_import_0.Buffer.concat([
+                    MAGIC,
+                    node_buffer__rspack_import_0.Buffer.from([
+                        VERSION
+                    ]),
+                    publicKey,
+                    ownNonce
+                ]);
+            }
+            m1() {
+                return node_buffer__rspack_import_0.Buffer.from(this.#m1);
+            }
+            acceptM2(body) {
+                if (this.#state !== "m1") throw new Error("M2 out of order");
+                if (!(body instanceof Uint8Array) || body.length !== SIZES.m2) throw new WearPairError("no-answer");
+                const watchPublic = node_buffer__rspack_import_0.Buffer.from(body.subarray(0, 65));
+                const watchNonce = node_buffer__rspack_import_0.Buffer.from(body.subarray(65, 81));
+                const tag = node_buffer__rspack_import_0.Buffer.from(body.subarray(81, 113));
+                if (!isValidPublicKey(watchPublic)) {
+                    this.#state = "failed";
+                    throw new WearPairError("auth");
+                }
+                let shared;
+                try {
+                    shared = leftPad32(this.#ecdh.computeSecret(watchPublic));
+                } catch  {
+                    this.#state = "failed";
+                    throw new WearPairError("auth");
+                }
+                const th = transcriptHash(this.#m1, watchPublic, watchNonce);
+                const keys = deriveKeys(shared, this.#codeData, th);
+                shared.fill(0);
+                if (!constantTimeEqual(tag, tagWatch(keys, th))) {
+                    wipeKeys(keys);
+                    this.#state = "failed";
+                    throw new WearPairError("auth");
+                }
+                this.#th = th;
+                this.#keys = keys;
+                this.#state = "m2";
+            }
+            sealM3(payload, { iv } = {}) {
+                if (this.#state !== "m2") throw new Error("M3 before a verified M2");
+                if (!(payload instanceof Uint8Array) || payload.length < 1 || payload.length > SIZES.maxPayload) {
+                    throw new WearPairError("payload");
+                }
+                const nonce = iv === undefined ? node_crypto__rspack_import_1["default"].randomBytes(SIZES.iv) : node_buffer__rspack_import_0.Buffer.from(iv);
+                if (nonce.length !== SIZES.iv) throw new RangeError("iv length");
+                const cipher = node_crypto__rspack_import_1["default"].createCipheriv("aes-256-gcm", this.#keys.enc, nonce, {
+                    authTagLength: SIZES.gcmTag
+                });
+                cipher.setAAD(this.#th);
+                const ciphertext = node_buffer__rspack_import_0.Buffer.concat([
+                    cipher.update(payload),
+                    cipher.final()
+                ]);
+                const m3 = node_buffer__rspack_import_0.Buffer.concat([
+                    tagComputer(this.#keys, this.#th),
+                    nonce,
+                    ciphertext,
+                    cipher.getAuthTag()
+                ]);
+                this.#keys.enc.fill(0);
+                this.#m3Hash = sha256(m3);
+                this.#state = "m3";
+                return m3;
+            }
+            openM4(body) {
+                if (this.#state !== "m3") throw new Error("M4 before M3");
+                this.#state = "done";
+                if (!(body instanceof Uint8Array) || body.length !== SIZES.m4) return null;
+                const status = body[0];
+                const expected = hmac(this.#keys.ack, node_buffer__rspack_import_0.Buffer.from("A"), this.#th, this.#m3Hash, node_buffer__rspack_import_0.Buffer.from([
+                    status
+                ]));
+                if (!constantTimeEqual(node_buffer__rspack_import_0.Buffer.from(body.subarray(1)), expected)) return null;
+                return status === STATUS.ok || status === STATUS.rejected || status === STATUS.storage ? status : null;
+            }
+            wipe() {
+                wipeKeys(this.#keys);
+                this.#keys = null;
+                this.#ecdh = null;
+                this.#state = "done";
+            }
+        }
+        class FrameReader {
+            #socket;
+            #buffer = node_buffer__rspack_import_0.Buffer.alloc(0);
+            #limit;
+            #ended = false;
+            #overflow = false;
+            #wake = null;
+            constructor(socket, limit){
+                this.#socket = socket;
+                this.#limit = limit;
+                socket.on("data", (chunk)=>{
+                    if (this.#overflow) return;
+                    if (this.#buffer.length + chunk.length > this.#limit) {
+                        this.#overflow = true;
+                        this.#buffer = node_buffer__rspack_import_0.Buffer.alloc(0);
+                    } else {
+                        this.#buffer = node_buffer__rspack_import_0.Buffer.concat([
+                            this.#buffer,
+                            chunk
+                        ]);
+                    }
+                    this.#wake?.();
+                });
+                const ended = ()=>{
+                    this.#ended = true;
+                    this.#wake?.();
+                };
+                socket.on("end", ended);
+                socket.on("close", ended);
+                socket.on("error", ended);
+            }
+            read(size, ms) {
+                this.#limit = 2 + size;
+                return new Promise((resolve, reject)=>{
+                    let timer;
+                    const finish = (error, body)=>{
+                        clearTimeout(timer);
+                        this.#wake = null;
+                        if (error) reject(error);
+                        else resolve(body);
+                    };
+                    const check = ()=>{
+                        if (this.#overflow) return finish(new Error("frame"));
+                        const buffered = this.#buffer;
+                        if (buffered.length >= 2 && buffered.readUInt16BE(0) !== size) return finish(new Error("frame"));
+                        if (buffered.length === 2 + size) {
+                            this.#buffer = node_buffer__rspack_import_0.Buffer.alloc(0);
+                            return finish(null, node_buffer__rspack_import_0.Buffer.from(buffered.subarray(2)));
+                        }
+                        if (this.#ended) return finish(new Error("closed"));
+                        return undefined;
+                    };
+                    timer = setTimeout(()=>finish(new Error("deadline")), ms);
+                    this.#wake = check;
+                    check();
+                });
+            }
+            expect(size) {
+                this.#limit = 2 + size;
+            }
+        }
+        function connect(host, port, ms) {
+            return new Promise((resolve, reject)=>{
+                const socket = node_net__rspack_import_2["default"].connect({
+                    host,
+                    port,
+                    family: 4,
+                    noDelay: true
+                });
+                const timer = setTimeout(()=>{
+                    socket.destroy();
+                    reject(new Error("deadline"));
+                }, ms);
+                socket.once("connect", ()=>{
+                    clearTimeout(timer);
+                    resolve(socket);
+                });
+                socket.once("error", ()=>{
+                    clearTimeout(timer);
+                    socket.destroy();
+                    reject(new Error("connect"));
+                });
+            });
+        }
+        function write(socket, bytes, ms) {
+            return new Promise((resolve, reject)=>{
+                const timer = setTimeout(()=>reject(new Error("deadline")), ms);
+                socket.write(bytes, (error)=>{
+                    clearTimeout(timer);
+                    if (error) reject(new Error("write"));
+                    else resolve();
+                });
+            });
+        }
+        function outcomeOf(status) {
+            if (status === STATUS.ok) return "paired";
+            if (status === STATUS.rejected) return "rejected";
+            if (status === STATUS.storage) return "storage-failed";
+            return "unknown";
+        }
+        async function pairWithWatch({ host, port, code, payload, timeouts = {}, signal }) {
+            const checked = checkCode(code);
+            if (checked.error) throw new WearPairError(checked.error);
+            if (typeof host !== "string" || node_net__rspack_import_2["default"].isIPv4(host) === false || !Number.isInteger(port) || port < 1 || port > 65535) {
+                throw new WearPairError("usage");
+            }
+            if (!(payload instanceof Uint8Array) || payload.length < 1 || payload.length > SIZES.maxPayload) {
+                throw new WearPairError("payload");
+            }
+            if (signal?.aborted) throw new WearPairError("aborted");
+            const limits = {
+                ...DEFAULT_TIMEOUTS,
+                ...timeouts
+            };
+            const handshake = new ClientHandshake({
+                codeData: checked.code.slice(0, CODE_DATA_LENGTH)
+            });
+            let socket;
+            const onAbort = ()=>socket?.destroy();
+            signal?.addEventListener("abort", onAbort, {
+                once: true
+            });
+            const fail = (category)=>new WearPairError(signal?.aborted ? "aborted" : category);
+            try {
+                try {
+                    socket = await connect(host, port, limits.connectMs);
+                } catch  {
+                    throw fail("unreachable");
+                }
+                if (signal?.aborted) throw fail("aborted");
+                const reader = new FrameReader(socket, 2 + SIZES.m2);
+                try {
+                    await write(socket, frame(handshake.m1()), limits.writeMs);
+                } catch  {
+                    throw fail("no-answer");
+                }
+                let m2;
+                try {
+                    m2 = await reader.read(SIZES.m2, limits.m2Ms);
+                } catch  {
+                    throw fail("no-answer");
+                }
+                handshake.acceptM2(m2);
+                reader.expect(SIZES.m4);
+                const m3 = handshake.sealM3(payload);
+                try {
+                    await write(socket, frame(m3), limits.writeMs);
+                } catch  {
+                    if (signal?.aborted) throw fail("aborted");
+                    return {
+                        outcome: "unknown"
+                    };
+                }
+                let m4;
+                try {
+                    m4 = await reader.read(SIZES.m4, limits.m4Ms);
+                } catch  {
+                    if (signal?.aborted) throw fail("aborted");
+                    return {
+                        outcome: "unknown"
+                    };
+                }
+                return {
+                    outcome: outcomeOf(handshake.openM4(m4))
+                };
+            } finally{
+                signal?.removeEventListener("abort", onAbort);
+                socket?.destroy();
+                handshake.wipe();
+            }
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Eh: ()=>WearPairError,
+            hu: ()=>parseTarget,
+            oN: ()=>pairWithWatch,
+            q7: ()=>checkCode,
+            wF: ()=>preflightSession
+        }, {
+            EM: PAIR_MESSAGES,
+            cT: OUTCOME_MESSAGES
+        });
+    },
     "./package.json" (module) {
         module.exports = {
             "rE": "0.11.2"
@@ -31324,9 +32338,9 @@ function __webpack_require__(moduleId) {
 var __webpack_exports__ = {};
 var node_worker_threads__rspack_import_0 = __webpack_require__("node:worker_threads");
 var react__rspack_import_1 = __webpack_require__("./node_modules/react/react.react-server.js");
-var _agent_bundle_runtime_flight_server__rspack_import_49 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
-var _agent_bundle_runtime__rspack_import_47 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-var _agent_bundle_runtime__rspack_import_48 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+var _agent_bundle_runtime_flight_server__rspack_import_50 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
+var _agent_bundle_runtime__rspack_import_48 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+var _agent_bundle_runtime__rspack_import_49 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
 var node_url__rspack_import_2 = __webpack_require__("node:url");
 var _src_cli_accounts_tsx__rspack_import_3 = __webpack_require__("./src/cli/accounts.tsx");
 var _src_cli_approvals_list_tsx__rspack_import_4 = __webpack_require__("./src/cli/approvals/list.tsx");
@@ -31372,6 +32386,7 @@ var _src_cli_skills_add_tsx__rspack_import_43 = __webpack_require__("./src/cli/s
 var _src_cli_skills_list_tsx__rspack_import_44 = __webpack_require__("./src/cli/skills/list.tsx");
 var _src_cli_skills_remove_tsx__rspack_import_45 = __webpack_require__("./src/cli/skills/remove.tsx");
 var _src_cli_thread_tsx__rspack_import_46 = __webpack_require__("./src/cli/thread.tsx");
+var _src_cli_wear_pair_tsx__rspack_import_47 = __webpack_require__("./src/cli/wear/pair.tsx");
 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_3, 'default'), _src_cli_accounts_tsx__rspack_import_3);
 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_4, 'default'), _src_cli_approvals_list_tsx__rspack_import_4);
 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_5, 'default'), _src_cli_approvals_respond_tsx__rspack_import_5);
@@ -31416,7 +32431,8 @@ const route40 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_im
 const route41 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_44, 'default'), _src_cli_skills_list_tsx__rspack_import_44);
 const route42 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_45, 'default'), _src_cli_skills_remove_tsx__rspack_import_45);
 const route43 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_46, 'default'), _src_cli_thread_tsx__rspack_import_46);
-const pluginRoot = (0, _agent_bundle_runtime__rspack_import_47.E7)({
+const route44 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_47, 'default'), _src_cli_wear_pair_tsx__rspack_import_47);
+const pluginRoot = (0, _agent_bundle_runtime__rspack_import_48.E7)({
     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
     stateAnchor: 'user-data'
 });
@@ -31695,6 +32711,12 @@ const routes = Object.freeze({
         kind: "cli",
         name: "thread",
         module: route43
+    }),
+    "cli:wear/pair": Object.freeze({
+        id: "cli:wear/pair",
+        kind: "cli",
+        name: "wear pair",
+        module: route44
     })
 });
 const requests = new Map();
@@ -31729,18 +32751,18 @@ const render = async (message)=>{
     };
     try {
         const cwd = process.cwd();
-        await (0, _agent_bundle_runtime__rspack_import_48.iC)({
+        await (0, _agent_bundle_runtime__rspack_import_49.iC)({
             capabilities: {
-                command: (0, _agent_bundle_runtime__rspack_import_48.hU)(),
-                filesystem: (0, _agent_bundle_runtime__rspack_import_48.hU)(),
-                network: (0, _agent_bundle_runtime__rspack_import_48.hU)(),
-                projectRoot: (0, _agent_bundle_runtime__rspack_import_48.qC)({
+                command: (0, _agent_bundle_runtime__rspack_import_49.hU)(),
+                filesystem: (0, _agent_bundle_runtime__rspack_import_49.hU)(),
+                network: (0, _agent_bundle_runtime__rspack_import_49.hU)(),
+                projectRoot: (0, _agent_bundle_runtime__rspack_import_49.qC)({
                     root: cwd
                 }, 'derived')
             },
-            host: (0, _agent_bundle_runtime__rspack_import_48.hU)('unsupported-surface'),
+            host: (0, _agent_bundle_runtime__rspack_import_49.hU)('unsupported-surface'),
             invocation: message.request,
-            lineage: (0, _agent_bundle_runtime__rspack_import_48.hU)('unsupported-surface'),
+            lineage: (0, _agent_bundle_runtime__rspack_import_49.hU)('unsupported-surface'),
             plugin: pluginRoot.identity,
             progress: {
                 report: async (update)=>{
@@ -31753,8 +32775,8 @@ const render = async (message)=>{
             },
             process: processHit,
             signal: controller.signal,
-            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_48.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_48.qC)(message.terminal, 'native'),
-            workspace: (0, _agent_bundle_runtime__rspack_import_48.qC)({
+            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_49.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_49.qC)(message.terminal, 'native'),
+            workspace: (0, _agent_bundle_runtime__rspack_import_49.qC)({
                 root: cwd
             }, 'derived')
         }, async ()=>{
@@ -31763,7 +32785,7 @@ const render = async (message)=>{
                 type: 'observed-render-start'
             });
             const renderStartedAt = performance.now();
-            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_49.y)(composeLayouts(observedRoute, {
+            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_50.y)(composeLayouts(observedRoute, {
                 ...message.props,
                 signal: controller.signal
             }, controller.signal), {

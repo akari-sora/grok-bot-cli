@@ -122,6 +122,41 @@ gbot thread Researcher --after "<cursor>" --json
 
 Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. The normalized `role` is `unknown` unless the entry says `user` or `assistant`. That is still a reply. Do not treat `unknown` as a failed send.
 
+### Pair a Wear OS watch (`gbot wear pair`)
+
+Sends the selected saved login's gateway session (gateway URL, token, routing headers, and the login label) to the grok-bot-watch Wear OS app on the same Wi-Fi, over the GBWP/1 pairing channel. This is provisioning from your computer, not a sign-in: the watch then uses a session the Grok Bot desktop app was issued, against the same undocumented gateway. When that session expires, pair again.
+
+On the watch, choose 「從電腦配對」 on the Connect screen. It shows a code like `ABCD-EFGH-JKMN-P` and an address. In a terminal on the same network:
+
+```sh
+gbot wear pair 192.168.1.23:40123
+gbot wear pair 192.168.1.23:40123 --account "<label>" --json
+```
+
+Type the code at the prompt. Input is hidden (echo off), at most 32 characters; Enter submits, Ctrl-C cancels. Case, dashes and spaces do not matter, and `I`/`L` read as `1`, `O` as `0`.
+
+- Address: the dotted-decimal IPv4 address and port the watch shows (port 1024–65535) in 10/8, 172.16/12, 192.168/16, 100.64/10 or 169.254/16. No host names, no IPv6.
+- Login: one saved login is used as is. With several, `--account` (label, id, or a unique id prefix of 8+ hex digits) is required. `GBOT_ACCOUNT` is ignored here, so an exported default never decides what leaves the computer.
+- Before connecting, `gbot` checks the last character of the code (a typo is reported and does not use up the code) and checks the session with the watch's own import rules (https on a Cursor host, a visible-ASCII token, at most 8 `x-` routing headers, at most 16 KiB). It then prints only the login label and the address.
+- It never prints the token, routing headers, gateway host or the code. The code is never in the command line, an environment value, shell history, output or an error: the `gbot` wrapper writes it to a 0600 file in a fresh 0700 temporary directory and passes only that path to the worker, which reads and deletes the file before connecting. The wrapper removes the directory on exit, on errors, on Ctrl-C and on SIGTERM. A SIGKILL or a power loss between the prompt and that read can leave the file in the temporary directory.
+- The 60-bit code is what authenticates the channel (ECDH P-256, HKDF-SHA256, HMAC-SHA256 tags, AES-256-GCM). The session is sent only after the watch proves it knows the code, and it is encrypted to that handshake. Never reuse a code: after any failure, generate a new one on the watch. The check character catches any single wrong character and any swap of two neighbours except `0`↔`Z`; such a swap is caught by the watch instead (wrong code).
+- There are no retries. Deadlines: connect 5 s, the watch's answer within 15 s, its receipt within 20 s.
+
+`--json` prints `{ "account", "id", "target", "outcome", "exitCode" }`, where `outcome` is `paired`, `rejected`, `storage-failed` or `unknown`. A failure prints `{ "category", "error", "exitCode" }` with a fixed message. `exitCode` is part of the value because the CLI framework takes the exit code from it.
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| 0 | Paired. | — |
+| 1 | The login could not be read, the watch would reject this session (nothing was sent, the code is still valid), or an internal error. | `gbot doctor --account "<label>"`; sign in again in the Grok Bot app. |
+| 2 | Usage: bad address, a typo in the code, not a code, several logins without `--account`, or not run in a terminal. | Fix the input. A typo does not use up the code. |
+| 3 | The watch is unreachable. | Same Wi-Fi? Guest networks and some routers isolate clients. On macOS, allow this terminal app under System Settings > Privacy & Security > Local Network. Generate a new code if the watch already shows a failure. |
+| 4 | Wrong code, not your watch, or the watch did not answer. | Generate a new code on the watch. Never reuse an old one. |
+| 5 | The watch rejected or could not store the session. | Generate a new code and try again. |
+| 6 | Sent, but no confirmation arrived. | Check the watch screen. |
+| 130 | Cancelled. | — |
+
+For tests only, `--code <code>` and `GBOT_TEST_KEYCHAIN_PASSWORD` are honoured when `GROK_BOT_TEST=1`. In test mode (`GROK_BOT_TEST` or `NODE_ENV=test`) `wear pair` never reads the Keychain, `secret-tool` or DPAPI, and loopback addresses are allowed. `src/core/wear-pair.js` imports Node built-ins only, because the watch repository vendors it for a cross-language test. The known-answer vectors in `test/fixtures/` are copied from the watch repository; `test/fixtures/wear-pair-vectors.sha256` records their source and SHA-256.
+
 ### Exit codes and common errors
 
 | Code | Meaning | What to do |
@@ -150,6 +185,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 ### Privacy
 
 - `gbot` talks only to the Cursor backend and the Grok Bot gateway URL the app saved (or `GROK_BOT_GATEWAY_URL`). It sends no telemetry.
+- `gbot wear pair` also connects to the watch address you type, on your local network, and sends it the selected login's gateway session, encrypted to that pairing. Nothing else does.
 - It reads the Grok Bot app's encrypted gateway descriptor and decrypts it with the OS secret store (Keychain, `secret-tool`, or DPAPI). It never writes them and never prints tokens.
 - It writes nothing unless you turn history on. `GROK_BOT_HISTORY=on` appends plain-text messages to `~/.grok-bot-cli/history.jsonl` (or `GROK_BOT_HISTORY_DIR`). Delete that file to remove it.
 - Uninstalling the package leaves the app login untouched; sign out in the Grok Bot app to remove it.
@@ -307,6 +343,41 @@ gbot thread Researcher --after "<cursor>" --json
 
 機器人回覆常常是 `kind: "send-message"`、`message.type: "text"`。除非項目寫明 `user` 或 `assistant`，正規化後的 `role` 會是 `unknown`。那仍然是回覆。不要把 `unknown` 當成送出失敗。
 
+### 配對 Wear OS 手錶（`gbot wear pair`）
+
+把選定登入的 gateway 工作階段（gateway 網址、token、路由 header 與登入標籤）經 GBWP/1 配對通道送到同一個 Wi-Fi 上的 grok-bot-watch Wear OS app。這是從電腦佈建，不是登入：手錶之後用的是 Grok Bot 桌面版拿到的工作階段，連的是同一個未公開的 gateway。工作階段過期時，再配對一次。
+
+在手錶的連線畫面選「從電腦配對」。它會顯示像 `ABCD-EFGH-JKMN-P` 的配對碼和一個位址。在同一個網路上的終端機執行：
+
+```sh
+gbot wear pair 192.168.1.23:40123
+gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
+```
+
+在提示處輸入配對碼。輸入不會顯示（echo 關閉），最多 32 個字元；Enter 送出，Ctrl-C 取消。大小寫、連字號和空白不影響，`I`／`L` 當成 `1`，`O` 當成 `0`。
+
+- 位址：手錶顯示的十進位 IPv4 位址和連接埠（1024–65535），限 10/8、172.16/12、192.168/16、100.64/10 或 169.254/16。不接受主機名稱，也不接受 IPv6。
+- 登入：只有一個已存登入時直接使用。有多個時必須給 `--account`（標籤、id，或 8 位以上十六進位的唯一 id 前綴）。這個命令忽略 `GBOT_ACCOUNT`，避免 export 的預設值決定什麼東西離開電腦。
+- 連線前，`gbot` 會檢查配對碼最後一個字元（打錯會直接提示，不會用掉這組碼），並用手錶自己的匯入規則檢查工作階段（Cursor 主機上的 https、可見 ASCII 的 token、最多 8 個 `x-` 路由 header、最多 16 KiB）。之後只印出登入標籤和位址。
+- 它不印 token、路由 header、gateway 主機或配對碼。配對碼不會出現在命令列、環境變數值、shell 歷史、輸出或錯誤裡：`gbot` wrapper 把它寫進新建 0700 暫存目錄裡的 0600 檔案，只把路徑交給 worker；worker 在連線前讀取並刪除那個檔案。wrapper 在結束、錯誤、Ctrl-C 與 SIGTERM 時都會刪掉那個目錄。若在輸入完到讀取之間遇到 SIGKILL 或斷電，檔案可能留在暫存目錄裡。
+- 通道靠 60 位元的配對碼驗證（ECDH P-256、HKDF-SHA256、HMAC-SHA256 標籤、AES-256-GCM）。手錶先證明它知道配對碼，工作階段才會送出，而且以這次交握的金鑰加密。不要重用配對碼：任何失敗後都在手錶上產生新的碼。檢查字元能抓到任何一個打錯的字元，以及任何兩個相鄰字元互換，唯一例外是 `0`↔`Z`；這種互換會在手錶端失敗（配對碼錯誤）。
+- 不會自動重試。期限：連線 5 秒，手錶回應 15 秒內，回條 20 秒內。
+
+`--json` 印出 `{ "account", "id", "target", "outcome", "exitCode" }`，`outcome` 是 `paired`、`rejected`、`storage-failed` 或 `unknown`。失敗時印出 `{ "category", "error", "exitCode" }`，訊息是固定的。`exitCode` 放在值裡，是因為 CLI 框架從那裡取結束碼。
+
+| 結束碼 | 意義 | 怎麼做 |
+| --- | --- | --- |
+| 0 | 已配對。 | — |
+| 1 | 讀不到登入、手錶會拒收這個工作階段（什麼都沒送出，配對碼仍有效），或內部錯誤。 | `gbot doctor --account "<標籤>"`；在 Grok Bot app 重新登入。 |
+| 2 | 用法錯誤：位址不對、配對碼打錯、不是配對碼、多個登入卻沒給 `--account`，或不是在終端機執行。 | 修正輸入。打錯字不會用掉配對碼。 |
+| 3 | 連不到手錶。 | 是同一個 Wi-Fi 嗎？訪客網路和部分路由器會隔離裝置。macOS 要在「系統設定 > 隱私權與安全性 > 區域網路」允許這個終端機 app。手錶若已顯示失敗，產生新的碼。 |
+| 4 | 配對碼錯誤、不是你的手錶，或手錶沒有回應。 | 在手錶上產生新的碼。不要重用舊碼。 |
+| 5 | 手錶拒收或無法儲存工作階段。 | 產生新的碼再試一次。 |
+| 6 | 已送出，但沒有收到確認。 | 看手錶畫面。 |
+| 130 | 已取消。 | — |
+
+僅供測試：`GROK_BOT_TEST=1` 時才接受 `--code <碼>` 與 `GBOT_TEST_KEYCHAIN_PASSWORD`。測試模式（`GROK_BOT_TEST` 或 `NODE_ENV=test`）下，`wear pair` 不讀 Keychain、`secret-tool` 或 DPAPI，並允許 loopback 位址。`src/core/wear-pair.js` 只 import Node 內建模組，因為手錶 repo 會把它原樣收錄做跨語言測試。`test/fixtures/` 裡的已知答案向量複製自手錶 repo；來源與 SHA-256 記在 `test/fixtures/wear-pair-vectors.sha256`。
+
 ### 結束碼與常見錯誤
 
 | 結束碼 | 意義 | 怎麼做 |
@@ -335,6 +406,7 @@ gbot thread Researcher --after "<cursor>" --json
 ### 隱私
 
 - `gbot` 只連 Cursor 後端和 app 存下的 Grok Bot gateway 網址（或 `GROK_BOT_GATEWAY_URL`）。沒有遙測。
+- `gbot wear pair` 另外會連到你輸入的區域網路手錶位址，把選定登入的 gateway 工作階段加密後送給它。其他命令都不會。
 - 它讀 Grok Bot app 加密的 gateway descriptor，用系統的密鑰儲存（Keychain、`secret-tool` 或 DPAPI）解密。它不寫這些檔，也不印 token。
 - 除非打開歷史，否則它不寫任何檔。`GROK_BOT_HISTORY=on` 會把訊息明文附加到 `~/.grok-bot-cli/history.jsonl`（或 `GROK_BOT_HISTORY_DIR`）。刪掉那個檔就清掉了。
 - 移除套件不會動到 app 的登入；要移除登入，在 Grok Bot app 登出。

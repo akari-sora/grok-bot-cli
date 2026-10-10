@@ -1,0 +1,7 @@
+# Copied byte for byte from the grok-bot-watch repository; do not edit here. Regenerate there and copy again.
+#   gbwp1-vectors.json          <- core/pairing/src/test/resources/gbwp1-vectors.json
+#                                  (written by scripts/gen-pairing-vectors.py, Python cryptography)
+#   session-import-vectors.json <- core/auth/src/test/resources/session-import-vectors.json
+# test/wear-pair-protocol.test.js checks these SHA-256 sums.
+77baded2862cfbc526439d19a13a435b38d88ddaa4aff6cc5d051e70d988d227  gbwp1-vectors.json
+5bc2d573b84d13f85413dcedd0b4a5d2dba4ffdd15c67bdcfb514d9d235cc394  session-import-vectors.json
