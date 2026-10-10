@@ -124,6 +124,20 @@ Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. 
 
 ### Pair a Wear OS watch (`gbot wear pair`)
 
+The watch app is [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) (unofficial; download the APK from its [releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases), step-by-step install in its [install guide](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md), in Traditional Chinese).
+
+`wear pair` is on the `feat/wear-pair` branch ([MR !3](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/3)) and is not in the `v0.11.2-iml1s.3` package. Until it is merged and released, build it from a clone (Node.js 22.19.0 or newer; the Grok Bot desktop app signed in on this computer):
+
+```sh
+git clone -b feat/wear-pair https://gitlab.com/aa22396584/grok-bot-cli.git
+cd grok-bot-cli
+npm ci
+npm run build      # works without Claude Code; host validation is skipped
+npm link           # or run node bin/gbot.mjs instead of gbot
+gbot accounts                        # saved logins, no credentials
+gbot bots list --account "<label>"   # check that login still works before pairing
+```
+
 Sends the selected saved login's gateway session (gateway URL, token, routing headers, and the login label) to the grok-bot-watch Wear OS app on the same Wi-Fi, over the GBWP/1 pairing channel. This is provisioning from your computer, not a sign-in: the watch then uses a session the Grok Bot desktop app was issued, against the same undocumented gateway. When that session expires, pair again.
 
 On the watch, choose 「從電腦配對」 on the Connect screen. It shows a code like `ABCD-EFGH-JKMN-P` and an address. In a terminal on the same network:
@@ -347,6 +361,20 @@ gbot thread Researcher --after "<cursor>" --json
 機器人回覆常常是 `kind: "send-message"`、`message.type: "text"`。除非項目寫明 `user` 或 `assistant`，正規化後的 `role` 會是 `unknown`。那仍然是回覆。不要把 `unknown` 當成送出失敗。
 
 ### 配對 Wear OS 手錶（`gbot wear pair`）
+
+手錶 App 是 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear)（非官方；APK 在它的 [Releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases)，逐步安裝見它的[安裝指南](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md)）。
+
+`wear pair` 在 `feat/wear-pair` 分支（[MR !3](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/3)），`v0.11.2-iml1s.3` 套件裡沒有。合併並發布之前，請從 clone 建置（Node.js 22.19.0 以上；這台電腦已登入 Grok Bot 桌面版）：
+
+```sh
+git clone -b feat/wear-pair https://gitlab.com/aa22396584/grok-bot-cli.git
+cd grok-bot-cli
+npm ci
+npm run build      # 沒裝 Claude Code 也可以，只會略過 host 檢查
+npm link           # 或把下面的 gbot 換成 node bin/gbot.mjs
+gbot accounts                       # 列出存的登入，不印憑證
+gbot bots list --account "<標籤>"   # 配對前先確認這個登入還能用
+```
 
 把選定登入的 gateway 工作階段（gateway 網址、token、路由 header 與登入標籤）經 GBWP/1 配對通道送到同一個 Wi-Fi 上的 grok-bot-watch Wear OS app。這是從電腦佈建，不是登入：手錶之後用的是 Grok Bot 桌面版拿到的工作階段，連的是同一個未公開的 gateway。工作階段過期時，再配對一次。
 
