@@ -4,11 +4,11 @@
 [![release](https://gitlab.com/aa22396584/grok-bot-cli/-/badges/release.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, per-OS setup, privacy, troubleshooting, and the platform matrix are in [FORK.md](FORK.md). The rest of this file is the upstream README.
+This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, per-OS setup, privacy, troubleshooting, and the platform matrix are in [FORK.md](FORK.md). Pairing the [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) watch app (`gbot wear pair`) is in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair). The rest of this file is the upstream README.
 
 Unofficial: not affiliated with, endorsed by, or supported by xAI, Cursor (Anysphere), or the upstream author. It uses your own Grok Bot login and an undocumented gateway; automated use may be limited by the Grok Bot terms, so use it at your own risk. Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
-這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread、各平台設定、隱私、疑難排解與平台表見 [FORK.md](FORK.md)。以下是上游 README。
+這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread、各平台設定、隱私、疑難排解與平台表見 [FORK.md](FORK.md)。配對 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) 手錶 App（`gbot wear pair`）見 FORK.md 的「配對 Wear OS 手錶」。以下是上游 README。
 
 非官方：與 xAI、Cursor（Anysphere）或上游作者沒有關係，也沒有得到他們的背書或支援。它用你自己的 Grok Bot 登入和未公開的 gateway；自動化使用可能受 Grok Bot 條款限制，風險自負。參與開發見 [CONTRIBUTING.md](CONTRIBUTING.md)，安全問題見 [SECURITY.md](SECURITY.md)。
 
@@ -411,6 +411,10 @@ A send timeout, network failure, or HTTP 408 or 5xx leaves delivery unknown
 is also unknown rather than accepted. Do not resend automatically: read the
 target thread and verify the original message in the Grok Bot app first. A new
 CLI send uses a new client nonce, so invoking it again is not a deduplicated retry.
+The send result includes that `clientNonce`. When delivery is unknown, the CLI prints
+it and `gbot reconcile <bot> --nonce <n>`. Reconcile reads the last 200 transcript
+entries for a user entry with that exact nonce and does not send again. `delivered`
+means the entry is in the tail; `not-found-in-tail` means it was not in those entries.
 
 Plain-text transcript output handles both direct content and nested
 `message.content` / `message.text`. Use `--json` when the full structured result is

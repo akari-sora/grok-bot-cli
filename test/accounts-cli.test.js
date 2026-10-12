@@ -87,3 +87,65 @@ test("gbot accounts lists labels and doctor requires a choice", {
   assert.notEqual(chosenDoctor.grokBotAppSession.code, "AMBIGUOUS_ENTRIES");
   assert.doesNotMatch(chosen.stdout + chosen.stderr, /other-token|gateway-token/);
 });
+
+function fixtureV3() {
+  const home = mkdtempSync(join(tmpdir(), "gbot-accounts-v3-"));
+  const descriptorPath = grokBotGatewayDescriptorPath(home, "darwin", {});
+  mkdirSync(dirname(descriptorPath), { recursive: true });
+  writeFileSync(descriptorPath, JSON.stringify({
+    version: 3,
+    entries: {
+      "8b7f0d1600000000000000000000000000000000000000000000000000000001": {
+        encrypted: encryptDarwinDescriptor({
+          baseUrl: "https://box.example",
+          token: "gateway-token",
+          headers: {},
+        }),
+        savedAtMs: 1,
+      },
+      "9c8e1f2700000000000000000000000000000000000000000000000000000002": {
+        encrypted: encryptDarwinDescriptor({
+          baseUrl: "https://other.example",
+          token: "other-token",
+          headers: {},
+        }),
+        savedAtMs: 2,
+      },
+    },
+  }));
+  const env = { ...process.env, HOME: home, USERPROFILE: home, GROK_BOT_TEST: "1" };
+  delete env.GBOT_ACCOUNT;
+  for (const key of Object.keys(env)) {
+    if (/^(GROK_BOT_|CURSOR_|SAND_)/.test(key) && key !== "GROK_BOT_TEST") delete env[key];
+  }
+  return { env };
+}
+
+test("gbot accounts handles version 3 descriptor and selects by id prefix", {
+  skip: process.platform !== "darwin" && "fixture descriptors are macOS-shaped",
+}, () => {
+  const { env } = fixtureV3();
+  const listed = run(["accounts", "--json"], env);
+  assert.equal(listed.status, 0, listed.stderr);
+  const payload = JSON.parse(listed.stdout);
+  assert.deepEqual(payload.accounts.map((row) => ({ label: row.label, lastSaved: row.lastSaved })), [
+    { label: "8b7f0d1600000000000000000000000000000000000000000000000000000001", lastSaved: false },
+    { label: "9c8e1f2700000000000000000000000000000000000000000000000000000002", lastSaved: true },
+  ]);
+  assert.doesNotMatch(listed.stdout + listed.stderr, /gateway-token|other-token|box\.example/);
+
+  const ambiguous = run(["doctor", "--json"], env);
+  assert.equal(ambiguous.status, 0, ambiguous.stderr);
+  const doctor = JSON.parse(ambiguous.stdout);
+  assert.equal(doctor.grokBotAppSession.usable, false);
+  assert.match(doctor.grokBotAppSession.error, /--account <label>/);
+  assert.doesNotMatch(ambiguous.stdout, /gateway-token|other-token/);
+
+  const chosen = run(["doctor", "--account", "8b7f0d16", "--json"], env);
+  assert.equal(chosen.status, 0, chosen.stderr);
+  assert.doesNotMatch(chosen.stderr, /Unknown option/);
+  const chosenDoctor = JSON.parse(chosen.stdout);
+  assert.equal(chosenDoctor.grokBotAppSession.usable, false);
+  assert.notEqual(chosenDoctor.grokBotAppSession.code, "AMBIGUOUS_ENTRIES");
+  assert.doesNotMatch(chosen.stdout + chosen.stderr, /other-token|gateway-token/);
+});

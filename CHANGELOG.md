@@ -6,6 +6,18 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 
 ### Unreleased
 
+- `gbot wear pair <ip:port> [--account <label|id>]` sends the selected saved login's gateway session to the grok-bot-watch Wear OS app on the same network over GBWP/1 (ECDH P-256, HKDF-SHA256, AES-256-GCM, authenticated by the 60-bit code the watch shows). The code is typed at a hidden prompt and handed to the worker in a 0600 file, never in argv or an environment value. A typo in the check character is caught before any network access; the session is checked with the watch's own import rules before connecting; `GBOT_ACCOUNT` is ignored; nothing secret is printed. Exit codes 0/2/3/4/5/6 as listed in FORK.md.
+- `loadGrokBotGatewaySelection` reads the saved logins in one decrypt pass and asks the OS secret store once.
+- `wear pair` hardening after review: the wrapper refuses a production `--code` or `--code=…` anywhere on any `gbot` command line (only `wear pair` has that option) before any worker starts; an interruption or error after the session started to leave reports `unknown` (exit 6), not cancelled; an abort during connect stops at once; SIGHUP is handled like SIGTERM; unreadable saved logins (Keychain) and a test-mode secret store are reported as such; labels or ids that alias a secret are shown as `login <n>`.
+- `wear pair` review round 2: the send is recorded before M3 and nothing is sent if that record fails (exit 1); after an interrupted send the wrapper also says on stderr that the session was already sent; `login <n>` placeholders never repeat a real label or id; only logins that all fail to decrypt are reported as a secret-store problem; FORK.md lists 130/143/129 for SIGINT/SIGTERM/SIGHUP before sending.
+- Live sends are reported correctly: the cloud gateway answers `{"accepted":true}` without a `messageId`, which earlier versions reported as `delivery: "unknown"`. `accepted: true` or a string `messageId` now counts as accepted; anything else stays unknown.
+- Every send receipt and send error carries the `clientNonce` that was posted. `gbot reconcile <bot> --nonce <n>` looks for that nonce in the latest 200 transcript entries and never resends.
+- Gateway errors carry `kind` (`auth` for 401/403, `routing` for an unroutable 404, `unsupported` for `gateway/unknown-method`, `server`, `client`) and the host's `failureCode`.
+- Note: `sendPrompt` to an id that is not on the roster answers 409 but still creates an empty "New Agent" placeholder, so `send` keeps resolving the target first.
+
+### 0.11.2-iml1s.3
+
+- Grok Bot app gateway descriptor version 3 is supported using the version 2 entries layout; unknown descriptor versions continue to be rejected.
 - A first run without a Grok Bot login says to sign in to the Grok Bot app and run `gbot accounts`, instead of pointing at a macOS agents directory. `--dir` and `--files` keep the old error.
 - The unit suite passes on Node 24: the Windows-collection test asks Node for TAP output.
 - `npm run typecheck` passes again.
