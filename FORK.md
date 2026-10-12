@@ -14,12 +14,12 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on the same OS user.
 
-Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.3` release and install that file.
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.4` release and install that file.
 
 macOS or Linux:
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ebe0bbf1fc9cd8bc15994e459ec25d29/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell:
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/ebe0bbf1fc9cd8bc15994e459ec25d29/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -102,7 +102,7 @@ node -e "process.stdout.write('Exact UTF-8 message')" | gbot send Researcher --s
 
 Do not combine `--stdin` with a positional message. The text must be non-empty UTF-8, at most 64 KiB, with no NUL and no surrounding whitespace. A UTF-8 BOM or a UTF-16 BOM is accepted and removed. A trailing CR, LF, or CRLF is surrounding whitespace and is rejected. A CR LF between lines is kept.
 
-Success JSON includes `delivery` (`accepted` or `unknown`), `kind` (`bot` or `group`), `exitCode: 0`, and `result`. `delivery: "accepted"` means the gateway returned a message id. `delivery: "unknown"` means the CLI cannot prove the send landed (timeout, network failure, HTTP 408 or 5xx, or a response without a message id). Do not send again. Read the thread first.
+Success JSON includes `delivery` (`accepted` or `unknown`), `kind` (`bot` or `group`), `exitCode: 0`, and `result`. `delivery: "accepted"` means the gateway confirmed the send (`{"accepted": true}` or a message id). `delivery: "unknown"` means the CLI cannot prove the send landed (timeout, network failure, HTTP 408 or 5xx, or a response with neither). Do not send again. The result carries the `clientNonce` it posted: `gbot reconcile <bot> --nonce <clientNonce>` looks for it in the last 200 transcript entries (`delivered` or `not-found-in-tail`) and never resends.
 
 Sends use a 15 second deadline that includes the response body. Reads use 30 seconds. There is no automatic retry. Redirects are rejected.
 
@@ -126,14 +126,9 @@ Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. 
 
 The watch app is [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) (unofficial; download the APK from its [releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases), step-by-step install in its [install guide](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md), in Traditional Chinese).
 
-`wear pair` is on the `feat/wear-pair` branch ([MR !3](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/3)) and is not in the `v0.11.2-iml1s.3` package. Until it is merged and released, build it from a clone (Node.js 22.19.0 or newer; the Grok Bot desktop app signed in on this computer):
+`wear pair` ships in `v0.11.2-iml1s.4` and later. Install that release as in [Install](#install) (Node.js 22.19.0 or newer; the Grok Bot desktop app signed in on this computer), then check the login before pairing:
 
 ```sh
-git clone -b feat/wear-pair https://gitlab.com/aa22396584/grok-bot-cli.git
-cd grok-bot-cli
-npm ci
-npm run build      # works without Claude Code; host validation is skipped
-npm link           # or run node bin/gbot.mjs instead of gbot
 gbot accounts                        # saved logins, no credentials
 gbot bots list --account "<label>"   # check that login still works before pairing
 ```
@@ -196,7 +191,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | Several logins, no choice | `gbot accounts`, then `--account "<label>"` after the subcommand, or set `GBOT_ACCOUNT`. |
 | `Unknown option: --account.` | Put `--account` after the subcommand. |
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
-| `delivery: "unknown"` | Read the thread. Do not send again. |
+| `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
 | `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
 
 ### Privacy
@@ -252,12 +247,12 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
 
-不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.3` 附的套件檔再安裝。
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.4` 附的套件檔再安裝。
 
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/ebe0bbf1fc9cd8bc15994e459ec25d29/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -265,7 +260,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/ea1a7376229627c06b13aa19a0e18e53/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/ebe0bbf1fc9cd8bc15994e459ec25d29/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -340,7 +335,7 @@ node -e "process.stdout.write('Exact UTF-8 message')" | gbot send Researcher --s
 
 不要同時給 `--stdin` 和位置參數訊息。內容必須是非空 UTF-8、最多 64 KiB、沒有 NUL、兩端沒有空白。UTF-8 BOM 或 UTF-16 BOM 會被接受並去掉。結尾的 CR、LF 或 CRLF 算兩端空白，會被拒絕。行與行之間的 CR LF 會保留。
 
-成功的 JSON 含 `delivery`（`accepted` 或 `unknown`）、`kind`（`bot` 或 `group`）、`exitCode: 0` 與 `result`。`accepted` 表示 gateway 回了 message id。`unknown` 表示 CLI 無法證明送出已落地（逾時、網路失敗、HTTP 408 或 5xx，或回應沒有 message id）。不要再送一次。先讀 thread。
+成功的 JSON 含 `delivery`（`accepted` 或 `unknown`）、`kind`（`bot` 或 `group`）、`exitCode: 0` 與 `result`。`accepted` 表示 gateway 確認收到（`{"accepted": true}` 或 message id）。`unknown` 表示 CLI 無法證明送出已落地（逾時、網路失敗、HTTP 408 或 5xx，或回應兩者都沒有）。不要再送一次。結果帶有這次送出的 `clientNonce`：`gbot reconcile <bot> --nonce <clientNonce>` 在最後 200 筆 transcript 裡找它（`delivered` 或 `not-found-in-tail`），不會重送。
 
 送出期限 15 秒，含讀取回應本文。讀取期限 30 秒。不會自動重試。重新導向會被拒絕。
 
@@ -364,14 +359,9 @@ gbot thread Researcher --after "<cursor>" --json
 
 手錶 App 是 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear)（非官方；APK 在它的 [Releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases)，逐步安裝見它的[安裝指南](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md)）。
 
-`wear pair` 在 `feat/wear-pair` 分支（[MR !3](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/3)），`v0.11.2-iml1s.3` 套件裡沒有。合併並發布之前，請從 clone 建置（Node.js 22.19.0 以上；這台電腦已登入 Grok Bot 桌面版）：
+`wear pair` 從 `v0.11.2-iml1s.4` 起包含在套件裡。照上面的「安裝」裝好那個版本（Node.js 22.19.0 以上；這台電腦已登入 Grok Bot 桌面版），配對前先確認登入：
 
 ```sh
-git clone -b feat/wear-pair https://gitlab.com/aa22396584/grok-bot-cli.git
-cd grok-bot-cli
-npm ci
-npm run build      # 沒裝 Claude Code 也可以，只會略過 host 檢查
-npm link           # 或把下面的 gbot 換成 node bin/gbot.mjs
 gbot accounts                       # 列出存的登入，不印憑證
 gbot bots list --account "<標籤>"   # 配對前先確認這個登入還能用
 ```
@@ -434,7 +424,7 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | 有多個登入、選不出來 | `gbot accounts`，再把 `--account "<標籤>"` 放在子命令後面，或設 `GBOT_ACCOUNT`。 |
 | `Unknown option: --account.` | 把 `--account` 放到子命令後面。 |
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
-| `delivery: "unknown"` | 先讀 thread，不要重送。 |
+| `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |
 | 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
 
 ### 隱私
