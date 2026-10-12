@@ -411,6 +411,10 @@ A send timeout, network failure, or HTTP 408 or 5xx leaves delivery unknown
 is also unknown rather than accepted. Do not resend automatically: read the
 target thread and verify the original message in the Grok Bot app first. A new
 CLI send uses a new client nonce, so invoking it again is not a deduplicated retry.
+The send result includes that `clientNonce`. When delivery is unknown, the CLI prints
+it and `gbot reconcile <bot> --nonce <n>`. Reconcile reads the last 200 transcript
+entries for a user entry with that exact nonce and does not send again. `delivered`
+means the entry is in the tail; `not-found-in-tail` means it was not in those entries.
 
 Plain-text transcript output handles both direct content and nested
 `message.content` / `message.text`. Use `--json` when the full structured result is

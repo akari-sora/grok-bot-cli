@@ -5,12 +5,16 @@ import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
 import { assertAllowedCredentialUrl, redactSecrets } from "./url-policy.js";
 import { grokApproval, grokApprovalResponseSchema } from "./grok-approvals.js";
 
-class GatewayError extends Error {
-  constructor(message, { status, method } = {}) {
+export class GatewayError extends Error {
+  constructor(message, info = {}) {
     super(message);
     this.name = "GatewayError";
-    this.status = status;
-    this.method = method;
+    this.status = info.status;
+    this.method = info.method;
+    if (info.code !== undefined) this.code = info.code;
+    if (info.effect !== undefined) this.effect = info.effect;
+    if (info.failureCode !== undefined) this.failureCode = info.failureCode;
+    if (info.kind !== undefined) this.kind = info.kind;
   }
 }
 
@@ -199,6 +203,43 @@ export async function connectGateway({ signal, account } = {}) {
   return ensureSandbox(token, { signal });
 }
 
+function redactDetail(detail, session) {
+  let text = redactSecrets(String(detail ?? "").slice(0, 300));
+  const secrets = [];
+  if (typeof session?.gatewayToken === "string") secrets.push(session.gatewayToken);
+  const headers = session?.gatewayHeaders;
+  if (headers && typeof headers === "object") {
+    for (const value of Object.values(headers)) {
+      if (typeof value === "string") secrets.push(value);
+    }
+  }
+  for (const secret of secrets) {
+    if (secret.length >= 8) text = text.split(secret).join("<redacted>");
+  }
+  return text;
+}
+
+// Live gateway failures are distinct: auth, a moved box, an unknown method, and a down server.
+function failureKind(status, contentType, data) {
+  const failureCode = data && typeof data.failureCode === "string" && data.failureCode
+    ? data.failureCode
+    : undefined;
+  const type = String(contentType || "").toLowerCase();
+  let kind;
+  if (failureCode === "gateway/unknown-method") kind = "unsupported";
+  else if (status === 401 || status === 403) kind = "auth";
+  else if (
+    status === 404
+    && type.includes("text/plain")
+    && data
+    && typeof data.raw === "string"
+    && data.raw.includes("could not be routed")
+  ) kind = "routing";
+  else if (status >= 500) kind = "server";
+  else if (status >= 400 && status < 500) kind = "client";
+  return { failureCode, kind };
+}
+
 async function gatewayCall(session, method, body = {}, { signal } = {}) {
   assertGatewayActive(signal);
   const base = assertAllowedCredentialUrl(session.gatewayUrl, { kind: "gateway" });
@@ -237,7 +278,13 @@ async function gatewayCall(session, method, body = {}, { signal } = {}) {
   if (!prompt) assertGatewayActive(signal);
   if (!res.ok) {
     const detail = data.message || data.error || data.raw || res.statusText;
-    throw new GatewayError(method + " failed: " + res.status + " " + redactSecrets(String(detail).slice(0, 300)), { status: res.status, method });
+    const classified = failureKind(res.status, res.headers.get("content-type"), data);
+    throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
+      status: res.status,
+      method,
+      ...(classified.kind ? { kind: classified.kind } : {}),
+      ...(classified.failureCode ? { failureCode: classified.failureCode } : {}),
+    });
   }
   return data;
 }
@@ -477,8 +524,26 @@ export async function removeGroupMember(session, groupRef, memberRef) {
   return setGroupMembers(session, group.id, next);
 }
 
+// Live hosts answer `{ "accepted": true }` (no messageId); older hosts returned a `messageId`.
+// Either one is a confirmed receipt. Anything else (`{ok:true}`, `"true"`, a missing body) stays
+// unconfirmed: the caller must reconcile by clientNonce before any resend.
+export function sendReceiptFrom(data) {
+  if (!data || typeof data !== "object") return { accepted: false };
+  const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : undefined;
+  if (data.accepted === true || messageId) return { accepted: true, ...(messageId ? { messageId } : {}) };
+  return { accepted: false };
+}
+
+function transcriptRows(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object" && Array.isArray(data.entries)) return data.entries;
+  return [];
+}
+
 export async function sendPrompt(session, ref, prompt, extra = {}) {
   assertGatewayActive(extra.signal);
+  // Keep this roster check. Live (2026-10-10): sendPrompt to an agentId that is not on the roster
+  // answers 409 send/agent-unavailable yet still creates an empty placeholder bot named "New Agent".
   const rec = await resolveRef(session, ref, { signal: extra.signal });
   const body = {
     agentId: rec.id,
@@ -502,15 +567,23 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     }
     if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
     if (err && err.targetId == null) err.targetId = rec.id;
+    if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
     if (err && err.delivery === "unknown" && err instanceof Error && !/delivery unknown/.test(err.message)) {
       err.message += " (delivery unknown; check the thread before resending)";
     }
     throw err;
   }
-  const messageId = data && typeof data === "object" && typeof data.messageId === "string" ? data.messageId : null;
+  const receipt = sendReceiptFrom(data);
+  const messageId = receipt.messageId;
   // Only a confirmed receipt counts as accepted; anything else is unknown, never a silent accept.
   // ponytail: full send/execution correlation envelope stays in #37.
-  return { target: rec, result: data && typeof data === "object" ? data : {}, delivery: messageId ? "accepted" : "unknown", ...(messageId ? { messageId } : {}) };
+  return {
+    target: rec,
+    result: data && typeof data === "object" ? data : {},
+    delivery: receipt.accepted ? "accepted" : "unknown",
+    ...(messageId ? { messageId } : {}),
+    clientNonce: body.clientNonce,
+  };
 }
 
 export async function getTranscriptTail(session, ref, limit = 40) {
@@ -518,6 +591,36 @@ export async function getTranscriptTail(session, ref, limit = 40) {
   const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
   const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: bounded });
   return { target: rec, transcript: data };
+}
+
+// Read the transcript tail for the nonce this send used. Never calls sendPrompt.
+export async function reconcileDelivery(session, ref, clientNonce) {
+  if (typeof clientNonce !== "string" || clientNonce.length === 0) {
+    throw new GatewayError("A clientNonce is required to reconcile a delivery.");
+  }
+  const tail = await getTranscriptTail(session, ref, 200);
+  const entries = transcriptRows(tail?.transcript);
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
+    const entryId = typeof entry.id === "string"
+      ? entry.id
+      : (typeof entry.entryId === "string" ? entry.entryId : "");
+    return {
+      target: tail.target,
+      clientNonce,
+      status: "delivered",
+      entryId,
+      ...(typeof entry.seq === "number" ? { seq: entry.seq } : {}),
+    };
+  }
+  return {
+    target: tail.target,
+    clientNonce,
+    status: "not-found-in-tail",
+    scanned: entries.length,
+  };
 }
 
 export async function getThread(session, ref, rootId) {

@@ -9397,6 +9397,110 @@ var __webpack_modules__ = {
             resultSchema: resultSchema
         });
     },
+    "./src/cli/reconcile.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
+        var _agent_bundle_runtime__rspack_import_3 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_2 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _shared_js__rspack_import_1 = __webpack_require__("./src/cli/_shared.ts");
+        const config = {
+            description: "Check whether a send client nonce is in the live transcript tail. Does not resend.",
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    account: {
+                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        type: 'string'
+                    },
+                    dir: {
+                        description: 'Agents directory for --files mode',
+                        type: 'string'
+                    },
+                    files: {
+                        description: 'Force the on-disk agents store',
+                        type: 'boolean'
+                    },
+                    gateway: {
+                        description: 'Force the live gateway',
+                        type: 'boolean'
+                    },
+                    nonce: {
+                        description: 'clientNonce from the send that reported unknown delivery',
+                        type: 'string'
+                    },
+                    target: {
+                        description: 'Bot or group name or id',
+                        type: 'string'
+                    }
+                },
+                required: [
+                    'target',
+                    'nonce'
+                ],
+                type: 'object'
+            },
+            positionals: [
+                'target'
+            ]
+        };
+        const inputSchema = _shared_js__rspack_import_1.lK.extend({
+            nonce: zod__rspack_import_2.YjP().min(1),
+            target: zod__rspack_import_2.YjP().min(1)
+        }).strict();
+        const resultSchema = zod__rspack_import_2.Ikc({
+            clientNonce: zod__rspack_import_2.YjP(),
+            entryId: zod__rspack_import_2.YjP().optional(),
+            id: zod__rspack_import_2.YjP(),
+            kind: zod__rspack_import_2.k5n([
+                'bot',
+                'group'
+            ]),
+            name: zod__rspack_import_2.YjP(),
+            scanned: zod__rspack_import_2.aig().int().nonnegative().optional(),
+            seq: zod__rspack_import_2.aig().optional(),
+            status: zod__rspack_import_2.k5n([
+                'delivered',
+                'not-found-in-tail'
+            ])
+        }).strict();
+        async function reconcile({ input }) {
+            const backend = await (0, _shared_js__rspack_import_1.FS)(input);
+            const found = await backend.reconcile(input.target, input.nonce);
+            const entryId = 'entryId' in found && typeof found.entryId === 'string' && found.entryId.length > 0 ? found.entryId : undefined;
+            const seq = 'seq' in found && typeof found.seq === 'number' ? found.seq : undefined;
+            const scanned = 'scanned' in found && typeof found.scanned === 'number' ? found.scanned : undefined;
+            const value = {
+                id: found.target.id,
+                name: found.target.name,
+                kind: found.target.isGroup ? 'group' : 'bot',
+                clientNonce: found.clientNonce,
+                status: found.status === 'delivered' ? 'delivered' : 'not-found-in-tail',
+                ...entryId ? {
+                    entryId
+                } : {},
+                ...seq !== undefined ? {
+                    seq
+                } : {},
+                ...scanned !== undefined ? {
+                    scanned
+                } : {}
+            };
+            const text = value.status === 'delivered' ? `Delivered nonce ${value.clientNonce} to ${value.kind} ${value.name} (${value.id})${value.entryId ? ` entry ${value.entryId}` : ''}${value.seq !== undefined ? ` seq ${value.seq}` : ''}.` : `Nonce ${value.clientNonce} was not found in the last ${value.scanned ?? 0} transcript entries for ${value.kind} ${value.name} (${value.id}). Nothing was resent.`;
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Result, {
+                value: value,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Text, {
+                    children: text
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>reconcile
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/cli/send.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
@@ -9517,6 +9621,7 @@ var __webpack_modules__ = {
             target: zod__rspack_import_8.YjP().min(1)
         }).strict().refine((input)=>!(input.stdin && (input.message?.length ?? 0) > 0), '--stdin cannot be combined with a positional message.').refine((input)=>input.stdin || (input.message?.length ?? 0) > 0, 'gbot send <bot-or-group> <message> or --stdin');
         const receiptSchema = zod__rspack_import_8.Ikc({
+            clientNonce: zod__rspack_import_8.YjP().min(1).optional(),
             correlationId: zod__rspack_import_8.YjP(),
             delivery: zod__rspack_import_8.k5n([
                 'accepted',
@@ -9574,6 +9679,9 @@ var __webpack_modules__ = {
                 ...typeof out.messageId === 'string' ? {
                     messageId: out.messageId
                 } : {},
+                ...typeof out.clientNonce === 'string' ? {
+                    clientNonce: out.clientNonce
+                } : {},
                 envelopeId: envelope.messageId,
                 correlationId: envelope.correlationId,
                 ...input.replyTo ? {
@@ -9616,7 +9724,10 @@ var __webpack_modules__ = {
             } catch (error) {
                 value = (0, _core_codex_contract_js__rspack_import_3.DG)(error);
             }
-            const text = value.exitCode === 0 ? `Sent to ${value.kind} ${value.name} (${value.id})${value.messageId ? ` message ${value.messageId}` : ''}; envelope ${value.envelopeId}` : value.error;
+            const nonce = typeof value.clientNonce === 'string' && value.clientNonce.length > 0 ? value.clientNonce : undefined;
+            const shownTarget = /[\s"]/.test(input.target) ? JSON.stringify(input.target) : input.target;
+            const hint = nonce ? ` Confirm with gbot reconcile ${shownTarget} --nonce ${nonce}` : '';
+            const text = value.exitCode === 0 ? value.delivery === 'unknown' && nonce ? `Sent to ${value.kind} ${value.name} (${value.id}); delivery unknown; nonce ${nonce}.${hint}` : `Sent to ${value.kind} ${value.name} (${value.id})${value.messageId ? ` message ${value.messageId}` : ''}; envelope ${value.envelopeId}` : value.delivery === 'unknown' && nonce ? `${value.error}\nnonce ${nonce}.${hint}` : value.error;
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Result, {
                 value: value,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Text, {
@@ -41792,9 +41903,9 @@ var __webpack_modules__ = {
             try {
                 var agent_bundle_launch_env_layer__rspack_import_0 = __webpack_require__("./.agent-bundle-virtual/bin-gbot-0.mjs");
                 var agent_bundle_cli_entry__rspack_import_1 = __webpack_require__("./node_modules/agent-bundle/dist/cli-entry.js");
-                var _agent_bundle_runtime__rspack_import_49 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-                var _agent_bundle_runtime__rspack_import_50 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
-                var _agent_bundle_runtime__rspack_import_51 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
+                var _agent_bundle_runtime__rspack_import_50 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+                var _agent_bundle_runtime__rspack_import_51 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+                var _agent_bundle_runtime__rspack_import_52 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
                 var node_url__rspack_import_2 = __webpack_require__("node:url");
                 var node_worker_threads__rspack_import_3 = __webpack_require__("node:worker_threads");
                 var _src_cli_accounts_tsx__rspack_import_4 = __webpack_require__("./src/cli/accounts.tsx");
@@ -41836,12 +41947,13 @@ var __webpack_modules__ = {
                 var _src_cli_groups_set_tsx__rspack_import_40 = __webpack_require__("./src/cli/groups/set.tsx");
                 var _src_cli_groups_update_tsx__rspack_import_41 = __webpack_require__("./src/cli/groups/update.tsx");
                 var _src_cli_history_tsx__rspack_import_42 = __webpack_require__("./src/cli/history.tsx");
-                var _src_cli_send_tsx__rspack_import_43 = __webpack_require__("./src/cli/send.tsx");
-                var _src_cli_skills_add_tsx__rspack_import_44 = __webpack_require__("./src/cli/skills/add.tsx");
-                var _src_cli_skills_list_tsx__rspack_import_45 = __webpack_require__("./src/cli/skills/list.tsx");
-                var _src_cli_skills_remove_tsx__rspack_import_46 = __webpack_require__("./src/cli/skills/remove.tsx");
-                var _src_cli_thread_tsx__rspack_import_47 = __webpack_require__("./src/cli/thread.tsx");
-                var _src_cli_wear_pair_tsx__rspack_import_48 = __webpack_require__("./src/cli/wear/pair.tsx");
+                var _src_cli_reconcile_tsx__rspack_import_43 = __webpack_require__("./src/cli/reconcile.tsx");
+                var _src_cli_send_tsx__rspack_import_44 = __webpack_require__("./src/cli/send.tsx");
+                var _src_cli_skills_add_tsx__rspack_import_45 = __webpack_require__("./src/cli/skills/add.tsx");
+                var _src_cli_skills_list_tsx__rspack_import_46 = __webpack_require__("./src/cli/skills/list.tsx");
+                var _src_cli_skills_remove_tsx__rspack_import_47 = __webpack_require__("./src/cli/skills/remove.tsx");
+                var _src_cli_thread_tsx__rspack_import_48 = __webpack_require__("./src/cli/thread.tsx");
+                var _src_cli_wear_pair_tsx__rspack_import_49 = __webpack_require__("./src/cli/wear/pair.tsx");
                 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_4, 'default'), _src_cli_accounts_tsx__rspack_import_4);
                 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_5, 'default'), _src_cli_approvals_list_tsx__rspack_import_5);
                 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_6, 'default'), _src_cli_approvals_respond_tsx__rspack_import_6);
@@ -41881,13 +41993,14 @@ var __webpack_modules__ = {
                 const route36 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_40, 'default'), _src_cli_groups_set_tsx__rspack_import_40);
                 const route37 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_41, 'default'), _src_cli_groups_update_tsx__rspack_import_41);
                 const route38 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_42, 'default'), _src_cli_history_tsx__rspack_import_42);
-                const route39 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_43, 'default'), _src_cli_send_tsx__rspack_import_43);
-                const route40 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_44, 'default'), _src_cli_skills_add_tsx__rspack_import_44);
-                const route41 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_45, 'default'), _src_cli_skills_list_tsx__rspack_import_45);
-                const route42 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_46, 'default'), _src_cli_skills_remove_tsx__rspack_import_46);
-                const route43 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_47, 'default'), _src_cli_thread_tsx__rspack_import_47);
-                const route44 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_48, 'default'), _src_cli_wear_pair_tsx__rspack_import_48);
-                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_49.E7)({
+                const route39 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_43, 'default'), _src_cli_reconcile_tsx__rspack_import_43);
+                const route40 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_44, 'default'), _src_cli_send_tsx__rspack_import_44);
+                const route41 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_45, 'default'), _src_cli_skills_add_tsx__rspack_import_45);
+                const route42 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_46, 'default'), _src_cli_skills_list_tsx__rspack_import_46);
+                const route43 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_47, 'default'), _src_cli_skills_remove_tsx__rspack_import_47);
+                const route44 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_48, 'default'), _src_cli_thread_tsx__rspack_import_48);
+                const route45 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_49, 'default'), _src_cli_wear_pair_tsx__rspack_import_49);
+                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_50.E7)({
                     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
                     stateAnchor: 'user-data'
                 });
@@ -42014,23 +42127,26 @@ var __webpack_modules__ = {
                     "cli:history": Object.freeze({
                         module: route38
                     }),
-                    "cli:send": Object.freeze({
+                    "cli:reconcile": Object.freeze({
                         module: route39
                     }),
-                    "cli:skills/add": Object.freeze({
+                    "cli:send": Object.freeze({
                         module: route40
                     }),
-                    "cli:skills/list": Object.freeze({
+                    "cli:skills/add": Object.freeze({
                         module: route41
                     }),
-                    "cli:skills/remove": Object.freeze({
+                    "cli:skills/list": Object.freeze({
                         module: route42
                     }),
-                    "cli:thread": Object.freeze({
+                    "cli:skills/remove": Object.freeze({
                         module: route43
                     }),
-                    "cli:wear/pair": Object.freeze({
+                    "cli:thread": Object.freeze({
                         module: route44
+                    }),
+                    "cli:wear/pair": Object.freeze({
+                        module: route45
                     })
                 });
                 const commands = Object.freeze([
@@ -44113,6 +44229,67 @@ var __webpack_modules__ = {
                     },
                     {
                         "aliases": [],
+                        "description": "Check whether a send client nonce is in the live transcript tail. Does not resend.",
+                        "exitCode": "zero",
+                        "options": [
+                            {
+                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "key": "account",
+                                "kind": "string",
+                                "option": "account",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Agents directory for --files mode",
+                                "key": "dir",
+                                "kind": "string",
+                                "option": "dir",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Force the on-disk agents store",
+                                "key": "files",
+                                "kind": "boolean",
+                                "option": "files",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Force the live gateway",
+                                "key": "gateway",
+                                "kind": "boolean",
+                                "option": "gateway",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "clientNonce from the send that reported unknown delivery",
+                                "key": "nonce",
+                                "kind": "string",
+                                "option": "nonce",
+                                "repeated": false,
+                                "required": true
+                            },
+                            {
+                                "description": "Bot or group name or id",
+                                "key": "target",
+                                "kind": "string",
+                                "option": "target",
+                                "positional": 0,
+                                "repeated": false,
+                                "required": true
+                            }
+                        ],
+                        "path": [
+                            "reconcile"
+                        ],
+                        "rendered": true,
+                        "routeId": "cli:reconcile"
+                    },
+                    {
+                        "aliases": [],
                         "description": "Send a message to a Grok Bot bot or group by name or id.",
                         "exitCode": "result",
                         "options": [
@@ -44603,27 +44780,27 @@ var __webpack_modules__ = {
                         instanceId: processLifetime.instanceId,
                         pid: processLifetime.pid
                     };
-                    const result = await (0, _agent_bundle_runtime__rspack_import_50.iC)({
+                    const result = await (0, _agent_bundle_runtime__rspack_import_51.iC)({
                         capabilities: {
-                            command: (0, _agent_bundle_runtime__rspack_import_50.hU)(),
-                            filesystem: (0, _agent_bundle_runtime__rspack_import_50.hU)(),
-                            network: (0, _agent_bundle_runtime__rspack_import_50.hU)(),
-                            projectRoot: (0, _agent_bundle_runtime__rspack_import_50.qC)({
+                            command: (0, _agent_bundle_runtime__rspack_import_51.hU)(),
+                            filesystem: (0, _agent_bundle_runtime__rspack_import_51.hU)(),
+                            network: (0, _agent_bundle_runtime__rspack_import_51.hU)(),
+                            projectRoot: (0, _agent_bundle_runtime__rspack_import_51.qC)({
                                 root: cwd
                             }, 'derived')
                         },
-                        host: (0, _agent_bundle_runtime__rspack_import_50.hU)('unsupported-surface'),
+                        host: (0, _agent_bundle_runtime__rspack_import_51.hU)('unsupported-surface'),
                         invocation: {
                             kind: 'cli',
                             operationId: command.routeId,
                             surface: command.path.join(' ')
                         },
-                        lineage: (0, _agent_bundle_runtime__rspack_import_50.hU)('unsupported-surface'),
+                        lineage: (0, _agent_bundle_runtime__rspack_import_51.hU)('unsupported-surface'),
                         plugin: pluginRoot.identity,
                         process: processHit,
                         signal: context.signal,
-                        terminal: (0, _agent_bundle_runtime__rspack_import_50.qC)(context.terminal, 'native'),
-                        workspace: (0, _agent_bundle_runtime__rspack_import_50.qC)({
+                        terminal: (0, _agent_bundle_runtime__rspack_import_51.qC)(context.terminal, 'native'),
+                        workspace: (0, _agent_bundle_runtime__rspack_import_51.qC)({
                             root: cwd
                         }, 'derived')
                     }, async ()=>route.module.default({
@@ -44730,7 +44907,7 @@ var __webpack_modules__ = {
                             return stream;
                         }
                     });
-                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_51.jK)(host);
+                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_52.jK)(host);
                     return Object.freeze({
                         close: async ()=>{
                             await worker.terminate();
@@ -47043,7 +47220,10 @@ var __webpack_modules__ = {
                     "hostName",
                     "hint",
                     "code",
-                    "effect"
+                    "effect",
+                    "clientNonce",
+                    "failureCode",
+                    "kind"
                 ]){
                     if (error[key] !== undefined) out[key] = error[key];
                 }
@@ -47862,6 +48042,7 @@ var __webpack_modules__ = {
                     addGroupMember: (group, bot)=>_gateway_js__rspack_import_1.zr(session, group, bot),
                     removeGroupMember: (group, bot)=>_gateway_js__rspack_import_1.A0(session, group, bot),
                     send: (ref, prompt, extra)=>_gateway_js__rspack_import_1.LV(session, ref, prompt, extra),
+                    reconcile: (ref, clientNonce)=>_gateway_js__rspack_import_1.zk(session, ref, clientNonce),
                     transcript: (ref, limit)=>_gateway_js__rspack_import_1.bA(session, ref, limit),
                     thread: (ref, rootId)=>_gateway_js__rspack_import_1.fG(session, ref, rootId),
                     skills: ()=>_gateway_js__rspack_import_1.bG(session),
@@ -47884,6 +48065,9 @@ var __webpack_modules__ = {
                 removeGroupMember: async (group, bot)=>_store_js__rspack_import_0.A0(root, group, bot),
                 send: async ()=>{
                     throw new _store_js__rspack_import_0.AD("send requires the live gateway");
+                },
+                reconcile: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("reconcile requires the live gateway");
                 },
                 transcript: async ()=>{
                     throw new _store_js__rspack_import_0.AD("thread requires the live gateway");
@@ -48504,11 +48688,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _url_policy_js__rspack_import_3 = __webpack_require__("./src/core/url-policy.js");
         var _grok_approvals_js__rspack_import_4 = __webpack_require__("./src/core/grok-approvals.js");
         class GatewayError extends Error {
-            constructor(message, { status, method } = {}){
+            constructor(message, info = {}){
                 super(message);
                 this.name = "GatewayError";
-                this.status = status;
-                this.method = method;
+                this.status = info.status;
+                this.method = info.method;
+                if (info.code !== undefined) this.code = info.code;
+                if (info.effect !== undefined) this.effect = info.effect;
+                if (info.failureCode !== undefined) this.failureCode = info.failureCode;
+                if (info.kind !== undefined) this.kind = info.kind;
             }
         }
         const GATEWAY_TIMEOUT_MS = 30000;
@@ -48702,6 +48890,35 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 signal
             });
         }
+        function redactDetail(detail, session) {
+            let text = (0, _url_policy_js__rspack_import_3.fp)(String(detail ?? "").slice(0, 300));
+            const secrets = [];
+            if (typeof session?.gatewayToken === "string") secrets.push(session.gatewayToken);
+            const headers = session?.gatewayHeaders;
+            if (headers && typeof headers === "object") {
+                for (const value of Object.values(headers)){
+                    if (typeof value === "string") secrets.push(value);
+                }
+            }
+            for (const secret of secrets){
+                if (secret.length >= 8) text = text.split(secret).join("<redacted>");
+            }
+            return text;
+        }
+        function failureKind(status, contentType, data) {
+            const failureCode = data && typeof data.failureCode === "string" && data.failureCode ? data.failureCode : undefined;
+            const type = String(contentType || "").toLowerCase();
+            let kind;
+            if (failureCode === "gateway/unknown-method") kind = "unsupported";
+            else if (status === 401 || status === 403) kind = "auth";
+            else if (status === 404 && type.includes("text/plain") && data && typeof data.raw === "string" && data.raw.includes("could not be routed")) kind = "routing";
+            else if (status >= 500) kind = "server";
+            else if (status >= 400 && status < 500) kind = "client";
+            return {
+                failureCode,
+                kind
+            };
+        }
         async function gatewayCall(session, method, body = {}, { signal } = {}) {
             assertGatewayActive(signal);
             const base = (0, _url_policy_js__rspack_import_3.Re)(session.gatewayUrl, {
@@ -48743,9 +48960,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!prompt) assertGatewayActive(signal);
             if (!res.ok) {
                 const detail = data.message || data.error || data.raw || res.statusText;
-                throw new GatewayError(method + " failed: " + res.status + " " + (0, _url_policy_js__rspack_import_3.fp)(String(detail).slice(0, 300)), {
+                const classified = failureKind(res.status, res.headers.get("content-type"), data);
+                throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
                     status: res.status,
-                    method
+                    method,
+                    ...classified.kind ? {
+                        kind: classified.kind
+                    } : {},
+                    ...classified.failureCode ? {
+                        failureCode: classified.failureCode
+                    } : {}
                 });
             }
             return data;
@@ -49012,6 +49236,26 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const next = group.memberIds.filter((id)=>id !== member.id);
             return setGroupMembers(session, group.id, next);
         }
+        function sendReceiptFrom(data) {
+            if (!data || typeof data !== "object") return {
+                accepted: false
+            };
+            const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : undefined;
+            if (data.accepted === true || messageId) return {
+                accepted: true,
+                ...messageId ? {
+                    messageId
+                } : {}
+            };
+            return {
+                accepted: false
+            };
+        }
+        function transcriptRows(data) {
+            if (Array.isArray(data)) return data;
+            if (data && typeof data === "object" && Array.isArray(data.entries)) return data.entries;
+            return [];
+        }
         async function sendPrompt(session, ref, prompt, extra = {}) {
             assertGatewayActive(extra.signal);
             const rec = await resolveRef(session, ref, {
@@ -49035,19 +49279,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 }
                 if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
                 if (err && err.targetId == null) err.targetId = rec.id;
+                if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
                 if (err && err.delivery === "unknown" && err instanceof Error && !/delivery unknown/.test(err.message)) {
                     err.message += " (delivery unknown; check the thread before resending)";
                 }
                 throw err;
             }
-            const messageId = data && typeof data === "object" && typeof data.messageId === "string" ? data.messageId : null;
+            const receipt = sendReceiptFrom(data);
+            const messageId = receipt.messageId;
             return {
                 target: rec,
                 result: data && typeof data === "object" ? data : {},
-                delivery: messageId ? "accepted" : "unknown",
+                delivery: receipt.accepted ? "accepted" : "unknown",
                 ...messageId ? {
                     messageId
-                } : {}
+                } : {},
+                clientNonce: body.clientNonce
             };
         }
         async function getTranscriptTail(session, ref, limit = 40) {
@@ -49060,6 +49307,34 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return {
                 target: rec,
                 transcript: data
+            };
+        }
+        async function reconcileDelivery(session, ref, clientNonce) {
+            if (typeof clientNonce !== "string" || clientNonce.length === 0) {
+                throw new GatewayError("A clientNonce is required to reconcile a delivery.");
+            }
+            const tail = await getTranscriptTail(session, ref, 200);
+            const entries = transcriptRows(tail?.transcript);
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                if (!entry || typeof entry !== "object") continue;
+                if (entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
+                const entryId = typeof entry.id === "string" ? entry.id : typeof entry.entryId === "string" ? entry.entryId : "";
+                return {
+                    target: tail.target,
+                    clientNonce,
+                    status: "delivered",
+                    entryId,
+                    ...typeof entry.seq === "number" ? {
+                        seq: entry.seq
+                    } : {}
+                };
+            }
+            return {
+                target: tail.target,
+                clientNonce,
+                status: "not-found-in-tail",
+                scanned: entries.length
             };
         }
         async function getThread(session, ref, rootId) {
@@ -49129,6 +49404,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             vc: ()=>listAgents,
             wj: ()=>createGroup,
             x4: ()=>updateAgent,
+            zk: ()=>reconcileDelivery,
             zr: ()=>addGroupMember
         });
     },
