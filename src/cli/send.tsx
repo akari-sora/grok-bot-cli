@@ -95,6 +95,7 @@ export const inputSchema = backendFlagsSchema
 
 const receiptSchema = z
   .object({
+    clientNonce: z.string().min(1).optional(),
     correlationId: z.string(),
     delivery: z.enum(['accepted', 'unknown']),
     envelopeId: z.string(),
@@ -160,6 +161,7 @@ const deliver = async (
         ? ('accepted' as const)
         : ('unknown' as const),
     ...(typeof out.messageId === 'string' ? { messageId: out.messageId } : {}),
+    ...(typeof out.clientNonce === 'string' ? { clientNonce: out.clientNonce } : {}),
     envelopeId: envelope.messageId,
     correlationId: envelope.correlationId,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -206,10 +208,18 @@ export default async function send({
   } catch (error) {
     value = outcomeFromError(error);
   }
-  const text =
-    value.exitCode === 0
-      ? `Sent to ${value.kind} ${value.name} (${value.id})${value.messageId ? ` message ${value.messageId}` : ''}; envelope ${value.envelopeId}`
-      : value.error;
+  const nonce = typeof value.clientNonce === 'string' && value.clientNonce.length > 0
+    ? value.clientNonce
+    : undefined;
+  const shownTarget = /[\s"]/.test(input.target) ? JSON.stringify(input.target) : input.target;
+  const hint = nonce ? ` Confirm with gbot reconcile ${shownTarget} --nonce ${nonce}` : '';
+  const text = value.exitCode === 0
+    ? (value.delivery === 'unknown' && nonce
+      ? `Sent to ${value.kind} ${value.name} (${value.id}); delivery unknown; nonce ${nonce}.${hint}`
+      : `Sent to ${value.kind} ${value.name} (${value.id})${value.messageId ? ` message ${value.messageId}` : ''}; envelope ${value.envelopeId}`)
+    : (value.delivery === 'unknown' && nonce
+      ? `${value.error}\nnonce ${nonce}.${hint}`
+      : value.error);
   return (
     <Agent.Result value={value}>
       <Agent.Text>{text}</Agent.Text>
