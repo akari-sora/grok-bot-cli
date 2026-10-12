@@ -24731,6 +24731,146 @@ var __webpack_modules__ = {
                 headers: descriptor.headers ?? {}
             };
         }
+        function once(fn) {
+            let done = false;
+            let value;
+            let failure;
+            return (...args)=>{
+                if (!done) {
+                    done = true;
+                    try {
+                        value = fn(...args);
+                    } catch (error) {
+                        failure = {
+                            error
+                        };
+                    }
+                }
+                if (failure) throw failure.error;
+                return value;
+            };
+        }
+        function selectionError(code, message, rows) {
+            const error = new GrokBotGatewaySessionError(code, message);
+            error.logins = rows.map((row)=>({
+                    label: row.shownLabel,
+                    lastSaved: row.lastSaved
+                }));
+            return error;
+        }
+        function shownLoginLines(rows) {
+            return rows.map((row)=>"  " + row.shownLabel + (row.lastSaved ? " (last saved)" : "")).join("\n");
+        }
+        function sessionSecrets(rows) {
+            const secrets = new Set();
+            const add = (value)=>{
+                if (typeof value !== "string") return;
+                const trimmed = value.trim().toLowerCase();
+                if (trimmed) secrets.add(trimmed);
+            };
+            for (const row of rows){
+                const descriptor = row.descriptor;
+                if (!descriptor || typeof descriptor !== "object") continue;
+                add(descriptor.token);
+                if (descriptor.headers && typeof descriptor.headers === "object") {
+                    for (const value of Object.values(descriptor.headers))add(value);
+                }
+                if (typeof descriptor.baseUrl === "string") {
+                    add(/^\s*[a-z][a-z0-9+.-]*:\/\/(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]+)/i.exec(descriptor.baseUrl)?.[1]);
+                }
+            }
+            return [
+                ...secrets
+            ];
+        }
+        function maskSecretAliases(rows) {
+            const secrets = sessionSecrets(rows);
+            const aliases = (value)=>{
+                const text = String(value).toLowerCase();
+                return secrets.some((secret)=>text === secret || secret.length >= 4 && text.includes(secret));
+            };
+            const taken = new Set(rows.flatMap((row)=>[
+                    String(row.label).toLowerCase(),
+                    String(row.id).toLowerCase()
+                ]));
+            return rows.map((row, index)=>{
+                const idMasked = aliases(row.id);
+                const labelMasked = aliases(row.label) || row.label === row.id && idMasked;
+                if (!idMasked && !labelMasked) return {
+                    ...row,
+                    shownId: row.id,
+                    shownLabel: row.label,
+                    masked: false
+                };
+                let n = index + 1;
+                while(taken.has(`login ${n}`))n += 1;
+                const placeholder = `login ${n}`;
+                taken.add(placeholder);
+                return {
+                    ...row,
+                    shownId: idMasked ? placeholder : row.id,
+                    shownLabel: labelMasked ? placeholder : row.label,
+                    masked: true
+                };
+            });
+        }
+        function chooseSavedEntryByFlag(rows, selector) {
+            if (rows.length === 0) {
+                throw new GrokBotGatewaySessionError("EMPTY_ENTRIES", "Grok Bot gateway descriptor has no saved gateway entries.");
+            }
+            const visible = markLastSaved(rows);
+            if (!selector) {
+                if (visible.length === 1) return visible[0];
+                throw selectionError("AMBIGUOUS_ENTRIES", "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + shownLoginLines(visible), visible);
+            }
+            const matches = visible.filter((row)=>matchesSelector(row, selector) || row.masked && (row.shownLabel === selector || row.shownId === selector));
+            if (matches.length === 1) return matches[0];
+            throw selectionError(matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES", (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") + "\nSaved logins:\n" + shownLoginLines(visible), visible);
+        }
+        function loadGrokBotGatewaySelection({ platform = process.platform, home = homedir(), env = process.env, appData, account, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
+            if (!SUPPORTED_PLATFORMS.has(platform)) return null;
+            const effectiveEnv = sessionEnv({
+                env,
+                appData
+            });
+            const path = grokBotGatewayDescriptorPath(home, platform, effectiveEnv);
+            if (!existsSync(path)) return null;
+            const wrapped = JSON.parse(readFileSync(path, "utf8"));
+            const password = once(getKeychainPassword);
+            const unprotect = once(unprotectData);
+            const decrypt = (encrypted)=>decryptEntry(encrypted, {
+                    platform,
+                    home,
+                    env: effectiveEnv,
+                    getKeychainPassword: password,
+                    unprotectData: unprotect
+                });
+            const rows = decorateEntries(savedEntries(wrapped), decrypt);
+            if (rows.length > 0 && rows.every((row)=>row.decryptError)) {
+                throw new GrokBotGatewaySessionError("UNREADABLE_ENTRIES", "Could not read the saved Grok Bot logins (Keychain or secret store access?).");
+            }
+            const selector = typeof account === "string" ? account.trim() : "";
+            const selected = chooseSavedEntryByFlag(maskSecretAliases(rows), selector);
+            if (typeof selected.encrypted !== "string" || !selected.encrypted) {
+                throw new GrokBotGatewaySessionError("MISSING_ENCRYPTED_PAYLOAD", "Grok Bot gateway descriptor is missing an encrypted payload.");
+            }
+            if (selected.decryptError || !selected.descriptor || typeof selected.descriptor !== "object") {
+                throw new GrokBotGatewaySessionError("UNUSABLE_SESSION", "The selected Grok Bot login could not be decrypted.");
+            }
+            const { baseUrl, token, headers } = selected.descriptor;
+            if (typeof baseUrl !== "string" || !baseUrl || typeof token !== "string" || !token) {
+                throw new GrokBotGatewaySessionError("INCOMPLETE_DESCRIPTOR", "Decrypted Grok Bot gateway descriptor is incomplete.");
+            }
+            return {
+                id: selected.shownId,
+                label: selected.shownLabel,
+                session: {
+                    gatewayUrl: baseUrl.replace(/\/$/, ""),
+                    gatewayToken: token,
+                    headers: headers ?? {}
+                }
+            };
+        }
         function inspectGrokBotGatewaySession(options = {}) {
             if (!hasGrokBotGatewaySession1(options)) {
                 return {

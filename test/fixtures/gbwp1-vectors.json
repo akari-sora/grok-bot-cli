@@ -1,0 +1,197 @@
+{
+  "protocol": "GBWP/1",
+  "generator": "scripts/gen-pairing-vectors.py (Python cryptography)",
+  "alphabet": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "vectors": [
+    {
+      "name": "basic",
+      "code": "7QF3-MXPZ-R2D4-0",
+      "codeData": "7QF3MXPZR2D4",
+      "computerPrivate": "9774676b698bab146f3dc7566dc123d70ec86e17f3d412c4356b3528ba6371e9",
+      "computerPublic": "044099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2",
+      "computerNonce": "000102030405060708090a0b0c0d0e0f",
+      "watchPrivate": "47fc098825f22568f8fb80e00c94443fa88808d6819eba0df282002874c394d3",
+      "watchPublic": "04f53e5ee268a113db77c2737aea7198909c3515fa92f4c81a7ad9b3275b0a6023f3fd88c697cd337c089041485b64e03ba2aff234799d5cd35326c1921c667bfa",
+      "watchNonce": "101112131415161718191a1b1c1d1e1f",
+      "iv": "202122232425262728292a2b",
+      "payload": "{\"gatewayUrl\":\"https://fake-pod.us12.cursorvm.com\",\"gatewayToken\":\"fake-gateway-token-0123456789\",\"headers\":{\"x-anyrun-network-token\":\"fake-route-token\"},\"label\":\"fake@example.com\"}",
+      "status": 0,
+      "ecdhX": "bbaa2927d3082523b62aefc5fec5b337211196c40e56614afdb90b17a45e0f53",
+      "transcriptHash": "a5ddbf370c918995fbed22700db85f302fd764ff6b014629fca3c269a2797467",
+      "prk": "8409786090fbaa5974486b8aa90520d752434129597024a91e6a1a40f192384c",
+      "keys": {
+        "tag watch": "54ec58be7e4fecbed6e7b57d8c91dd14c43d580b52bdf02b5cdbd3351554fb50",
+        "tag computer": "573001dbbc5170c225507dc1a492880146feab01f411c3a24af5e8558a92a862",
+        "enc": "e6a3ba16b5a60feca8171ba2adb0563163f2a1d7bc1415ac8d9a2bae9e094531",
+        "ack": "eb3fe2807c91e663e33c7481b133900c5875509ddd127acbdfd27b974c0e269f"
+      },
+      "tagWatch": "5650f73efbde966ffc8784a161d2d7d3969e8f24f8b2e8dfda3e8c179ee7f1a3",
+      "tagComputer": "72ac3ea39459ce827578d2b925b1f11a667ed4c0bec583224516a649c3ba79e6",
+      "tagAck": "7b69b22f81914f9e069d9b4c4a7703782803390e7365072d7e8a7de55ab357ee",
+      "m1": "00564742575001044099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2000102030405060708090a0b0c0d0e0f",
+      "m2": "007104f53e5ee268a113db77c2737aea7198909c3515fa92f4c81a7ad9b3275b0a6023f3fd88c697cd337c089041485b64e03ba2aff234799d5cd35326c1921c667bfa101112131415161718191a1b1c1d1e1f5650f73efbde966ffc8784a161d2d7d3969e8f24f8b2e8dfda3e8c179ee7f1a3",
+      "m3": "00f172ac3ea39459ce827578d2b925b1f11a667ed4c0bec583224516a649c3ba79e6202122232425262728292a2baa8f50698556251b7369f0ffad2631b79bc7add238bbad7de1624ee088e4718cef35278503a8f505064d36bc4b231c6d249e55531dda2a55944fdff8992d873ab6765eadf684019ddfa954d362c0c66ba393fee4673c01e09cd35dc5db5a822f148bbfffc2950ef5e15d0afc1cffc222720c5fd020dcf0568d31bd9fce8e2c81a26859b8316f88f35c12c9579a6ec57fc6fcf29eb342eb999651232c04f637c076e767b7b0a245be505eed223b4a4a1288a46f688d25b00361f71e99af2c78d575dd6778d4",
+      "m4": "0021007b69b22f81914f9e069d9b4c4a7703782803390e7365072d7e8a7de55ab357ee"
+    },
+    {
+      "name": "rejected-status",
+      "code": "0000-0000-00ZZ-2",
+      "codeData": "0000000000ZZ",
+      "computerPrivate": "2a6edf1d32d868a1072feedc1afebb55a66d35c467071fec849a0c7d02b4fb32",
+      "computerPublic": "04b5fba240e48b8ba033e8a24479a09e51af9d78fc070d022b0c573ba1b06180cf1ab1af33432333f290a585eaf1548cf22fd4c5c1c86468a4c4865e54f5720260",
+      "computerNonce": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "watchPrivate": "52534adcd864b4ee92e114ab70b1e8a78391733df9d258270d551623c91a0636",
+      "watchPublic": "044ef7e13eae2f48fb78ce41eb85a62d312cbc0d31ee8d599b07b05c6a46100e6a0c5c67eb4c23eded3c941b4510d91429b2225b0ff188b85057d7ae71e8f4a9e9",
+      "watchNonce": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "iv": "010101010101010101010101",
+      "payload": "{\"gatewayUrl\":\"https://fake-pod.us12.cursorvm.com\",\"gatewayToken\":\"fake-gateway-token-0123456789\",\"headers\":{\"x-anyrun-network-token\":\"fake-route-token\"},\"label\":\"fake@example.com\"}",
+      "status": 1,
+      "ecdhX": "eeeaf84a8c6a1e8d7489f494a7e58b259da890a6655c9a5e1c67414ca77fe5cf",
+      "transcriptHash": "d4b898e3fabfe89afb3e546c055f3db83c7b344f7f8d37165eab110fe2e6597e",
+      "prk": "2019efdae5360f138748cd1603eff7c243cb881723af6659a97e80117b60d9ce",
+      "keys": {
+        "tag watch": "8f0fd9cc4a29c125614728db4d70f208dd254b12c665e95e16145858fa27589e",
+        "tag computer": "82cfb20adf06c5909baa47f84e2909b6165a8c98dd8352ba882d1deb5b2a7093",
+        "enc": "86e7fa2b241f349674e82b1f8037511c4dc22d8457523553fa108d71b0b54ee2",
+        "ack": "43c75915408f12b0a9e8f47f41ab904e11403563ae4e502865c75466b1b185d6"
+      },
+      "tagWatch": "bdefab041b181f0126eb99c05e8833b922ea366453af44f2fe1689148469cf7b",
+      "tagComputer": "b4adce66269c7effc0bf3429362f101ac0255b6b84b939f8def6aaa75eec90fe",
+      "tagAck": "b3c60c5d5ee71cae49cf85624da696c6cebc535ee145fb72f1f183edc0f624a1",
+      "m1": "0056474257500104b5fba240e48b8ba033e8a24479a09e51af9d78fc070d022b0c573ba1b06180cf1ab1af33432333f290a585eaf1548cf22fd4c5c1c86468a4c4865e54f5720260a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "m2": "0071044ef7e13eae2f48fb78ce41eb85a62d312cbc0d31ee8d599b07b05c6a46100e6a0c5c67eb4c23eded3c941b4510d91429b2225b0ff188b85057d7ae71e8f4a9e95a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5abdefab041b181f0126eb99c05e8833b922ea366453af44f2fe1689148469cf7b",
+      "m3": "00f1b4adce66269c7effc0bf3429362f101ac0255b6b84b939f8def6aaa75eec90fe0101010101010101010101019b4baabd42b8fe2c3aebc4085ead8e76f0c9d62b4dad7c1875366864f94ec3026c0cf4c4cea1f7fba235897fe6ef14c85d579b1a0e0cc269c4f228a94920a7d2be6b0a0f15eb9464140ba0c046d83057cccea7f0a83104d683fa84cc15893b475b9fd78f031dbda965f46943aa30d8701f6c727fd4db467c540d2bffbd3565dde03d879db600ef0abd33232213ac673816f7e3d65ab12eb18ecfbb4fce500d4036ef6e610f5849151cc02976e9339746fb1dfc57ac51f12d3f2f4d59b5bd292998153b6f27",
+      "m4": "002101b3c60c5d5ee71cae49cf85624da696c6cebc535ee145fb72f1f183edc0f624a1"
+    },
+    {
+      "name": "leading-zero-shared-secret",
+      "code": "ABCD-EFGH-JKMN-3",
+      "codeData": "ABCDEFGHJKMN",
+      "computerPrivate": "c1f5dcc68bd333d4abb7e06a817fc8a703b0c78954e0b5c0547cccf2b49e8bf7",
+      "computerPublic": "04d5dfc20a77d9f297feab7c8965831b552cc54551e6ffd35dab06bb414ae97e7065d7cf7ede44f9af0fe0cc355d79f7f7d558781c29fd2d3722792709c282865e",
+      "computerNonce": "11111111111111111111111111111111",
+      "watchPrivate": "a07e80c9b0cbc94af39e554c1de10ce63368cf06f5ac01f702708b2a8f52816b",
+      "watchPublic": "041e0ba546d9d579408c6d6d28ded13edbfc87c9659763bbab536acb1e2a278c6867f38d90587f7a7fc05f68f352f2d2ff1044219af038364cf5b091bcc9d78804",
+      "watchNonce": "22222222222222222222222222222222",
+      "iv": "333333333333333333333333",
+      "payload": "{\"gatewayUrl\":\"https://fake-pod.us12.cursorvm.com\",\"gatewayToken\":\"fake-gateway-token-0123456789\",\"headers\":{\"x-anyrun-network-token\":\"fake-route-token\"},\"label\":\"fake@example.com\"}",
+      "status": 2,
+      "ecdhX": "00e2608cd005d845f36f09b77c044c2d95938b9389e7f44f81bcd0c2dacced4c",
+      "transcriptHash": "d30713a3e04b57186a2921fa4470bcc2e2c0ec57a44af6bc2e66a67d8216a000",
+      "prk": "7aca97102ae17806d20274870c6df72f11b2f22d8cbe30d5919e31b424ae8757",
+      "keys": {
+        "tag watch": "e76e2149caf59a0685a5871ef8320682bb3b56df6c28ec42791dc0862b834bf2",
+        "tag computer": "a859379c2c02a1afd13b8985358d2f8b900ef292a364bead164ba8eef4cc3c7c",
+        "enc": "d66866293fe7ea7422b158a6d42554b3a814ed0c6985f5f927d4184363ed5f0a",
+        "ack": "a7f4ca376ef2889920e3c80da4b98bcde894d9811a49ece21cbd944e2c029325"
+      },
+      "tagWatch": "c6b72eb19c5aa356bb682038ab40108c151cc0ee39f8787109d565cfdfb04532",
+      "tagComputer": "3da726c3322398622dc011ee3a08f0777bd15886b235fefbf3b638d8fddb93a8",
+      "tagAck": "453a497f1deb34194d50ca6e82b99d95cfa0554505f96d187c2c930306880678",
+      "m1": "0056474257500104d5dfc20a77d9f297feab7c8965831b552cc54551e6ffd35dab06bb414ae97e7065d7cf7ede44f9af0fe0cc355d79f7f7d558781c29fd2d3722792709c282865e11111111111111111111111111111111",
+      "m2": "0071041e0ba546d9d579408c6d6d28ded13edbfc87c9659763bbab536acb1e2a278c6867f38d90587f7a7fc05f68f352f2d2ff1044219af038364cf5b091bcc9d7880422222222222222222222222222222222c6b72eb19c5aa356bb682038ab40108c151cc0ee39f8787109d565cfdfb04532",
+      "m3": "00f13da726c3322398622dc011ee3a08f0777bd15886b235fefbf3b638d8fddb93a83333333333333333333333334e64e658a4bd4382be65d62b6a155bd32afadad5adf503205e6e474ddb7a159dd9ff2350788b30a329f3799afdaf485ce78b62888a8b9938e004c6a91cc438001ab1d94ab5aaf3b296884a9f0bdfaf787d865fac791c2458126c466ddecf3e16e5a5aa0ac056d2931838dcf6ed5129c8ef8806394d02c12cd7da2449ee96881a266fbab44caa8ebf69b1dad8a59584b135823c4edb84172b122af28c3bf1a645d06019cf581db824bb338d33c14eb20415f2af1e1b2c02bcf60c4da5a051944bde8e6e2360",
+      "m4": "002102453a497f1deb34194d50ca6e82b99d95cfa0554505f96d187c2c930306880678"
+    },
+    {
+      "name": "edge-coordinates",
+      "code": "ZZZZ-ZZZZ-ZZZZ-C",
+      "codeData": "ZZZZZZZZZZZZ",
+      "computerPrivate": "26f124db23f1b2130ee8530c1af47975ba41829a352198645865a39d63097fec",
+      "computerPublic": "04c4aac063081c288ee44b99c718d3c392694cb9dd03bb0c84882f97b7f31ee70cf4615763c93a392b243e49fefc0a8330f218ed64d9769bbcd9476b8e2a961f6e",
+      "computerNonce": "44444444444444444444444444444444",
+      "watchPrivate": "5eb4442538de27d58a4545e6d67819fa39f30fb9cc9c77aca7c34e7f863a9f16",
+      "watchPublic": "0400dad67e2cf229335efc1259c32ef52e001901973fe722600427062ddc54a41d96aa1381faf04d87728eb11d992561df7fdb249f05dda0c1291aaf65678e5011",
+      "watchNonce": "55555555555555555555555555555555",
+      "iv": "666666666666666666666666",
+      "payload": "{\"gatewayUrl\":\"https://fake-pod.us12.cursorvm.com\",\"gatewayToken\":\"fake-gateway-token-0123456789\",\"headers\":{\"x-anyrun-network-token\":\"fake-route-token\"},\"label\":\"fake@example.com\"}",
+      "status": 0,
+      "ecdhX": "ae98e25725b890263771904e22f7f49f2c1552b7c3713ff6ed1ab24b8eb4e262",
+      "transcriptHash": "6c5f45358d6423db771912debb1c29a9858f2a075f11e5d01f292866be752cde",
+      "prk": "0dbe644d212d68e8d40d7757e807b72d79524c290a1045bf642de454606fb519",
+      "keys": {
+        "tag watch": "0fdc15856636e7f69b58b851ced1b7dcfbc11df783068ec9796c3f4b5d3a3b23",
+        "tag computer": "e43aa815e6c6e1ef278f232103571a359ad5f7f0ae1f952ad530feea11146ce4",
+        "enc": "19a952f474ded4ef95cddc9472770e7428dc46b582cc5700a2cdd10ef5db3df2",
+        "ack": "c496ec0a7e55cb8a680ffd2acd953c73a299398dd3345bc0d2068c6b2246f526"
+      },
+      "tagWatch": "8d1fca185f3112b3f33477577ef502d0ecfe35e0d16fdf09396f30c3bdf4b737",
+      "tagComputer": "10121ac3cb5e929c28a2e95cd08a9e1701516e60d1374c8bbf1eedb605df0f9e",
+      "tagAck": "ac949e1006b11810cb833be46b726028f7b68c57be626f7ba3d3da9e4bb5e00a",
+      "m1": "0056474257500104c4aac063081c288ee44b99c718d3c392694cb9dd03bb0c84882f97b7f31ee70cf4615763c93a392b243e49fefc0a8330f218ed64d9769bbcd9476b8e2a961f6e44444444444444444444444444444444",
+      "m2": "00710400dad67e2cf229335efc1259c32ef52e001901973fe722600427062ddc54a41d96aa1381faf04d87728eb11d992561df7fdb249f05dda0c1291aaf65678e5011555555555555555555555555555555558d1fca185f3112b3f33477577ef502d0ecfe35e0d16fdf09396f30c3bdf4b737",
+      "m3": "00f110121ac3cb5e929c28a2e95cd08a9e1701516e60d1374c8bbf1eedb605df0f9e6666666666666666666666661b039908f83ed01f4f2c99951311e5de4496914439e57bef0ab00077eb5deb1fb5a00499d511979aa2b3d17d52b21c59a1ab0f5d9c6d43d9eda126ec37ee3b49595ccfe9134455ae04ff4cb9276e6a0cd90a443ecfa5511dc8b219b8f7a49cef7d7b1309d39f9fd35a70598cd800d4d7cd2099563422a36b398513c844824df31ac0bbf2b9afa2d0761c673260aea4875c77301c4d285d99b247e3bdb7fa9b7bbe97bb53ae588dec4f354d03d34caf809b9e910326086ad6ca25dae2ac74c4da90bc98cc7e",
+      "m4": "002100ac949e1006b11810cb833be46b726028f7b68c57be626f7ba3d3da9e4bb5e00a"
+    }
+  ],
+  "codes": [
+    {
+      "input": "7QF3-MXPZ-R2D4-0",
+      "normalized": "7QF3MXPZR2D40"
+    },
+    {
+      "input": "7qf3 mxpz r2d4 0",
+      "normalized": "7QF3MXPZR2D40"
+    },
+    {
+      "input": "1LIO00000000W",
+      "normalized": "111000000000W"
+    },
+    {
+      "input": "Q7F3MXPZR2D40",
+      "normalized": null
+    },
+    {
+      "input": "7QF3MAPZR2D40",
+      "normalized": null
+    },
+    {
+      "input": "7QF3MXPZR2D4",
+      "normalized": null
+    },
+    {
+      "input": "7QF3MXPZR2D400",
+      "normalized": null
+    },
+    {
+      "input": "7QFUMXPZR2D40",
+      "normalized": null
+    },
+    {
+      "input": "7QFÉMXPZR2D40",
+      "normalized": null
+    },
+    {
+      "input": "",
+      "normalized": null
+    }
+  ],
+  "badPublicKeys": {
+    "zero-prefix": "004099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2",
+    "compressed-prefix": "024099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2",
+    "hybrid-prefix": "064099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2",
+    "off-curve": "044099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c3",
+    "x-equals-p": "04ffffffff00000001000000000000000000000000ffffffffffffffffffffffff7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c2",
+    "truncated": "044099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155",
+    "too-long": "044099a55040a17cfdbbe98d52399d4a22a796e8903598cfcdc7dfce6bb97c073b7e2cf38621e658922427394de127d0592b6ebc31e75862d4adf699a9f47155c200",
+    "all-zero": "0400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "hkdfRfc5869": [
+    {
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "salt": "000102030405060708090a0b0c",
+      "info": "f0f1f2f3f4f5f6f7f8f9",
+      "length": 42,
+      "prk": "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5",
+      "okm": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+    },
+    {
+      "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "salt": "",
+      "info": "",
+      "length": 42,
+      "prk": "19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04",
+      "okm": "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "about": "Session payloads the watch accepts or rejects (SessionVault.import with the production UrlPolicy). The grok-bot-cli fork's `wear pair` pre-flight must agree on every case. All secrets are synthetic.",
+  "cases": [
+    {
+      "name": "cursorvm gateway",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "apex cursor.com",
+      "json": "{\"gatewayUrl\":\"https://cursor.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "apex cursor.sh",
+      "json": "{\"gatewayUrl\":\"https://cursor.sh\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "api2.cursor.sh",
+      "json": "{\"gatewayUrl\":\"https://api2.cursor.sh\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "trailing slash",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com/\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "url with surrounding spaces",
+      "json": "{\"gatewayUrl\":\"  https://fake-1.us12.cursorvm.com  \",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "token with surrounding spaces is trimmed",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"  fake-gw-token  \",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "upper-case header name is lower-cased",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"X-Anyrun-Network-Token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "eight headers",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-h0\":\"v\",\"x-h1\":\"v\",\"x-h2\":\"v\",\"x-h3\":\"v\",\"x-h4\":\"v\",\"x-h5\":\"v\",\"x-h6\":\"v\",\"x-h7\":\"v\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "no headers",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "long label is truncated, not rejected",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "accept": true
+    },
+    {
+      "name": "token of 4096 chars",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "header value with tab inside",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-a\":\"fake\\tvalue\"},\"label\":\"fake@example.com\"}",
+      "accept": true
+    },
+    {
+      "name": "http scheme",
+      "json": "{\"gatewayUrl\":\"http://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "foreign host",
+      "json": "{\"gatewayUrl\":\"https://evil.example\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "look-alike suffix",
+      "json": "{\"gatewayUrl\":\"https://fake.cursorvm.com.evil.example\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "look-alike without dot",
+      "json": "{\"gatewayUrl\":\"https://fakecursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "userinfo",
+      "json": "{\"gatewayUrl\":\"https://user:pass@fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "port out of range",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com:70000\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "localhost",
+      "json": "{\"gatewayUrl\":\"https://localhost\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "loopback ip",
+      "json": "{\"gatewayUrl\":\"http://127.0.0.1:8080\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "empty token",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "token with inner space",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake gw\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "token of 4097 chars",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "non-ASCII token",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake token\",\"headers\":{\"x-anyrun-network-token\":\"fake-route\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "nine headers",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-h0\":\"v\",\"x-h1\":\"v\",\"x-h2\":\"v\",\"x-h3\":\"v\",\"x-h4\":\"v\",\"x-h5\":\"v\",\"x-h6\":\"v\",\"x-h7\":\"v\",\"x-h8\":\"v\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "authorization header",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"authorization\":\"Bearer fake\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "cookie header",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"cookie\":\"fake=1\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "host header",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"host\":\"evil.example\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "header name without x- prefix",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"y-route\":\"fake\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "header name with underscore",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x_route\":\"fake\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "header value with leading space",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-a\":\" fake\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "header value with newline",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-a\":\"fake\\nInjected: 1\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "empty header value",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"gatewayToken\":\"fake-gw-token\",\"headers\":{\"x-a\":\"\"},\"label\":\"fake@example.com\"}",
+      "accept": false
+    },
+    {
+      "name": "not JSON",
+      "json": "fake-not-json",
+      "accept": false
+    },
+    {
+      "name": "missing token field",
+      "json": "{\"gatewayUrl\":\"https://fake-1.us12.cursorvm.com\",\"headers\":{},\"label\":\"x\"}",
+      "accept": false
+    }
+  ]
+}

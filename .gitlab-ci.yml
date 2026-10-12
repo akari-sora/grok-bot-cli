@@ -24,7 +24,10 @@ unit:
   script:
     - npm ci
     - npm run build
-    - npm run test:unit
+    # Run the tests as the image's unprivileged user: root ignores the
+    # permission bits that the read-only fixtures rely on.
+    - chown -R node:node "$CI_PROJECT_DIR"
+    - su node -s /bin/sh -c "npm run test:unit"
 
 # Self-hosted Windows. Tags, manual web runs, and main pushes that change
 # shipped code, tests, or packaging. A CI-only push still runs Linux only.

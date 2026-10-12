@@ -364,6 +364,198 @@ export function loadGrokBotGatewaySession({
   };
 }
 
+/** Calls `fn` at most once; later calls return the first result or rethrow the first error. */
+function once(fn) {
+  let done = false;
+  let value;
+  let failure;
+  return (...args) => {
+    if (!done) {
+      done = true;
+      try {
+        value = fn(...args);
+      } catch (error) {
+        failure = { error };
+      }
+    }
+    if (failure) throw failure.error;
+    return value;
+  };
+}
+
+function selectionError(code, message, rows) {
+  const error = new GrokBotGatewaySessionError(code, message);
+  // Shown labels only (see maskSecretAliases), for the caller's own message; never a secret.
+  error.logins = rows.map((row) => ({ label: row.shownLabel, lastSaved: row.lastSaved }));
+  return error;
+}
+
+function shownLoginLines(rows) {
+  return rows.map((row) => "  " + row.shownLabel + (row.lastSaved ? " (last saved)" : "")).join("\n");
+}
+
+/** Secrets of every decrypted login: tokens, routing header values and gateway hosts. */
+function sessionSecrets(rows) {
+  const secrets = new Set();
+  const add = (value) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed) secrets.add(trimmed);
+  };
+  for (const row of rows) {
+    const descriptor = row.descriptor;
+    if (!descriptor || typeof descriptor !== "object") continue;
+    add(descriptor.token);
+    if (descriptor.headers && typeof descriptor.headers === "object") {
+      for (const value of Object.values(descriptor.headers)) add(value);
+    }
+    if (typeof descriptor.baseUrl === "string") {
+      add(/^\s*[a-z][a-z0-9+.-]*:\/\/(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]+)/i.exec(descriptor.baseUrl)?.[1]);
+    }
+  }
+  return [...secrets];
+}
+
+/**
+ * Labels and ids are printed; a login whose label or id equals or contains a token, a routing header value or a
+ * gateway host (of any saved login) is shown as "login <n>" instead. Containment counts for secrets of 4 or more
+ * characters, case-insensitively. Each placeholder is unique, case-insensitively, against every real label and id
+ * and every other placeholder (n starts at the row's position and moves up until it is free), so it always selects
+ * exactly one login.
+ */
+function maskSecretAliases(rows) {
+  const secrets = sessionSecrets(rows);
+  const aliases = (value) => {
+    const text = String(value).toLowerCase();
+    return secrets.some((secret) => text === secret || (secret.length >= 4 && text.includes(secret)));
+  };
+  const taken = new Set(rows.flatMap((row) => [String(row.label).toLowerCase(), String(row.id).toLowerCase()]));
+  return rows.map((row, index) => {
+    const idMasked = aliases(row.id);
+    const labelMasked = aliases(row.label) || (row.label === row.id && idMasked);
+    if (!idMasked && !labelMasked) return { ...row, shownId: row.id, shownLabel: row.label, masked: false };
+    let n = index + 1;
+    while (taken.has(`login ${n}`)) n += 1;
+    const placeholder = `login ${n}`;
+    taken.add(placeholder);
+    return {
+      ...row,
+      shownId: idMasked ? placeholder : row.id,
+      shownLabel: labelMasked ? placeholder : row.label,
+      masked: true,
+    };
+  });
+}
+
+/**
+ * Like chooseSavedEntry, but the selection comes from --account only, messages do not offer GBOT_ACCOUNT, and only
+ * shown labels appear. A masked login can also be chosen by its placeholder ("login 2").
+ */
+function chooseSavedEntryByFlag(rows, selector) {
+  if (rows.length === 0) {
+    throw new GrokBotGatewaySessionError(
+      "EMPTY_ENTRIES",
+      "Grok Bot gateway descriptor has no saved gateway entries.",
+    );
+  }
+  const visible = markLastSaved(rows);
+  if (!selector) {
+    if (visible.length === 1) return visible[0];
+    throw selectionError(
+      "AMBIGUOUS_ENTRIES",
+      "Several Grok Bot logins are saved. Choose one with --account <label>.\nSaved logins:\n" + shownLoginLines(visible),
+      visible,
+    );
+  }
+  const matches = visible.filter((row) =>
+    matchesSelector(row, selector) || (row.masked && (row.shownLabel === selector || row.shownId === selector)));
+  if (matches.length === 1) return matches[0];
+  throw selectionError(
+    matches.length === 0 ? "UNKNOWN_ACCOUNT" : "AMBIGUOUS_ENTRIES",
+    (matches.length === 0 ? "No saved Grok Bot login matches --account." : "More than one saved Grok Bot login matches --account.") +
+      "\nSaved logins:\n" + shownLoginLines(visible),
+    visible,
+  );
+}
+
+/**
+ * The selected saved login and its gateway session, from one read and one decrypt pass of the descriptor, for
+ * commands that hand the session to another device (`gbot wear pair`). The OS secret (Keychain password,
+ * secret-tool password, DPAPI key) is read at most once per call. The selection comes from `account` alone:
+ * GBOT_ACCOUNT is never consulted. One saved login is used as is; several need `account` (exact label or id, a
+ * case-insensitive e-mail label, a unique >= 8-hex id prefix, or the "login <n>" placeholder of a masked login).
+ * The returned `id` and `label`, and the labels in errors, are safe to print (see maskSecretAliases). Errors are
+ * GrokBotGatewaySessionError with a `code`: UNREADABLE_ENTRIES when no saved login could be decrypted (the OS
+ * secret store refused or is unavailable); selection errors also carry `logins` ({ label, lastSaved }). Returns
+ * null when there is no descriptor. It never reaches the network and never mints a session.
+ *
+ * @param {{ platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv, appData?: string, account?: string,
+ *   getKeychainPassword?: (platform?: NodeJS.Platform) => string, unprotectData?: (blob: Buffer) => Buffer }} [options]
+ * @returns {{ id: string, label: string, session: { gatewayUrl: string, gatewayToken: string, headers: Record<string, unknown> } } | null}
+ */
+export function loadGrokBotGatewaySelection({
+  platform = process.platform,
+  home = homedir(),
+  env = process.env,
+  appData,
+  account,
+  getKeychainPassword = readKeychainPassword,
+  unprotectData = unprotectWithDpapi,
+} = {}) {
+  if (!SUPPORTED_PLATFORMS.has(platform)) return null;
+
+  const effectiveEnv = sessionEnv({ env, appData });
+  const path = grokBotGatewayDescriptorPath(home, platform, effectiveEnv);
+  if (!existsSync(path)) return null;
+
+  const wrapped = JSON.parse(readFileSync(path, "utf8"));
+  const password = once(getKeychainPassword);
+  const unprotect = once(unprotectData);
+  const decrypt = (encrypted) => decryptEntry(encrypted, {
+    platform,
+    home,
+    env: effectiveEnv,
+    getKeychainPassword: password,
+    unprotectData: unprotect,
+  });
+  const rows = decorateEntries(savedEntries(wrapped), decrypt);
+  // Only when every saved login failed to decrypt; a login without an encrypted payload is a different problem
+  // (MISSING_ENCRYPTED_PAYLOAD when it is selected).
+  if (rows.length > 0 && rows.every((row) => row.decryptError)) {
+    throw new GrokBotGatewaySessionError(
+      "UNREADABLE_ENTRIES",
+      "Could not read the saved Grok Bot logins (Keychain or secret store access?).",
+    );
+  }
+  const selector = typeof account === "string" ? account.trim() : "";
+  const selected = chooseSavedEntryByFlag(maskSecretAliases(rows), selector);
+  if (typeof selected.encrypted !== "string" || !selected.encrypted) {
+    throw new GrokBotGatewaySessionError(
+      "MISSING_ENCRYPTED_PAYLOAD",
+      "Grok Bot gateway descriptor is missing an encrypted payload.",
+    );
+  }
+  if (selected.decryptError || !selected.descriptor || typeof selected.descriptor !== "object") {
+    throw new GrokBotGatewaySessionError("UNUSABLE_SESSION", "The selected Grok Bot login could not be decrypted.");
+  }
+  const { baseUrl, token, headers } = selected.descriptor;
+  if (typeof baseUrl !== "string" || !baseUrl || typeof token !== "string" || !token) {
+    throw new GrokBotGatewaySessionError(
+      "INCOMPLETE_DESCRIPTOR",
+      "Decrypted Grok Bot gateway descriptor is incomplete.",
+    );
+  }
+  return {
+    id: selected.shownId,
+    label: selected.shownLabel,
+    session: {
+      gatewayUrl: baseUrl.replace(/\/$/, ""),
+      gatewayToken: token,
+      headers: headers ?? {},
+    },
+  };
+}
+
 export function inspectGrokBotGatewaySession(options = {}) {
   if (!hasGrokBotGatewaySession(options)) {
     return { present: false, usable: false };
