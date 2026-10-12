@@ -149,14 +149,31 @@ test("Ctrl-C after the session was sent prints the unknown text in text mode", {
   assert.match(result.stdout, /Sent; no confirmation\. Check the watch screen\./);
 });
 
-/** Children of `pid` (POSIX ps). */
+/** Children of `pid`: POSIX ps, or /proc where ps is absent (slim Linux images). */
 function childrenOf(pid) {
-  return execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" })
-    .trim()
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(([, ppid]) => ppid === pid)
-    .map(([child]) => child);
+  let pairs;
+  try {
+    pairs = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" })
+      .trim()
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/).map(Number));
+  } catch (error) {
+    if (error.code !== "ENOENT" || process.platform !== "linux") throw error;
+    pairs = [];
+    for (const entry of readdirSync("/proc")) {
+      if (!/^\d+$/.test(entry)) continue;
+      let stat;
+      try {
+        stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+      } catch {
+        continue; // exited while listing
+      }
+      // Field 4 is the parent pid; the command name in parentheses may contain spaces.
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      pairs.push([Number(entry), Number(fields[1])]);
+    }
+  }
+  return pairs.filter(([, ppid]) => ppid === pid).map(([child]) => child);
 }
 
 test("the worker killed (SIGKILL) after the session was sent: the wrapper still reports unknown (exit 6)", { skip, timeout: 30_000 }, async (t) => {
@@ -184,11 +201,14 @@ test("the worker killed (SIGKILL) after the session was sent: the wrapper still 
   assertNoSecrets(result, code);
 });
 
-for (const [name, block] of [
-  ["the directory is read-only", (dir) => chmodSync(dir, 0o500)],
-  ["`sent` already exists", (dir) => writeFileSync(join(dir, "sent"), "fake-blocker", { mode: 0o600 })],
+// Root ignores directory permission bits, so a read-only directory blocks nothing there.
+const rootSkip = process.getuid?.() === 0 ? "root bypasses directory permission bits" : false;
+
+for (const [name, block, caseSkip] of [
+  ["the directory is read-only", (dir) => chmodSync(dir, 0o500), rootSkip],
+  ["`sent` already exists", (dir) => writeFileSync(join(dir, "sent"), "fake-blocker", { mode: 0o600 }), false],
 ]) {
-  test(`the send cannot be recorded (${name}): nothing is sent, exit 1`, { skip, timeout: 30_000 }, async (t) => {
+  test(`the send cannot be recorded (${name}): nothing is sent, exit 1`, { skip: skip || caseSkip, timeout: 30_000 }, async (t) => {
     const f = setup(t);
     const code = randomCode();
     const fake = await startFakeWatch({
