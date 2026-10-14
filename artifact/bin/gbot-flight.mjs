@@ -31388,9 +31388,6 @@ var __webpack_modules__ = {
         const WRAPPER_LOG_FILENAME = "codex-desktop-to-daemon.log";
         const ENV_LOG_FILENAME = "codex-desktop-shared-daemon-env.log";
         const STANDALONE_REAL_SUFFIX = (0, node_path__rspack_import_3.join)("packages", "standalone", "current", "bin", "codex");
-        function codexHomeDir(env = process.env) {
-            return env.CODEX_HOME || join(env.HOME || homedir(), ".codex");
-        }
         function userHomeDir(env = process.env) {
             return env.HOME || (0, node_os__rspack_import_2.homedir)();
         }
