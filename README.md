@@ -1,5 +1,7 @@
 # About this fork / 關於這個 fork
 
+> Canonical repository and issues: https://gitlab.com/aa22396584/grok-bot-cli. The GitHub copy at https://github.com/hoshitabi/grok-bot-cli is a read-only mirror.
+
 [![pipeline](https://gitlab.com/aa22396584/grok-bot-cli/badges/main/pipeline.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines)
 [![release](https://gitlab.com/aa22396584/grok-bot-cli/-/badges/release.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
