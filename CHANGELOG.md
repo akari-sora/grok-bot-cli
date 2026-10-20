@@ -4,6 +4,12 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### Unreleased
+
+- A gateway answer of HTTP 417 is reported as an asleep box: `kind: "asleep"`, `code: "BOX_ASLEEP"`, and a message that says how to wake it (open the Grok Bot app and select a bot, or switch the app to that login). Seen live on 2026-10-20: every call for a login answered 417 until its box was woken. A send to an asleep box stays `delivery: "rejected"`.
+- The gateway read cap is now 16 MiB (was 2 MiB): `gbot skills list` on a real account passed 2 MiB. `GBOT_MAX_RESPONSE_BYTES` sets it between 64 KiB and 256 MiB; other values are ignored. The read still streams and stops at the cap, and the error names the variable.
+- With `CURSOR_ACCESS_TOKEN`, `EnsureSandBox` now asks for `{ "wake": true }` instead of `{}`. The field comes from the Grok Bot app's `EnsureSandBoxRequest`; this path was not tested against the live backend.
+
 ### 0.11.2-iml1s.4
 
 - `gbot wear pair <ip:port> [--account <label|id>]` sends the selected saved login's gateway session to the grok-bot-watch Wear OS app on the same network over GBWP/1 (ECDH P-256, HKDF-SHA256, AES-256-GCM, authenticated by the 60-bit code the watch shows). The code is typed at a hidden prompt and handed to the worker in a 0600 file, never in argv or an environment value. A typo in the check character is caught before any network access; the session is checked with the watch's own import rules before connecting; `GBOT_ACCOUNT` is ignored; nothing secret is printed. Exit codes 0/2/3/4/5/6 as listed in FORK.md.

@@ -65100,7 +65100,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         const GATEWAY_TIMEOUT_MS = 30000;
         const SEND_GATEWAY_TIMEOUT_MS = 15000;
-        const GATEWAY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+        const GATEWAY_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+        const MIN_RESPONSE_BYTES = 64 * 1024;
+        const MAX_RESPONSE_BYTES = 256 * 1024 * 1024;
+        function gatewayMaxResponseBytes(env = process.env) {
+            const raw = String(env.GBOT_MAX_RESPONSE_BYTES ?? "").trim();
+            if (!/^[0-9]+$/.test(raw)) return GATEWAY_MAX_RESPONSE_BYTES;
+            const n = Number(raw);
+            if (!Number.isSafeInteger(n) || n <= 0) return GATEWAY_MAX_RESPONSE_BYTES;
+            return Math.min(MAX_RESPONSE_BYTES, Math.max(MIN_RESPONSE_BYTES, n));
+        }
+        const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot, or switch the app to this login, to wake it; then retry)";
         function assertGatewayActive(signal) {
             if (signal?.aborted) {
                 const error = new GatewayError("Gateway submission cancelled before transmission");
@@ -65192,11 +65202,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
             });
         }
+        function tooLargeMessage(maxBytes) {
+            return "Gateway response too large (over " + maxBytes + " bytes); set GBOT_MAX_RESPONSE_BYTES (up to " + MAX_RESPONSE_BYTES + ") to read it";
+        }
         async function readTextCapped(res, maxBytes, signal) {
             if (!res.body || typeof res.body.getReader !== "function") {
                 const text = await raceSignal(res.text(), signal);
                 if (Buffer.byteLength(text, "utf8") > maxBytes) {
-                    throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+                    throw new GatewayError(tooLargeMessage(maxBytes));
                 }
                 return text;
             }
@@ -65211,14 +65224,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     try {
                         await reader.cancel();
                     } catch  {}
-                    throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+                    throw new GatewayError(tooLargeMessage(maxBytes));
                 }
                 chunks.push(value);
             }
             return Buffer.concat(chunks.map((c)=>Buffer.from(c.buffer ?? c, c.byteOffset ?? 0, c.byteLength ?? c.length))).toString("utf8");
         }
         async function readJson(res, signal) {
-            const text = await readTextCapped(res, GATEWAY_MAX_RESPONSE_BYTES, signal);
+            const text = await readTextCapped(res, gatewayMaxResponseBytes(), signal);
             if (!text) return {};
             try {
                 return JSON.parse(text);
@@ -65247,7 +65260,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     redirect: "error",
                     signal: gatewayDeadline(signal),
                     headers: (0, _headers_js__rspack_import_5._6)(accessToken),
-                    body: "{}"
+                    body: JSON.stringify({
+                        wake: true
+                    })
                 });
                 body = await readJson(res);
             } catch (error) {
@@ -65311,6 +65326,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (failureCode === "gateway/unknown-method") kind = "unsupported";
             else if (status === 401 || status === 403) kind = "auth";
             else if (status === 404 && type.includes("text/plain") && data && typeof data.raw === "string" && data.raw.includes("could not be routed")) kind = "routing";
+            else if (status === 417) kind = "asleep";
             else if (status >= 500) kind = "server";
             else if (status >= 400 && status < 500) kind = "client";
             return {
@@ -65360,9 +65376,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!res.ok) {
                 const detail = data.message || data.error || data.raw || res.statusText;
                 const classified = failureKind(res.status, res.headers.get("content-type"), data);
-                throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
+                const asleep = classified.kind === "asleep";
+                throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session) + (asleep ? ASLEEP_HINT : ""), {
                     status: res.status,
                     method,
+                    ...asleep ? {
+                        code: "BOX_ASLEEP"
+                    } : {},
                     ...classified.kind ? {
                         kind: classified.kind
                     } : {},

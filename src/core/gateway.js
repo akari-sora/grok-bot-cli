@@ -22,7 +22,22 @@ export class GatewayError extends Error {
 // is delivery-unknown, and waiting longer only delays the "do not resend" error.
 export const GATEWAY_TIMEOUT_MS = 30000;
 export const SEND_GATEWAY_TIMEOUT_MS = 15_000;
-export const GATEWAY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Default read cap. `skills list` on a real account passed the old 2 MiB (2026-10-20); the read
+// still streams and stops at the cap. GBOT_MAX_RESPONSE_BYTES overrides it within 64 KiB..256 MiB.
+export const GATEWAY_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const MIN_RESPONSE_BYTES = 64 * 1024;
+const MAX_RESPONSE_BYTES = 256 * 1024 * 1024;
+
+export function gatewayMaxResponseBytes(env = process.env) {
+  const raw = String(env.GBOT_MAX_RESPONSE_BYTES ?? "").trim();
+  if (!/^[0-9]+$/.test(raw)) return GATEWAY_MAX_RESPONSE_BYTES;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n <= 0) return GATEWAY_MAX_RESPONSE_BYTES;
+  return Math.min(MAX_RESPONSE_BYTES, Math.max(MIN_RESPONSE_BYTES, n));
+}
+
+// Live (2026-10-20): every gateway call answers 417 Expectation Failed while the login's box is asleep.
+const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot, or switch the app to this login, to wake it; then retry)";
 
 function assertGatewayActive(signal) {
   if (signal?.aborted) {
@@ -118,11 +133,15 @@ function raceSignal(promise, signal, onAbort) {
   });
 }
 
+function tooLargeMessage(maxBytes) {
+  return "Gateway response too large (over " + maxBytes + " bytes); set GBOT_MAX_RESPONSE_BYTES (up to " + MAX_RESPONSE_BYTES + ") to read it";
+}
+
 async function readTextCapped(res, maxBytes, signal) {
   if (!res.body || typeof res.body.getReader !== "function") {
     const text = await raceSignal(res.text(), signal);
     if (Buffer.byteLength(text, "utf8") > maxBytes) {
-      throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+      throw new GatewayError(tooLargeMessage(maxBytes));
     }
     return text;
   }
@@ -135,7 +154,7 @@ async function readTextCapped(res, maxBytes, signal) {
     bytes += value.byteLength ?? value.length;
     if (bytes > maxBytes) {
       try { await reader.cancel(); } catch { /* already closed */ }
-      throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+      throw new GatewayError(tooLargeMessage(maxBytes));
     }
     chunks.push(value);
   }
@@ -143,7 +162,7 @@ async function readTextCapped(res, maxBytes, signal) {
 }
 
 async function readJson(res, signal) {
-  const text = await readTextCapped(res, GATEWAY_MAX_RESPONSE_BYTES, signal);
+  const text = await readTextCapped(res, gatewayMaxResponseBytes(), signal);
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -170,7 +189,9 @@ async function ensureSandbox(accessToken, { signal } = {}) {
       redirect: "error",
       signal: gatewayDeadline(signal),
       headers: ensureSandboxHeaders(accessToken),
-      body: "{}",
+      // EnsureSandBoxRequest: wake (2), supports_asleep_box (3). gbot needs an awake box and cannot show an
+      // asleep one, so it asks for wake only. Not verified live (needs CURSOR_ACCESS_TOKEN).
+      body: JSON.stringify({ wake: true }),
     });
     body = await readJson(res);
   } catch (error) {
@@ -235,6 +256,7 @@ function failureKind(status, contentType, data) {
     && typeof data.raw === "string"
     && data.raw.includes("could not be routed")
   ) kind = "routing";
+  else if (status === 417) kind = "asleep";
   else if (status >= 500) kind = "server";
   else if (status >= 400 && status < 500) kind = "client";
   return { failureCode, kind };
@@ -279,9 +301,11 @@ async function gatewayCall(session, method, body = {}, { signal } = {}) {
   if (!res.ok) {
     const detail = data.message || data.error || data.raw || res.statusText;
     const classified = failureKind(res.status, res.headers.get("content-type"), data);
-    throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
+    const asleep = classified.kind === "asleep";
+    throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session) + (asleep ? ASLEEP_HINT : ""), {
       status: res.status,
       method,
+      ...(asleep ? { code: "BOX_ASLEEP" } : {}),
       ...(classified.kind ? { kind: classified.kind } : {}),
       ...(classified.failureCode ? { failureCode: classified.failureCode } : {}),
     });

@@ -71,7 +71,15 @@ for (const [label, markdown, error] of [
 
 test("add says the import may have landed when the echoed list exceeds the response cap", async (t) => {
   mockGateway(t, { importReply: () => new Response("[" + "\"x\",".repeat(600000) + "\"x\"]", { status: 200 }) });
-  await assert.rejects(addSkill(session, "# Skill\nbody"), { name: "GatewayError", message: /may still have landed. Run gbot skills list/ });
+  // ~2.4 MB echo against a 1 MiB cap (the default cap is 16 MiB).
+  const prev = process.env.GBOT_MAX_RESPONSE_BYTES;
+  process.env.GBOT_MAX_RESPONSE_BYTES = String(1024 * 1024);
+  try {
+    await assert.rejects(addSkill(session, "# Skill\nbody"), { name: "GatewayError", message: /may still have landed. Run gbot skills list/ });
+  } finally {
+    if (prev === undefined) delete process.env.GBOT_MAX_RESPONSE_BYTES;
+    else process.env.GBOT_MAX_RESPONSE_BYTES = prev;
+  }
 });
 
 test("remove deletes a library skill by name, case-insensitively", async (t) => {

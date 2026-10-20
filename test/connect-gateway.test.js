@@ -82,6 +82,9 @@ test("unusable app session falls through to CURSOR_ACCESS_TOKEN EnsureSandBox", 
       assert.equal(session.gatewayToken, "from-ensure");
       assert.equal(calls.length, 1);
       assert.match(calls[0].url, /EnsureSandBox/);
+      // The app's EnsureSandBoxRequest has `wake` (2) and `supports_asleep_box` (3). gbot needs an awake box
+      // and cannot show an asleep state, so it asks for wake only.
+      assert.deepEqual(JSON.parse(calls[0].body), { wake: true });
     },
   );
 });

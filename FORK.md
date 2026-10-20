@@ -193,6 +193,8 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
 | `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
+| `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep. Open the Grok Bot app and select any bot of that login (or switch the app to it), then retry. |
+| `Gateway response too large (over N bytes)` | Set `GBOT_MAX_RESPONSE_BYTES` (bytes, 64 KiB to 256 MiB; default 16 MiB) and retry. |
 
 ### Privacy
 
@@ -426,6 +428,8 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |
 | 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
+| `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠。打開 Grok Bot app，點選那個登入底下任一個 bot（或把 app 切到那個登入），再試一次。 |
+| `Gateway response too large (over N bytes)` | 設 `GBOT_MAX_RESPONSE_BYTES`（位元組，64 KiB 到 256 MiB，預設 16 MiB）後再試。 |
 
 ### 隱私
 
