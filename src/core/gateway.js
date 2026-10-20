@@ -41,8 +41,11 @@ export function gatewayMaxResponseBytes(env = process.env) {
   return responseBytesFromEnv(env).value ?? GATEWAY_MAX_RESPONSE_BYTES;
 }
 
-// Live (2026-10-20): every gateway call answers 417 Expectation Failed while the login's box is asleep.
-const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot, or switch the app to this login, to wake it; with CURSOR_ACCESS_TOKEN, rerun: EnsureSandBox asks it to wake. Then retry)";
+// Live (2026-10-20): while a login's box is asleep, every gateway call answers 417 Expectation Failed
+// with an empty body and `x-anyrun-failure-reason: pod_hibernated` (`proxy-status: anyrun-proxy;
+// error=destination_unavailable; details="pod_hibernated"`). Bringing the app forward (`open -g`, a
+// bare `grokbot://`) did not wake it; selecting a bot of that login in the app did.
+const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot of this login, or switch the app to this login, then retry)";
 
 function assertGatewayActive(signal) {
   if (signal?.aborted) {
@@ -250,7 +253,7 @@ function redactDetail(detail, session) {
 }
 
 // Live gateway failures are distinct: auth, a moved box, an unknown method, and a down server.
-function failureKind(status, contentType, data) {
+function failureKind(status, contentType, data, failureReason) {
   const failureCode = data && typeof data.failureCode === "string" && data.failureCode
     ? data.failureCode
     : undefined;
@@ -265,8 +268,12 @@ function failureKind(status, contentType, data) {
     && typeof data.raw === "string"
     && data.raw.includes("could not be routed")
   ) kind = "routing";
-  // Only a bare 417 (or one whose failureCode says so) is an asleep box; other 417 codes stay client failures.
-  else if (status === 417 && (!failureCode || /sleep/i.test(failureCode))) kind = "asleep";
+  // A 417 is an asleep box when the proxy says pod_hibernated, has no failureCode (the live answer), or its
+  // failureCode says so; other 417 codes stay client failures.
+  else if (
+    status === 417
+    && (/^pod_hibernated$/i.test(String(failureReason ?? "").trim()) || !failureCode || /sleep|hibernat/i.test(failureCode))
+  ) kind = "asleep";
   else if (status >= 500) kind = "server";
   else if (status >= 400 && status < 500) kind = "client";
   return { failureCode, kind };
@@ -310,7 +317,7 @@ async function gatewayCall(session, method, body = {}, { signal } = {}) {
   if (!prompt) assertGatewayActive(signal);
   if (!res.ok) {
     const detail = data.message || data.error || data.raw || res.statusText;
-    const classified = failureKind(res.status, res.headers.get("content-type"), data);
+    const classified = failureKind(res.status, res.headers.get("content-type"), data, res.headers.get("x-anyrun-failure-reason"));
     const asleep = classified.kind === "asleep";
     throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session) + (asleep ? ASLEEP_HINT : ""), {
       status: res.status,

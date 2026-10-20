@@ -193,7 +193,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
 | `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
-| `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep. Open the Grok Bot app and select any bot of that login (or switch the app to it), then retry. With `CURSOR_ACCESS_TOKEN`, rerun: EnsureSandBox asks the box to wake. |
+| `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep (the proxy reports `pod_hibernated`). Open the Grok Bot app and select any bot of that login (or switch the app to it), then retry. Bringing the app forward without selecting a bot did not wake it. gbot uses `CURSOR_ACCESS_TOKEN` (EnsureSandBox with `wake: true`, not tested live) only when it has no saved app login and no `GROK_BOT_GATEWAY_URL`. |
 | `Gateway response too large (over N bytes)` | Set `GBOT_MAX_RESPONSE_BYTES` to a byte count from 65536 to 67108864 (default 16 MiB) and retry. Other values are ignored; the error says so. |
 | `EnsureSandBox failed: 4xx` with `CURSOR_ACCESS_TOKEN` | Since the change that added `BOX_ASLEEP`, gbot sends `{"wake": true}` to EnsureSandBox. That body has not been tested against the live backend; report the error. |
 
@@ -429,7 +429,7 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |
 | 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
-| `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠。打開 Grok Bot app，點選那個登入底下任一個 bot（或把 app 切到那個登入），再試一次。用 `CURSOR_ACCESS_TOKEN` 的話，直接重跑：EnsureSandBox 會請它醒來。 |
+| `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠（proxy 回報 `pod_hibernated`）。打開 Grok Bot app，點選那個登入底下任一個 bot（或把 app 切到那個登入），再試一次。只把 app 叫到前景、沒點 bot，叫不醒。gbot 只有在沒有已存的 app 登入、也沒設 `GROK_BOT_GATEWAY_URL` 時，才會用 `CURSOR_ACCESS_TOKEN`（EnsureSandBox 帶 `wake: true`，未實測）。 |
 | `Gateway response too large (over N bytes)` | 把 `GBOT_MAX_RESPONSE_BYTES` 設成 65536 到 67108864 之間的位元組數（預設 16 MiB）後再試。其他值會被忽略，錯誤訊息會說明。 |
 | 用 `CURSOR_ACCESS_TOKEN` 時出現 `EnsureSandBox failed: 4xx` | 加入 `BOX_ASLEEP` 的這次修改起，gbot 會對 EnsureSandBox 送 `{"wake": true}`。這個內容還沒對真正的後端測過，請回報錯誤。 |
 

@@ -45,8 +45,13 @@ async function withEnvAsync(values, fn) {
 }
 
 // Live (2026-10-20): while the Grok Bot box of a login is asleep, every gateway call answers
-// 417 Expectation Failed. Opening the app and selecting a bot (or switching to that login) woke it.
-const asleep = () => new Response("", { status: 417, statusText: "Expectation Failed" });
+// 417 Expectation Failed with an empty body and these proxy headers. Selecting a bot of that login in the app woke it.
+const HIBERNATED_HEADERS = {
+  "proxy-status": 'anyrun-proxy; error=destination_unavailable; details="pod_hibernated"',
+  "x-anyrun-error-source": "anyrun-proxy",
+  "x-anyrun-failure-reason": "pod_hibernated",
+};
+const asleep = () => new Response("", { status: 417, statusText: "Expectation Failed", headers: HIBERNATED_HEADERS });
 
 test("417 from the gateway is an asleep box, with a wake hint and no token", async (t) => {
   const session = await mockGateway(t, asleep);
@@ -57,6 +62,7 @@ test("417 from the gateway is an asleep box, with a wake hint and no token", asy
   assert.match(error.message, /^listAgents failed: 417 /);
   assert.match(error.message, /asleep/);
   assert.match(error.message, /Grok Bot app/);
+  assert.doesNotMatch(error.message, /CURSOR_ACCESS_TOKEN/);
   assert.doesNotMatch(error.message, /gateway-secret-token/);
 });
 
@@ -147,4 +153,15 @@ test("a 417 with another failureCode stays a client failure; a sleep failureCode
   const sleeping = await listAgents(await mockGateway(t, () => reply("gateway/box-asleep"))).then(() => assert.fail("expected throw"), (e) => e);
   assert.equal(sleeping.kind, "asleep");
   assert.equal(sleeping.code, "BOX_ASLEEP");
+});
+
+test("a 417 the proxy marks pod_hibernated is asleep even with another failureCode", async (t) => {
+  const session = await mockGateway(t, () => new Response(JSON.stringify({ message: "no", failureCode: "x/other" }), {
+    status: 417,
+    headers: { "content-type": "application/json", "x-anyrun-failure-reason": "pod_hibernated" },
+  }));
+  const error = await listAgents(session).then(() => assert.fail("expected throw"), (e) => e);
+  assert.equal(error.kind, "asleep");
+  assert.equal(error.code, "BOX_ASLEEP");
+  assert.equal(error.failureCode, "x/other");
 });
