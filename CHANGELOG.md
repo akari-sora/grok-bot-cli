@@ -6,8 +6,9 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 
 ### Unreleased
 
-- A gateway answer of HTTP 417 is reported as an asleep box: `kind: "asleep"`, `code: "BOX_ASLEEP"`, and a message that says how to wake it (open the Grok Bot app and select a bot, or switch the app to that login). Seen live on 2026-10-20: every call for a login answered 417 until its box was woken. A send to an asleep box stays `delivery: "rejected"`.
-- The gateway read cap is now 16 MiB (was 2 MiB): `gbot skills list` on a real account passed 2 MiB. `GBOT_MAX_RESPONSE_BYTES` sets it between 64 KiB and 256 MiB; other values are ignored. The read still streams and stops at the cap, and the error names the variable.
+- A gateway answer of HTTP 417 with no `failureCode` (or one that mentions sleep) is reported as an asleep box: `kind: "asleep"`, `code: "BOX_ASLEEP"`, and a message that says how to wake it (open the Grok Bot app and select a bot, or switch the app to that login; with `CURSOR_ACCESS_TOKEN`, rerun). Seen live on 2026-10-20: every call for a login answered 417 until its box was woken. Other 417 failure codes stay `kind: "client"`.
+- A send whose roster lookup fails (for example on an asleep box) is now `delivery: "rejected"` with its `clientNonce`: the prompt was never transmitted. Before, the error had no delivery state and the relay recorded it as unknown.
+- The gateway read cap is now 16 MiB (was 2 MiB): `gbot skills list` on a real account passed 2 MiB. `GBOT_MAX_RESPONSE_BYTES` sets it to a byte count from 65536 (64 KiB) to 67108864 (64 MiB); any other value (`32M`, `0`, out of range) is ignored and the too-large error says so. Peak memory for one read is a few times the cap. The read still streams and stops at the cap. The unit test runner drops the variable from the developer's environment.
 - With `CURSOR_ACCESS_TOKEN`, `EnsureSandBox` now asks for `{ "wake": true }` instead of `{}`. The field comes from the Grok Bot app's `EnsureSandBoxRequest`; this path was not tested against the live backend.
 
 ### 0.11.2-iml1s.4

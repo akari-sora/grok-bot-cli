@@ -65102,15 +65102,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         const SEND_GATEWAY_TIMEOUT_MS = 15000;
         const GATEWAY_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
         const MIN_RESPONSE_BYTES = 64 * 1024;
-        const MAX_RESPONSE_BYTES = 256 * 1024 * 1024;
-        function gatewayMaxResponseBytes(env = process.env) {
+        const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+        function responseBytesFromEnv(env) {
             const raw = String(env.GBOT_MAX_RESPONSE_BYTES ?? "").trim();
-            if (!/^[0-9]+$/.test(raw)) return GATEWAY_MAX_RESPONSE_BYTES;
-            const n = Number(raw);
-            if (!Number.isSafeInteger(n) || n <= 0) return GATEWAY_MAX_RESPONSE_BYTES;
-            return Math.min(MAX_RESPONSE_BYTES, Math.max(MIN_RESPONSE_BYTES, n));
+            if (!raw) return {
+                set: false,
+                value: null
+            };
+            const n = /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+            const ok = Number.isSafeInteger(n) && n >= MIN_RESPONSE_BYTES && n <= MAX_RESPONSE_BYTES;
+            return {
+                set: true,
+                value: ok ? n : null
+            };
         }
-        const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot, or switch the app to this login, to wake it; then retry)";
+        function gatewayMaxResponseBytes(env = process.env) {
+            return responseBytesFromEnv(env).value ?? GATEWAY_MAX_RESPONSE_BYTES;
+        }
+        const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot, or switch the app to this login, to wake it; with CURSOR_ACCESS_TOKEN, rerun: EnsureSandBox asks it to wake. Then retry)";
         function assertGatewayActive(signal) {
             if (signal?.aborted) {
                 const error = new GatewayError("Gateway submission cancelled before transmission");
@@ -65203,7 +65212,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             });
         }
         function tooLargeMessage(maxBytes) {
-            return "Gateway response too large (over " + maxBytes + " bytes); set GBOT_MAX_RESPONSE_BYTES (up to " + MAX_RESPONSE_BYTES + ") to read it";
+            const env = responseBytesFromEnv(process.env);
+            let hint = "";
+            if (env.set && env.value === null) hint = "; GBOT_MAX_RESPONSE_BYTES was ignored: not a byte count from " + MIN_RESPONSE_BYTES + " to " + MAX_RESPONSE_BYTES;
+            else if (maxBytes < MAX_RESPONSE_BYTES) hint = "; set GBOT_MAX_RESPONSE_BYTES to a byte count up to " + MAX_RESPONSE_BYTES + " to read it";
+            return "Gateway response too large (over " + maxBytes + " bytes)" + hint;
         }
         async function readTextCapped(res, maxBytes, signal) {
             if (!res.body || typeof res.body.getReader !== "function") {
@@ -65326,7 +65339,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (failureCode === "gateway/unknown-method") kind = "unsupported";
             else if (status === 401 || status === 403) kind = "auth";
             else if (status === 404 && type.includes("text/plain") && data && typeof data.raw === "string" && data.raw.includes("could not be routed")) kind = "routing";
-            else if (status === 417) kind = "asleep";
+            else if (status === 417 && (!failureCode || /sleep/i.test(failureCode))) kind = "asleep";
             else if (status >= 500) kind = "server";
             else if (status >= 400 && status < 500) kind = "client";
             return {
@@ -65554,7 +65567,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
             } catch (error) {
                 if (error instanceof GatewayError && /response too large/.test(error.message)) {
-                    throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list.");
+                    throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list (raise GBOT_MAX_RESPONSE_BYTES if that is too large too).");
                 }
                 throw error;
             }
@@ -65677,9 +65690,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function sendPrompt(session, ref, prompt, extra = {}) {
             assertGatewayActive(extra.signal);
-            const rec = await resolveRef(session, ref, {
-                signal: extra.signal
-            });
+            let rec;
+            try {
+                rec = await resolveRef(session, ref, {
+                    signal: extra.signal
+                });
+            } catch (err) {
+                if (err && typeof err === "object") {
+                    if (err.delivery == null) err.delivery = "rejected";
+                    if (err.clientNonce == null && extra.clientNonce) err.clientNonce = extra.clientNonce;
+                }
+                throw err;
+            }
             const body = {
                 agentId: rec.id,
                 prompt,

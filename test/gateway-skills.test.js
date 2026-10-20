@@ -75,7 +75,7 @@ test("add says the import may have landed when the echoed list exceeds the respo
   const prev = process.env.GBOT_MAX_RESPONSE_BYTES;
   process.env.GBOT_MAX_RESPONSE_BYTES = String(1024 * 1024);
   try {
-    await assert.rejects(addSkill(session, "# Skill\nbody"), { name: "GatewayError", message: /may still have landed. Run gbot skills list/ });
+    await assert.rejects(addSkill(session, "# Skill\nbody"), { name: "GatewayError", message: /may still have landed. Run gbot skills list \(raise GBOT_MAX_RESPONSE_BYTES/ });
   } finally {
     if (prev === undefined) delete process.env.GBOT_MAX_RESPONSE_BYTES;
     else process.env.GBOT_MAX_RESPONSE_BYTES = prev;

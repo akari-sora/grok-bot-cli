@@ -82,15 +82,15 @@ test("other 4xx stay client failures without the asleep code", async (t) => {
   assert.doesNotMatch(error.message, /asleep/);
 });
 
-test("response cap: default is 16 MiB; GBOT_MAX_RESPONSE_BYTES overrides within 64 KiB..256 MiB", () => {
+test("response cap: default 16 MiB; GBOT_MAX_RESPONSE_BYTES is a byte count from 64 KiB to 64 MiB, else ignored", () => {
   const MiB = 1024 * 1024;
   assert.equal(GATEWAY_MAX_RESPONSE_BYTES, 16 * MiB);
   assert.equal(gatewayMaxResponseBytes({}), 16 * MiB);
   assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: String(2 * MiB) }), 2 * MiB);
   assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: " 3145728 " }), 3 * MiB);
-  assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: "1" }), 64 * 1024);
-  assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: String(1024 * MiB) }), 256 * MiB);
-  for (const bad of ["", "abc", "0", "-5", "1.5", "1e9", "0x100"]) {
+  assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: "65536" }), 64 * 1024);
+  assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: String(64 * MiB) }), 64 * MiB);
+  for (const bad of ["", "abc", "0", "1", "65535", String(64 * MiB + 1), "1073741824", "99999999999999999999", "-5", "1.5", "1e9", "0x100", "32M"]) {
     assert.equal(gatewayMaxResponseBytes({ GBOT_MAX_RESPONSE_BYTES: bad }), 16 * MiB, bad);
   }
 });
@@ -103,6 +103,48 @@ test("a 3 MiB roster reads by default and is refused under a 1 MiB cap with the 
   assert.equal(rows[0].description.length, 3 * 1024 * 1024);
   const error = await withEnvAsync({ GBOT_MAX_RESPONSE_BYTES: String(1024 * 1024) }, () => listAgents(session))
     .then(() => assert.fail("expected the capped read to throw"), (e) => e);
-  assert.match(error.message, /too large \(over 1048576 bytes\)/);
-  assert.match(error.message, /GBOT_MAX_RESPONSE_BYTES/);
+  assert.match(error.message, /too large \(over 1048576 bytes\); set GBOT_MAX_RESPONSE_BYTES to a byte count up to 67108864/);
+});
+
+test("an ignored GBOT_MAX_RESPONSE_BYTES is named in the too-large error", async (t) => {
+  const session = await mockGateway(t, () => new Response("x".repeat(GATEWAY_MAX_RESPONSE_BYTES + 8), { status: 200 }));
+  const error = await withEnvAsync({ GBOT_MAX_RESPONSE_BYTES: "32M" }, () => listAgents(session))
+    .then(() => assert.fail("expected the read to throw"), (e) => e);
+  assert.match(error.message, /over 16777216 bytes\); GBOT_MAX_RESPONSE_BYTES was ignored: not a byte count from 65536 to 67108864/);
+});
+
+test("a 417 that echoes the token is redacted", async (t) => {
+  const session = await mockGateway(t, () => new Response(JSON.stringify({ message: "sleeping " + TOKEN }), {
+    status: 417,
+    headers: { "content-type": "application/json" },
+  }));
+  const error = await listAgents(session).then(() => assert.fail("expected listAgents to throw"), (e) => e);
+  assert.equal(error.code, "BOX_ASLEEP");
+  assert.match(error.message, /<redacted>/);
+  assert.doesNotMatch(error.message, /gateway-secret-token/);
+});
+
+test("a send while every call answers 417 is rejected before the prompt is sent", async (t) => {
+  const seen = [];
+  const session = await mockGateway(t, (url) => { seen.push(url); return asleep(); });
+  const error = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-all-asleep" })
+    .then(() => assert.fail("expected sendPrompt to throw"), (e) => e);
+  assert.deepEqual(seen, ["/api/listAgents"]);
+  assert.equal(error.code, "BOX_ASLEEP");
+  assert.equal(error.delivery, "rejected");
+  assert.equal(error.clientNonce, "nonce-all-asleep");
+});
+
+test("a 417 with another failureCode stays a client failure; a sleep failureCode is asleep", async (t) => {
+  const reply = (code) => new Response(JSON.stringify({ message: "no", failureCode: code }), {
+    status: 417,
+    headers: { "content-type": "application/json" },
+  });
+  const other = await listAgents(await mockGateway(t, () => reply("x/other"))).then(() => assert.fail("expected throw"), (e) => e);
+  assert.equal(other.kind, "client");
+  assert.equal(other.code, undefined);
+  assert.doesNotMatch(other.message, /asleep/);
+  const sleeping = await listAgents(await mockGateway(t, () => reply("gateway/box-asleep"))).then(() => assert.fail("expected throw"), (e) => e);
+  assert.equal(sleeping.kind, "asleep");
+  assert.equal(sleeping.code, "BOX_ASLEEP");
 });
