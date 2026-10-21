@@ -4,6 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+// Property lookup so a caller can count keychain, secret-tool, and DPAPI commands.
+export const osSecretCommands = { execFileSync };
+
 // Chromium OSCrypt: "v10" = fixed password (macOS: the Keychain password; Linux: "peanuts"),
 // "v11" = Linux Secret Service password. macOS stretches with 1003 PBKDF2 rounds, Linux with 1.
 // Windows v10 uses AES-256-GCM with a DPAPI-wrapped key from Local State (not PBKDF2).
@@ -225,13 +228,13 @@ export function hasGrokBotGatewaySession({
 
 function readKeychainPassword(platform = process.platform) {
   if (platform === "linux") {
-    return execFileSync(
+    return osSecretCommands.execFileSync(
       "secret-tool",
       ["lookup", "xdg:schema", "chrome_libsecret_os_crypt_password_v2", "application", "Grok Bot"],
       { encoding: "utf8" },
     ).trimEnd();
   }
-  return execFileSync(
+  return osSecretCommands.execFileSync(
     "/usr/bin/security",
     ["find-generic-password", "-w", "-s", "Grok Bot Safe Storage"],
     { encoding: "utf8" },
@@ -243,7 +246,7 @@ function unprotectWithDpapi(blob) {
     "Add-Type -AssemblyName System.Security; " +
     "$blob = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); " +
     "[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($blob, $null, 'CurrentUser'))";
-  const out = execFileSync(
+  const out = osSecretCommands.execFileSync(
     join(
       process.env.SystemRoot ?? "C:\\Windows",
       "System32/WindowsPowerShell/v1.0/powershell.exe",
@@ -305,6 +308,16 @@ export function listGrokBotGatewayAccounts(options = {}) {
   }));
 }
 
+export function decryptGrokBotSafeStorage(encrypted, {
+  platform = process.platform,
+  home = homedir(),
+  env = process.env,
+  getKeychainPassword = readKeychainPassword,
+  unprotectData = unprotectWithDpapi,
+} = {}) {
+  return decryptEntry(encrypted, { platform, home, env, getKeychainPassword, unprotectData });
+}
+
 function decryptEntry(encrypted, { platform, home, env, getKeychainPassword, unprotectData }) {
   if (platform === "win32") {
     return decryptWindowsSafeStorageString(
@@ -357,11 +370,11 @@ export function loadGrokBotGatewaySession({
     );
   }
 
-  return {
+  return withAccountScope({
     gatewayUrl: String(descriptor.baseUrl).replace(/\/$/, ""),
     gatewayToken: String(descriptor.token),
     headers: descriptor.headers ?? {},
-  };
+  }, selected.id);
 }
 
 /** Calls `fn` at most once; later calls return the first result or rethrow the first error. */
@@ -491,7 +504,7 @@ function chooseSavedEntryByFlag(rows, selector) {
  *
  * @param {{ platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv, appData?: string, account?: string,
  *   getKeychainPassword?: (platform?: NodeJS.Platform) => string, unprotectData?: (blob: Buffer) => Buffer }} [options]
- * @returns {{ id: string, label: string, session: { gatewayUrl: string, gatewayToken: string, headers: Record<string, unknown> } } | null}
+ * @returns {{ id: string, label: string, session: { gatewayUrl: string, gatewayToken: string, headers: Record<string, unknown>, accountScope?: string } } | null}
  */
 export function loadGrokBotGatewaySelection({
   platform = process.platform,
@@ -548,12 +561,16 @@ export function loadGrokBotGatewaySelection({
   return {
     id: selected.shownId,
     label: selected.shownLabel,
-    session: {
+    session: withAccountScope({
       gatewayUrl: baseUrl.replace(/\/$/, ""),
       gatewayToken: token,
       headers: headers ?? {},
-    },
+    }, selected.id),
   };
+}
+
+function withAccountScope(session, id) {
+  return typeof id === "string" && /^[0-9a-f]{64}$/.test(id) ? { ...session, accountScope: id } : session;
 }
 
 export function inspectGrokBotGatewaySession(options = {}) {

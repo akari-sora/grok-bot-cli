@@ -155,6 +155,7 @@ test("a 417 with another failureCode stays a client failure; a sleep failureCode
   assert.equal(sleeping.code, "BOX_ASLEEP");
 });
 
+// Synthetic: a sleeping pod cannot answer with a body. This only checks that the proxy reason wins.
 test("a 417 the proxy marks pod_hibernated is asleep even with another failureCode", async (t) => {
   const session = await mockGateway(t, () => new Response(JSON.stringify({ message: "no", failureCode: "x/other" }), {
     status: 417,
@@ -164,4 +165,21 @@ test("a 417 the proxy marks pod_hibernated is asleep even with another failureCo
   assert.equal(error.kind, "asleep");
   assert.equal(error.code, "BOX_ASLEEP");
   assert.equal(error.failureCode, "x/other");
+});
+
+test("a 417 with another proxy reason is a client failure and names the reason", async (t) => {
+  const session = await mockGateway(t, () => new Response("", {
+    status: 417,
+    headers: { "x-anyrun-error-source": "anyrun-proxy", "x-anyrun-failure-reason": "pod_terminated" },
+  }));
+  const error = await listAgents(session).then(() => assert.fail("expected throw"), (e) => e);
+  assert.equal(error.kind, "client");
+  assert.equal(error.code, undefined);
+  assert.equal(error.failureReason, "pod_terminated");
+  assert.doesNotMatch(error.message, /asleep/);
+});
+
+test("the live 417 carries the proxy reason", async (t) => {
+  const error = await listAgents(await mockGateway(t, asleep)).then(() => assert.fail("expected throw"), (e) => e);
+  assert.equal(error.failureReason, "pod_hibernated");
 });
