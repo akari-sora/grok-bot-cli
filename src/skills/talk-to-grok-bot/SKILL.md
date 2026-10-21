@@ -72,7 +72,9 @@ List targets with `gbot bots list` / `gbot groups list` when the name is ambiguo
 ## Auth
 
 Same order as `gbot`: `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`,
-else the Grok Bot app session, else `CURSOR_ACCESS_TOKEN`. `gbot doctor` shows
+else the Grok Bot app session, else `CURSOR_ACCESS_TOKEN`. An asleep app-login
+box (`BOX_ASLEEP`) is woken once with the app's saved access token and the call
+is retried; `GBOT_AUTO_WAKE=0` turns that off. `gbot doctor` shows
 which source is present.
 
 ## Claude Code channel

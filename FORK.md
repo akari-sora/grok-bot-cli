@@ -86,6 +86,33 @@ gbot doctor
 
 `gbot accounts --json` is `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable" }] }`. `id` is the label when the descriptor has no separate name.
 
+### Wake an asleep box (`gbot wake`)
+
+A gateway call for a saved app login that fails with `code: "BOX_ASLEEP"` wakes that login's box and retries the call once. gbot reads the access token the app saved for that login (the same account id as the gateway descriptor entry). It never reads the refresh token and never writes an app file. It posts EnsureSandBox `{ "wake": true }`. If the box is `STARTING`, or the answer has no gateway fields, it polls `{ "wake": false }` every 3 seconds for up to 90 seconds, then retries the original request. Calls for the same login share one wake. `GBOT_AUTO_WAKE=0` turns this off. A session from both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` is never woken. Success is the call's own result. If waking fails, the error stays `code: "BOX_ASLEEP"` and adds `wake: { attempted: true, error }` and a short reason (`auto wake failed: …`). A `sendPrompt` retry posts the same `clientNonce`. If that retry's delivery is unknown, it stays unknown: do not send again.
+
+`x-cursor-client-version` is `SAND_CLIENT_VERSION` when that is `major.minor.patch` (`0.72.1.0` becomes `0.72.1`). Otherwise gbot reads the installed app: macOS `CFBundleShortVersionString` in `/Applications/Grok Bot.app` then `~/Applications`, Windows uninstall `DisplayVersion` whose `DisplayName` is `Grok Bot`. Linux has no lookup. Otherwise the built-in default is `0.72.1`. An invalid value uses `0.72.1` and does not read the app. A 401 whose text says the version is no longer supported names the version gbot sent and that `SAND_CLIENT_VERSION` can override it. Live on 2026-10-21, `0.20.0` was rejected that way and `0.72.1` was accepted.
+
+gbot reaches EnsureSandBox through `CURSOR_ACCESS_TOKEN` only when there is no usable app login and not both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` are set. That path uses the same client version and `{ "wake": true }`.
+
+Wake via `{ "wake": true }` with the app login token was verified live on macOS on 2026-10-21: a hibernated box became `RUNNING` in about 10 seconds, and `listAgents` through the new gateway answered 200 about 3 seconds later. The Windows token path is implemented and has not been live-tested.
+
+```sh
+gbot wake
+gbot wake --account "<label>" --json
+gbot wake --check
+```
+
+`--check` sends `{ "wake": false }` and prints the run state (`RUNNING`, `HIBERNATED`, `STARTING`, or `unknown`) without waking. Without `--check`, gbot wakes, waits for `RUNNING` (up to 90 seconds), then lists bots once. The text is the account label, the state before and after, and the seconds taken. It never prints tokens, gateway URLs, or network tokens. `--account` is a saved label or id and overrides `GBOT_ACCOUNT`.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Running, or `--check` succeeded. |
+| 2 | Usage: an unknown flag, or several logins and `--account` does not pick one. |
+| 3 | Could not wake (no saved login, a bad or expired token, or the backend refused). |
+| 4 | Timed out while the box was still starting. |
+
+`--json` prints those fields and `exitCode`. A failure also has `error`.
+
 ### Fork commands
 
 `--stdin` (default `false`):
@@ -104,7 +131,7 @@ Do not combine `--stdin` with a positional message. The text must be non-empty U
 
 Success JSON includes `delivery` (`accepted` or `unknown`), `kind` (`bot` or `group`), `exitCode: 0`, and `result`. `delivery: "accepted"` means the gateway confirmed the send (`{"accepted": true}` or a message id). `delivery: "unknown"` means the CLI cannot prove the send landed (timeout, network failure, HTTP 408 or 5xx, or a response with neither). Do not send again. The result carries the `clientNonce` it posted: `gbot reconcile <bot> --nonce <clientNonce>` looks for it in the last 200 transcript entries (`delivered` or `not-found-in-tail`) and never resends.
 
-Sends use a 15 second deadline that includes the response body. Reads use 30 seconds. There is no automatic retry. Redirects are rejected.
+Sends use a 15 second deadline that includes the response body. Reads use 30 seconds. There is no automatic retry, except one retry of the same request after waking an asleep box. Redirects are rejected.
 
 `--normalized` (default `false`) requires `--json`. Leading `--json` is accepted (`gbot --json thread …`).
 
@@ -193,15 +220,15 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
 | `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
-| `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep (the proxy reports `pod_hibernated`). Open the Grok Bot app and select any bot of that login (or switch the app to it), then retry. Bringing the app forward without selecting a bot did not wake it. gbot uses `CURSOR_ACCESS_TOKEN` (EnsureSandBox with `wake: true`, not tested live) only when it has no saved app login and no `GROK_BOT_GATEWAY_URL`. |
+| `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep. Live on 2026-10-20 the proxy answered 417 with an empty body and `x-anyrun-failure-reason: pod_hibernated`; a 417 without that header can also be `BOX_ASLEEP`, while a 417 with another proxy reason is not; the error carries the proxy reason as `failureReason`. gbot tries to wake the box itself. If that fails, the message says why (`auto wake failed: …`, and `wake.error`). You can still open the Grok Bot app and select a bot of that login. Switching the app to that login was also observed to wake the box on 2026-10-20 (one owner session); that is an observation, not a rule. Opening the app or a bare `grokbot://` in the background (`open -g`) did not wake it. `GBOT_AUTO_WAKE=0` skips the automatic wake. `gbot wake` does the same wake and prints the run state. gbot reaches EnsureSandBox through `CURSOR_ACCESS_TOKEN` only when there is no usable app login and not both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` are set. |
 | `Gateway response too large (over N bytes)` | Set `GBOT_MAX_RESPONSE_BYTES` to a byte count from 65536 to 67108864 (default 16 MiB) and retry. Other values are ignored; the error says so. |
-| `EnsureSandBox failed: 4xx` with `CURSOR_ACCESS_TOKEN` | Since the change that added `BOX_ASLEEP`, gbot sends `{"wake": true}` to EnsureSandBox. That body has not been tested against the live backend; report the error. |
+| `EnsureSandBox failed: 4xx` | `{ "wake": true }` with an app login token was verified live on macOS on 2026-10-21 (hibernated to `RUNNING` in about 10 seconds). `x-cursor-client-version` `0.20.0` is rejected with 401 "no longer supported"; the default is `0.72.1`, and `SAND_CLIENT_VERSION` overrides it. That 401 names the version gbot sent. The Windows saved-login decrypt path is implemented and has not been live-tested. |
 
 ### Privacy
 
 - `gbot` talks only to the Cursor backend and the Grok Bot gateway URL the app saved (or `GROK_BOT_GATEWAY_URL`). It sends no telemetry.
 - `gbot wear pair` also connects to the watch address you type, on your local network, and sends it the selected login's gateway session, encrypted to that pairing. Nothing else does.
-- It reads the Grok Bot app's encrypted gateway descriptor and decrypts it with the OS secret store (Keychain, `secret-tool`, or DPAPI). It never writes them and never prints tokens.
+- It reads the Grok Bot app's encrypted gateway descriptor and, to wake an asleep box, `sand-secrets.json` in the same directory. It decrypts the saved access token with the OS secret store (Keychain, `secret-tool`, or DPAPI). It never reads the refresh token, never writes an app file, and never prints tokens.
 - It writes nothing unless you turn history on. `GROK_BOT_HISTORY=on` appends plain-text messages to `~/.grok-bot-cli/history.jsonl` (or `GROK_BOT_HISTORY_DIR`). Delete that file to remove it.
 - Uninstalling the package leaves the app login untouched; sign out in the Grok Bot app to remove it.
 
@@ -322,6 +349,33 @@ gbot doctor
 
 `gbot accounts --json` 的形狀是 `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable" }] }`。沒有另外的名稱時，`id` 就是標籤。
 
+### 喚醒睡眠中的雲端電腦（`gbot wake`）
+
+已存 app 登入的 gateway 呼叫若失敗且 `code` 為 `"BOX_ASLEEP"`，gbot 會喚醒那個登入的雲端電腦，並把原本的呼叫重試一次。它讀 app 為那個登入存下的 access token（帳號 id 與 gateway descriptor 的 entry 相同）。它不讀 refresh token，也不寫任何 app 檔案。它對 EnsureSandBox 送 `{ "wake": true }`。若狀態是 `STARTING`，或回應沒有 gateway 欄位，就每 3 秒以 `{ "wake": false }` 查詢，最多 90 秒，然後重試原本的請求。同一個登入的並行呼叫共用一次喚醒。`GBOT_AUTO_WAKE=0` 關閉這件事。同時設了 `GROK_BOT_GATEWAY_URL` 和 `GROK_BOT_GATEWAY_TOKEN` 的工作階段不會被喚醒。成功時回的是該呼叫自己的結果。喚醒失敗時，錯誤仍是 `code: "BOX_ASLEEP"`，並加上 `wake: { attempted: true, error }` 與一句短原因（`auto wake failed: …`）。`sendPrompt` 的重試使用同一個 `clientNonce`。若那次重試的 delivery 是 unknown，就維持 unknown：不要再送一次。
+
+`x-cursor-client-version` 在 `SAND_CLIENT_VERSION` 是 `major.minor.patch` 時用那個值（`0.72.1.0` 會變成 `0.72.1`）。否則讀已安裝的 app：macOS 先看 `/Applications/Grok Bot.app` 再看 `~/Applications` 的 `CFBundleShortVersionString`；Windows 看解除安裝項目裡 `DisplayName` 剛好是 `Grok Bot` 的 `DisplayVersion`。Linux 不查。再不然內建預設是 `0.72.1`。不合法的值用 `0.72.1`，而且不去讀 app。401 若寫版本已不再支援，訊息會標出 gbot 送出的版本，以及可以用 `SAND_CLIENT_VERSION` 覆寫。2026-10-21 實測：`0.20.0` 被這樣拒絕，`0.72.1` 被接受。
+
+gbot 只有在沒有可用的 app 登入，而且並非同時設了 `GROK_BOT_GATEWAY_URL` 與 `GROK_BOT_GATEWAY_TOKEN` 時，才會經由 `CURSOR_ACCESS_TOKEN` 呼叫 EnsureSandBox。那條路用同一個 client 版本，並送 `{ "wake": true }`。
+
+以 app 登入 token 送 `{ "wake": true }` 已在 2026-10-21 於 macOS 實測：睡眠中的雲端電腦約 10 秒變成 `RUNNING`，約 3 秒後用新的 gateway 呼叫 `listAgents` 得到 200。Windows 的 token 路徑有實作，尚未實測。
+
+```sh
+gbot wake
+gbot wake --account "<標籤>" --json
+gbot wake --check
+```
+
+`--check` 送 `{ "wake": false }`，印出執行狀態（`RUNNING`、`HIBERNATED`、`STARTING` 或 `unknown`），不喚醒。沒有 `--check` 時，gbot 會喚醒、等到 `RUNNING`（最多 90 秒），然後列出 bots 一次。文字是帳號標籤、前後狀態，以及花費秒數。它不印 token、gateway 網址或 network token。`--account` 是已存的標籤或 id，會覆寫 `GBOT_ACCOUNT`。
+
+| 結束碼 | 意義 |
+| --- | --- |
+| 0 | 正在執行，或 `--check` 成功。 |
+| 2 | 用法：不認識的旗標，或多個登入且 `--account` 沒有選到一筆。 |
+| 3 | 叫不醒（沒有已存登入、token 壞了或過期，或後端拒絕）。 |
+| 4 | 逾時，雲端電腦仍在啟動。 |
+
+`--json` 印出這些欄位和 `exitCode`。失敗時還有 `error`。
+
 ### Fork 命令
 
 `--stdin`（預設 `false`）：
@@ -340,7 +394,7 @@ node -e "process.stdout.write('Exact UTF-8 message')" | gbot send Researcher --s
 
 成功的 JSON 含 `delivery`（`accepted` 或 `unknown`）、`kind`（`bot` 或 `group`）、`exitCode: 0` 與 `result`。`accepted` 表示 gateway 確認收到（`{"accepted": true}` 或 message id）。`unknown` 表示 CLI 無法證明送出已落地（逾時、網路失敗、HTTP 408 或 5xx，或回應兩者都沒有）。不要再送一次。結果帶有這次送出的 `clientNonce`：`gbot reconcile <bot> --nonce <clientNonce>` 在最後 200 筆 transcript 裡找它（`delivered` 或 `not-found-in-tail`），不會重送。
 
-送出期限 15 秒，含讀取回應本文。讀取期限 30 秒。不會自動重試。重新導向會被拒絕。
+送出期限 15 秒，含讀取回應本文。讀取期限 30 秒。不會自動重試，唯一的例外是喚醒睡眠中的雲端電腦後，把同一個請求重試一次。重新導向會被拒絕。
 
 `--normalized`（預設 `false`）必須搭配 `--json`。`--json` 可以寫在子命令前面（`gbot --json thread …`）。
 
@@ -429,15 +483,15 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |
 | 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
-| `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠（proxy 回報 `pod_hibernated`）。打開 Grok Bot app，點選那個登入底下任一個 bot（或把 app 切到那個登入），再試一次。只把 app 叫到前景、沒點 bot，叫不醒。gbot 只有在沒有已存的 app 登入、也沒設 `GROK_BOT_GATEWAY_URL` 時，才會用 `CURSOR_ACCESS_TOKEN`（EnsureSandBox 帶 `wake: true`，未實測）。 |
+| `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠。2026-10-20 實測時，proxy 以空本文和 `x-anyrun-failure-reason: pod_hibernated` 回答 417；沒有那個標頭的 417 也可以是 `BOX_ASLEEP`，但 proxy 標頭寫的是別的原因時就不算；錯誤的 `failureReason` 欄位會帶出 proxy 原因。gbot 會自己嘗試喚醒。若失敗，訊息會說明原因（`auto wake failed: …`，以及 `wake.error`）。你仍可打開 Grok Bot app，點選那個登入底下的一個 bot。2026-10-20 也曾觀察到把 app 切到那個登入會喚醒（一次擁有者的工作階段）；那是觀察，不是規則。在背景開啟 app 或單獨的 `grokbot://`（`open -g`）叫不醒。`GBOT_AUTO_WAKE=0` 會跳過自動喚醒。`gbot wake` 做同一件事並印出執行狀態。gbot 只有在沒有可用的 app 登入，而且並非同時設了 `GROK_BOT_GATEWAY_URL` 與 `GROK_BOT_GATEWAY_TOKEN` 時，才會經由 `CURSOR_ACCESS_TOKEN` 呼叫 EnsureSandBox。 |
 | `Gateway response too large (over N bytes)` | 把 `GBOT_MAX_RESPONSE_BYTES` 設成 65536 到 67108864 之間的位元組數（預設 16 MiB）後再試。其他值會被忽略，錯誤訊息會說明。 |
-| 用 `CURSOR_ACCESS_TOKEN` 時出現 `EnsureSandBox failed: 4xx` | 加入 `BOX_ASLEEP` 的這次修改起，gbot 會對 EnsureSandBox 送 `{"wake": true}`。這個內容還沒對真正的後端測過，請回報錯誤。 |
+| 出現 `EnsureSandBox failed: 4xx` | 以 app 登入 token 送 `{ "wake": true }` 已在 2026-10-21 於 macOS 實測（睡眠約 10 秒變成 `RUNNING`）。`x-cursor-client-version` `0.20.0` 會被 401「不再支援」拒絕；預設是 `0.72.1`，可用 `SAND_CLIENT_VERSION` 覆寫。那個 401 會標出 gbot 送出的版本。Windows 的已存登入解密有實作，尚未實測。 |
 
 ### 隱私
 
 - `gbot` 只連 Cursor 後端和 app 存下的 Grok Bot gateway 網址（或 `GROK_BOT_GATEWAY_URL`）。沒有遙測。
 - `gbot wear pair` 另外會連到你輸入的區域網路手錶位址，把選定登入的 gateway 工作階段加密後送給它。其他命令都不會。
-- 它讀 Grok Bot app 加密的 gateway descriptor，用系統的密鑰儲存（Keychain、`secret-tool` 或 DPAPI）解密。它不寫這些檔，也不印 token。
+- 它讀 Grok Bot app 加密的 gateway descriptor，喚醒睡眠中的雲端電腦時也讀同一目錄的 `sand-secrets.json`。它用系統的密鑰儲存（Keychain、`secret-tool` 或 DPAPI）解密已存的 access token。它不讀 refresh token，不寫 app 檔案，也不印 token。
 - 除非打開歷史，否則它不寫任何檔。`GROK_BOT_HISTORY=on` 會把訊息明文附加到 `~/.grok-bot-cli/history.jsonl`（或 `GROK_BOT_HISTORY_DIR`）。刪掉那個檔就清掉了。
 - 移除套件不會動到 app 的登入；要移除登入，在 Grok Bot app 登出。
 

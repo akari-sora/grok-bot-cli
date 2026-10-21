@@ -38,6 +38,7 @@ test("one saved login is selected with its id, label and session", (t) => {
       gatewayUrl: `https://${SECRETS.host}`,
       gatewayToken: SECRETS.token,
       headers: { "X-Anyrun-Network-Token": SECRETS.route },
+      accountScope: ENTRY_A,
     },
   });
   assert.equal(keychain.calls.count, 1);

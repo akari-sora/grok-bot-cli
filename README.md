@@ -45,6 +45,8 @@ Requires Node.js 22.19.0+ and the Grok Bot desktop app on macOS, Linux, or Windo
 
 If the app has exactly one saved gateway login, `gbot` uses it. If several are saved, choose with `--account <label>` or `GBOT_ACCOUNT`. `gbot accounts` prints those labels and nothing else from the login: an email or display name when the saved descriptor has one, otherwise the app's account key. It marks the most recently saved login. This file does not record which login the app window currently has selected. `--account` overrides `GBOT_ACCOUNT`. Commands without an `--account` flag still honor the environment variable. On Linux the app keeps its session under `~/.config/Grok Bot` (or `$XDG_CONFIG_HOME`); when it is stored in the system keyring, `gbot` reads the key with `secret-tool` (package `libsecret-tools`). On Windows the session lives under `%APPDATA%\\Grok Bot` and decrypts with the app's DPAPI-wrapped Safe Storage key.
 
+When a call for that saved login fails because the box is asleep (`BOX_ASLEEP`), `gbot` wakes it with the app's saved access token and retries the call once. `gbot wake` prints the run state; `gbot wake --check` only looks. `GBOT_AUTO_WAKE=0` turns the automatic wake off. See [FORK.md](FORK.md).
+
 ## Use
 
 ```sh
@@ -66,6 +68,8 @@ gbot skills remove poteto-mode
 gbot groups delete Launch
 gbot bots delete Researcher
 gbot bots delete Writer
+gbot wake
+gbot wake --check
 ```
 
 `update` fields: `--name` `--description` `--title` `--avatar-shape` `--avatar-color` `--notify on|off` `--hidden on|off`. `--description` is the UI Instructions field.
@@ -86,8 +90,8 @@ snapshot with `gapReset: true`. The gateway request remains limit-only.
 
 Run `gbot --help` for every command.
 Options are command-local (for example, `gbot send --history-dir DIR ...`);
-`--json` prints the canonical JSON result; `send` and the `codex` commands also report failures as
-a JSON document on stdout with `exitCode` (see below), every other command
+`--json` prints the canonical JSON result; `send`, `wake`, and the `codex` commands also report failures as
+a JSON document on stdout with `exitCode` (see below). `gbot wake` exits 0 when the box is running or `--check` succeeded, 2 for usage, 3 when it could not wake, and 4 when the box is still starting. Every other command
 prints the failure message on stderr and exits 1.
 
 ## Messaging a live Claude Code session

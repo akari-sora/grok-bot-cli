@@ -11593,8 +11593,8 @@ var __webpack_modules__ = {
             const color = showColors ? withColor : withColorNoop;
             const processIsBun = process1?.isBun === true;
             return loggerMake(({ cause, date, fiber, logLevel, message: message_ })=>{
-                const console = fiber.getRef(ConsoleRef);
-                const log = fiber.getRef(LogToStderr) ? console.error : console.log;
+                const console1 = fiber.getRef(ConsoleRef);
+                const log = fiber.getRef(LogToStderr) ? console1.error : console1.log;
                 const message = Array.isArray(message_) ? message_.slice() : [
                     message_
                 ];
@@ -11614,7 +11614,7 @@ var __webpack_modules__ = {
                     }
                 }
                 log(firstLine);
-                if (!processIsBun) console.group();
+                if (!processIsBun) console1.group();
                 if (cause.reasons.length > 0) {
                     log(causePretty(cause));
                 }
@@ -11627,7 +11627,7 @@ var __webpack_modules__ = {
                 for (const [key, value] of Object.entries(annotations)){
                     log(color(`${key}:`, colors.bold, colors.white), redact(value));
                 }
-                if (!processIsBun) console.groupEnd();
+                if (!processIsBun) console1.groupEnd();
             });
         };
         const prettyLoggerBrowser = (options)=>{
@@ -11635,7 +11635,7 @@ var __webpack_modules__ = {
             const color = showColors ? "%c" : "";
             const formatDate = options?.formatDate ?? defaultDateFormat;
             return loggerMake(({ cause, date, fiber, logLevel, message: message_ })=>{
-                const console = fiber.getRef(ConsoleRef);
+                const console1 = fiber.getRef(ConsoleRef);
                 const message = Array.isArray(message_) ? message_.slice() : [
                     message_
                 ];
@@ -11665,25 +11665,25 @@ var __webpack_modules__ = {
                         messageIndex++;
                     }
                 }
-                console.groupCollapsed(firstLine, ...firstParams);
+                console1.groupCollapsed(firstLine, ...firstParams);
                 if (cause.reasons.length > 0) {
-                    console.error(causePretty(cause));
+                    console1.error(causePretty(cause));
                 }
                 if (messageIndex < message.length) {
                     for(; messageIndex < message.length; messageIndex++){
-                        console.log(redact(message[messageIndex]));
+                        console1.log(redact(message[messageIndex]));
                     }
                 }
                 const annotations = fiber.getRef(CurrentLogAnnotations);
                 for (const [key, value] of Object.entries(annotations)){
                     const redacted = redact(value);
                     if (showColors) {
-                        console.log(`%c${key}:`, "color:gray", redacted);
+                        console1.log(`%c${key}:`, "color:gray", redacted);
                     } else {
-                        console.log(`${key}:`, redacted);
+                        console1.log(`${key}:`, redacted);
                     }
                 }
-                console.groupEnd();
+                console1.groupEnd();
             });
         };
         const defaultLogger = loggerMake(({ cause, date, fiber, logLevel, message })=>{
@@ -11703,8 +11703,8 @@ var __webpack_modules__ = {
             if (Object.keys(annotations).length > 0) {
                 message_.push(annotations);
             }
-            const console = fiber.getRef(ConsoleRef);
-            const log = fiber.getRef(LogToStderr) ? console.error : console.log;
+            const console1 = fiber.getRef(ConsoleRef);
+            const log = fiber.getRef(LogToStderr) ? console1.error : console1.log;
             log(`[${defaultDateFormat(date)}] ${logLevel.toUpperCase()} (#${fiber.id})${spanString}:`, ...message_);
         });
         const tracerLogger = loggerMake(({ cause, fiber, logLevel, message })=>{
@@ -21924,6 +21924,126 @@ var __webpack_modules__ = {
             A: ()=>__rspack_default_export
         });
     },
+    "./src/core/app-auth.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
+        var node_fs__rspack_import_1 = __webpack_require__("node:fs");
+        var node_os__rspack_import_2 = __webpack_require__("node:os");
+        var node_path__rspack_import_3 = __webpack_require__("node:path");
+        var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        class AppAuthError extends Error {
+            constructor(code, message){
+                super(message);
+                this.name = "AppAuthError";
+                this.code = code;
+            }
+        }
+        const SIGN_IN = "Open the Grok Bot app and sign in to that login once.";
+        const MESSAGES = {
+            NO_SECRETS_FILE: `No saved Grok Bot login file was found. ${SIGN_IN}`,
+            UNSUPPORTED_VERSION: `This Grok Bot app login file is not a supported version. ${SIGN_IN}`,
+            NO_ACCOUNT: `No saved Grok Bot login matches this account. ${SIGN_IN}`,
+            DECRYPT_FAILED: `Could not decrypt the saved Grok Bot login. ${SIGN_IN}`,
+            EXPIRED: "The saved Grok Bot login has expired. Open the Grok Bot app and sign in to that login once so it can refresh.",
+            SCOPE_MISMATCH: `The saved Grok Bot login does not match this account. ${SIGN_IN}`,
+            NOT_JWT: `The saved Grok Bot login is not a usable access token. ${SIGN_IN}`
+        };
+        const SCOPE = /^[0-9a-f]{64}$/;
+        const LEGACY = /^scoped:v1:([0-9a-f]{64}):([\s\S]+)$/;
+        const ISSUER = "https://authentication.cursor.sh";
+        function fail(code) {
+            return new AppAuthError(code, MESSAGES[code]);
+        }
+        function isScope(value) {
+            return typeof value === "string" && SCOPE.test(value);
+        }
+        function parseAccounts(raw) {
+            if (typeof raw !== "string" || !raw.trim()) return null;
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+                return parsed;
+            } catch  {
+                return null;
+            }
+        }
+        function accessTokenValue(secrets, accounts, scope) {
+            const entry = accounts?.accounts?.[scope];
+            const current = entry?.["cursor-access-token"];
+            if (typeof current === "string" && current) return current;
+            const legacy = secrets["cursor-access-token"];
+            if (typeof legacy !== "string") return null;
+            const match = LEGACY.exec(legacy);
+            if (match && match[1] === scope) return match[2];
+            return null;
+        }
+        function reveal(value, options) {
+            if (value.startsWith("plaintext:v1:")) return value.slice("plaintext:v1:".length);
+            try {
+                return (0, _app_session_js__rspack_import_4.KK)(value, options);
+            } catch  {
+                throw fail("DECRYPT_FAILED");
+            }
+        }
+        function readPayload(token) {
+            const parts = String(token).split(".");
+            if (parts.length !== 3 || parts.some((part)=>part.length === 0)) throw fail("NOT_JWT");
+            let payload;
+            try {
+                payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+            } catch  {
+                throw fail("NOT_JWT");
+            }
+            if (!payload || typeof payload !== "object" || payload.iss !== ISSUER || typeof payload.sub !== "string" || !payload.sub || typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw fail("NOT_JWT");
+            return payload;
+        }
+        function loadAppAccessToken({ scope, platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env, getKeychainPassword, unprotectData, now = ()=>Date.now(), readFile = node_fs__rspack_import_1.readFileSync } = {}) {
+            const path = (0, node_path__rspack_import_3.join)((0, node_path__rspack_import_3.dirname)((0, _app_session_js__rspack_import_4.dQ)(home, platform, env)), "sand-secrets.json");
+            let text;
+            try {
+                text = readFile(path, "utf8");
+            } catch  {
+                throw fail("NO_SECRETS_FILE");
+            }
+            let secrets;
+            try {
+                secrets = JSON.parse(text);
+            } catch  {
+                throw fail("UNSUPPORTED_VERSION");
+            }
+            if (!secrets || typeof secrets !== "object" || Array.isArray(secrets) || secrets.version !== 1) {
+                throw fail("UNSUPPORTED_VERSION");
+            }
+            const accounts = parseAccounts(secrets["cursor-accounts"]);
+            const resolved = scope == null || scope === "" ? accounts?.active : scope;
+            if (!isScope(resolved)) throw fail("NO_ACCOUNT");
+            const stored = accessTokenValue(secrets, accounts, resolved);
+            if (!stored) throw fail("NO_ACCOUNT");
+            const token = reveal(stored, {
+                platform,
+                home,
+                env,
+                ...getKeychainPassword ? {
+                    getKeychainPassword
+                } : {},
+                ...unprotectData ? {
+                    unprotectData
+                } : {}
+            });
+            const payload = readPayload(token);
+            const actual = node_crypto__rspack_import_0["default"].createHash("sha256").update(payload.sub).digest("hex");
+            if (actual !== resolved) throw fail("SCOPE_MISMATCH");
+            if (!(payload.exp * 1000 > now() + 60000)) throw fail("EXPIRED");
+            return {
+                token,
+                scope: resolved,
+                expiresAt: payload.exp * 1000
+            };
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            y: ()=>AppAuthError,
+            z: ()=>loadAppAccessToken
+        });
+    },
     "./src/core/app-session.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_child_process__rspack_import_1 = __webpack_require__("node:child_process");
@@ -22189,6 +22309,15 @@ var __webpack_modules__ = {
                     usable: row.usable
                 }));
         }
+        function decryptGrokBotSafeStorage(encrypted, { platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
+            return decryptEntry(encrypted, {
+                platform,
+                home,
+                env,
+                getKeychainPassword,
+                unprotectData
+            });
+        }
         function decryptEntry(encrypted, { platform, home, env, getKeychainPassword, unprotectData }) {
             if (platform === "win32") {
                 return decryptWindowsSafeStorageString(encrypted, readWindowsSafeStorageKey(home, env, unprotectData));
@@ -22222,11 +22351,11 @@ var __webpack_modules__ = {
             if (!descriptor.baseUrl || !descriptor.token) {
                 throw new GrokBotGatewaySessionError("INCOMPLETE_DESCRIPTOR", "Decrypted Grok Bot gateway descriptor is incomplete.");
             }
-            return {
+            return withAccountScope({
                 gatewayUrl: String(descriptor.baseUrl).replace(/\/$/, ""),
                 gatewayToken: String(descriptor.token),
                 headers: descriptor.headers ?? {}
-            };
+            }, selected.id);
         }
         function once(fn) {
             let done = false;
@@ -22361,12 +22490,18 @@ var __webpack_modules__ = {
             return {
                 id: selected.shownId,
                 label: selected.shownLabel,
-                session: {
+                session: withAccountScope({
                     gatewayUrl: baseUrl.replace(/\/$/, ""),
                     gatewayToken: token,
                     headers: headers ?? {}
-                }
+                }, selected.id)
             };
+        }
+        function withAccountScope(session, id) {
+            return typeof id === "string" && /^[0-9a-f]{64}$/.test(id) ? {
+                ...session,
+                accountScope: id
+            } : session;
         }
         function inspectGrokBotGatewaySession(options = {}) {
             if (!hasGrokBotGatewaySession1(options)) {
@@ -22391,8 +22526,112 @@ var __webpack_modules__ = {
             }
         }
         __webpack_require__.d(__webpack_exports__, {
+            KK: ()=>decryptGrokBotSafeStorage,
             Z2: ()=>loadGrokBotGatewaySession,
             dQ: ()=>grokBotGatewayDescriptorPath
+        });
+    },
+    "./src/core/client-version.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_child_process__rspack_import_0 = __webpack_require__("node:child_process");
+        var node_fs__rspack_import_1 = __webpack_require__("node:fs");
+        var node_os__rspack_import_2 = __webpack_require__("node:os");
+        var node_path__rspack_import_3 = __webpack_require__("node:path");
+        const DEFAULT_SAND_CLIENT_VERSION = "0.72.1";
+        const VERSION = /^\d+\.\d+\.\d+$/;
+        const PLIST_VERSION = /<key>\s*CFBundleShortVersionString\s*<\/key>\s*<string>([^<]*)<\/string>/;
+        const REG_ROOTS = [
+            "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+        ];
+        function normalizeClientVersion(raw) {
+            const trimmed = String(raw ?? "").trim();
+            const fourPart = /^(\d+\.\d+\.\d+)\.\d+$/.exec(trimmed);
+            const candidate = fourPart ? fourPart[1] : trimmed;
+            return VERSION.test(candidate) ? candidate : null;
+        }
+        function macVersion(home, readFile) {
+            const paths = [
+                "/Applications/Grok Bot.app/Contents/Info.plist",
+                (0, node_path__rspack_import_3.join)(home, "Applications/Grok Bot.app/Contents/Info.plist")
+            ];
+            for (const path of paths){
+                let text = "";
+                try {
+                    text = readFile(path, "utf8");
+                } catch  {
+                    continue;
+                }
+                const match = PLIST_VERSION.exec(String(text));
+                const version = match ? normalizeClientVersion(match[1]) : null;
+                if (version) return version;
+            }
+            return null;
+        }
+        function versionFromReg(output) {
+            const blocks = String(output).split(/\r?\n(?=HKEY_)/);
+            for (const block of blocks){
+                const name = /^\s*DisplayName\s+REG_\w+\s+(.*)$/m.exec(block);
+                if (!name || name[1].trim() !== "Grok Bot") continue;
+                const found = /^\s*DisplayVersion\s+REG_\w+\s+(.*)$/m.exec(block);
+                const version = found ? normalizeClientVersion(found[1]) : null;
+                if (version) return version;
+            }
+            return null;
+        }
+        function windowsVersion(execFile) {
+            for (const root of REG_ROOTS){
+                let output = "";
+                try {
+                    output = execFile("reg", [
+                        "query",
+                        root,
+                        "/s"
+                    ], {
+                        encoding: "utf8",
+                        timeout: 3000,
+                        windowsHide: true
+                    });
+                } catch  {
+                    continue;
+                }
+                const version = versionFromReg(output);
+                if (version) return version;
+            }
+            return null;
+        }
+        function installedVersion({ platform, home, readFile, execFile }) {
+            if (platform === "darwin") return macVersion(home, readFile);
+            if (platform === "win32") return windowsVersion(execFile);
+            return null;
+        }
+        let cachedAppVersion;
+        function cursorClientVersion({ env = process.env, platform, home, readFile, execFile } = {}) {
+            const raw = env.SAND_CLIENT_VERSION;
+            if (raw != null && String(raw).trim() !== "") {
+                return normalizeClientVersion(String(raw)) ?? DEFAULT_SAND_CLIENT_VERSION;
+            }
+            const injected = platform != null || home != null || readFile != null || execFile != null;
+            if (!injected) {
+                if (cachedAppVersion === undefined) {
+                    cachedAppVersion = installedVersion({
+                        platform: process.platform,
+                        home: (0, node_os__rspack_import_2.homedir)(),
+                        readFile: node_fs__rspack_import_1.readFileSync,
+                        execFile: node_child_process__rspack_import_0.execFileSync
+                    });
+                }
+                return cachedAppVersion ?? DEFAULT_SAND_CLIENT_VERSION;
+            }
+            return installedVersion({
+                platform: platform ?? process.platform,
+                home: home ?? (0, node_os__rspack_import_2.homedir)(),
+                readFile: readFile ?? node_fs__rspack_import_1.readFileSync,
+                execFile: execFile ?? node_child_process__rspack_import_0.execFileSync
+            }) ?? DEFAULT_SAND_CLIENT_VERSION;
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Uz: ()=>cursorClientVersion
         });
     },
     "./src/core/codex-bridge.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -25181,11 +25420,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     },
     "./src/core/gateway.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
-        var _headers_js__rspack_import_5 = __webpack_require__("./src/core/headers.js");
-        var _app_session_js__rspack_import_1 = __webpack_require__("./src/core/app-session.js");
-        var _store_js__rspack_import_2 = __webpack_require__("./src/core/store.js");
-        var _url_policy_js__rspack_import_3 = __webpack_require__("./src/core/url-policy.js");
-        var _grok_approvals_js__rspack_import_4 = __webpack_require__("./src/core/grok-approvals.js");
+        var node_os__rspack_import_1 = __webpack_require__("node:os");
+        var _app_auth_js__rspack_import_2 = __webpack_require__("./src/core/app-auth.js");
+        var _client_version_js__rspack_import_3 = __webpack_require__("./src/core/client-version.js");
+        var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
+        var _app_session_js__rspack_import_5 = __webpack_require__("./src/core/app-session.js");
+        var _store_js__rspack_import_6 = __webpack_require__("./src/core/store.js");
+        var _url_policy_js__rspack_import_7 = __webpack_require__("./src/core/url-policy.js");
+        var _grok_approvals_js__rspack_import_8 = __webpack_require__("./src/core/grok-approvals.js");
         class GatewayError extends Error {
             constructor(message, info = {}){
                 super(message);
@@ -25196,6 +25438,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (info.effect !== undefined) this.effect = info.effect;
                 if (info.failureCode !== undefined) this.failureCode = info.failureCode;
                 if (info.kind !== undefined) this.kind = info.kind;
+                if (info.wake !== undefined) this.wake = info.wake;
+                if (info.failureReason !== undefined) this.failureReason = info.failureReason;
             }
         }
         const GATEWAY_TIMEOUT_MS = 30000;
@@ -25252,11 +25496,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const url = (process.env.GROK_BOT_GATEWAY_URL || "").trim();
             if (url && token) {
                 return {
-                    gatewayUrl: (0, _url_policy_js__rspack_import_3.Re)(url.replace(/\/$/, ""), {
+                    gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(url.replace(/\/$/, ""), {
                         kind: "gateway"
                     }),
                     gatewayToken: token,
-                    gatewayHeaders: (0, _headers_js__rspack_import_5.gx)()
+                    gatewayHeaders: (0, _headers_js__rspack_import_4.gx)()
                 };
             }
             return null;
@@ -25264,7 +25508,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function sessionFromApp(account) {
             let loaded;
             try {
-                loaded = (0, _app_session_js__rspack_import_1.Z2)({
+                loaded = (0, _app_session_js__rspack_import_5.Z2)({
                     account
                 });
             } catch (error) {
@@ -25273,11 +25517,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             if (!loaded) return null;
             return {
-                gatewayUrl: (0, _url_policy_js__rspack_import_3.Re)(loaded.gatewayUrl, {
+                gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(loaded.gatewayUrl, {
                     kind: "gateway"
                 }),
                 gatewayToken: loaded.gatewayToken,
-                gatewayHeaders: (0, _headers_js__rspack_import_5.bQ)((0, _headers_js__rspack_import_5.dk)(loaded.headers), (0, _headers_js__rspack_import_5.gx)())
+                gatewayHeaders: (0, _headers_js__rspack_import_4.bQ)((0, _headers_js__rspack_import_4.dk)(loaded.headers), (0, _headers_js__rspack_import_4.gx)()),
+                ...loaded.accountScope ? {
+                    accountScope: loaded.accountScope
+                } : {}
             };
         }
         function hasGatewayAuth() {
@@ -25361,9 +25608,45 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return undefined;
         }
-        async function ensureSandbox(accessToken, { signal } = {}) {
+        const RUN_STATE = {
+            SAND_BOX_RUN_STATE_RUNNING: "RUNNING",
+            SAND_BOX_RUN_STATE_HIBERNATED: "HIBERNATED",
+            SAND_BOX_RUN_STATE_STARTING: "STARTING"
+        };
+        function normalizeRunState(value) {
+            if (value == null || value === "") return "unknown";
+            return RUN_STATE[String(value)] || "unknown";
+        }
+        function positiveTestMs(env, name) {
+            const test = /^(1|true|yes)$/i.test(String(env.GROK_BOT_TEST ?? "").trim());
+            if (!test) return null;
+            const n = Number(String(env[name] ?? "").trim());
+            return Number.isSafeInteger(n) && n >= 1 && n <= 90000 ? n : null;
+        }
+        function sandboxWakeBudget(env = process.env) {
+            return {
+                timeoutMs: positiveTestMs(env, "GBOT_WAKE_TIMEOUT_MS") ?? 90000,
+                intervalMs: positiveTestMs(env, "GBOT_WAKE_POLL_MS") ?? 3000
+            };
+        }
+        function sandboxFields(body) {
+            const gatewayUrl = pick(body, "gatewayUrl", "gateway_url");
+            const gatewayToken = pick(body, "gatewayToken", "gateway_token");
+            if (!gatewayUrl || !gatewayToken) return {};
+            return {
+                gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(String(gatewayUrl).replace(/\/$/, ""), {
+                    kind: "gateway"
+                }),
+                gatewayToken: String(gatewayToken),
+                gatewayHeaders: (0, _headers_js__rspack_import_4.bQ)((0, _headers_js__rspack_import_4.Ew)(body), (0, _headers_js__rspack_import_4.gx)())
+            };
+        }
+        function sandboxReady(result) {
+            return result?.runState === "RUNNING" && Boolean(result.gatewayUrl) && Boolean(result.gatewayToken);
+        }
+        async function ensureSandbox(accessToken, { signal, wake = true, partial = false } = {}) {
             assertGatewayActive(signal);
-            const url = (0, _url_policy_js__rspack_import_3.Re)(backendBase(), {
+            const url = (0, _url_policy_js__rspack_import_7.Re)(backendBase(), {
                 kind: "backend"
             }) + "/aiserver.v1.GrokBotService/EnsureSandBox";
             let res, body;
@@ -25372,9 +25655,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     method: "POST",
                     redirect: "error",
                     signal: gatewayDeadline(signal),
-                    headers: (0, _headers_js__rspack_import_5._6)(accessToken),
+                    headers: (0, _headers_js__rspack_import_4._6)(accessToken),
                     body: JSON.stringify({
-                        wake: true
+                        wake: Boolean(wake)
                     })
                 });
                 body = await readJson(res);
@@ -25384,24 +25667,78 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             assertGatewayActive(signal);
             if (!res.ok) {
-                const detail = body.message || body.error || body.raw || res.statusText;
-                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_3.fp)(detail), {
+                let detail = body.message || body.error || body.raw || res.statusText;
+                if (res.status === 401 && /no longer supported/i.test(String(detail))) {
+                    const version = (0, _client_version_js__rspack_import_3.Uz)();
+                    detail = `${detail} (gbot sent x-cursor-client-version ${version}; set SAND_CLIENT_VERSION to override)`;
+                }
+                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_7.fp)(detail), {
                     status: res.status,
                     method: "EnsureSandBox"
                 });
             }
-            const gatewayUrl = pick(body, "gatewayUrl", "gateway_url");
-            const gatewayToken = pick(body, "gatewayToken", "gateway_token");
-            if (!gatewayUrl || !gatewayToken) {
+            const fields = sandboxFields(body);
+            if ((!fields.gatewayUrl || !fields.gatewayToken) && !partial) {
                 throw new GatewayError("EnsureSandBox returned no gatewayUrl/gatewayToken. Auth may be a dashboard API key (those do not work).");
             }
             return {
-                gatewayUrl: (0, _url_policy_js__rspack_import_3.Re)(String(gatewayUrl).replace(/\/$/, ""), {
-                    kind: "gateway"
-                }),
-                gatewayToken: String(gatewayToken),
-                gatewayHeaders: (0, _headers_js__rspack_import_5.bQ)((0, _headers_js__rspack_import_5.Ew)(body), (0, _headers_js__rspack_import_5.gx)())
+                ...fields,
+                runState: normalizeRunState(pick(body, "runState", "run_state"))
             };
+        }
+        function abortableSleep(ms, signal) {
+            if (signal?.aborted) {
+                return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+            }
+            return new Promise((resolve, reject)=>{
+                const timer = setTimeout(()=>{
+                    signal?.removeEventListener("abort", onAbort);
+                    resolve();
+                }, ms);
+                const onAbort = ()=>{
+                    clearTimeout(timer);
+                    reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+                };
+                signal?.addEventListener("abort", onAbort, {
+                    once: true
+                });
+            });
+        }
+        async function describeSandbox(accessToken, options = {}) {
+            return ensureSandbox(accessToken, {
+                ...options,
+                wake: false,
+                partial: true
+            });
+        }
+        async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs } = {}) {
+            const budget = sandboxWakeBudget();
+            const timeout = timeoutMs ?? budget.timeoutMs;
+            const interval = intervalMs ?? budget.intervalMs;
+            const started = Date.now();
+            let result = await ensureSandbox(accessToken, {
+                signal,
+                wake: true,
+                partial: true
+            });
+            while(!sandboxReady(result)){
+                const elapsed = Date.now() - started;
+                if (elapsed >= timeout) {
+                    const error = new GatewayError(result.runState === "STARTING" ? "The Grok Bot box is still starting." : "The Grok Bot box did not start.", {
+                        code: result.runState === "STARTING" ? "WAKE_TIMEOUT" : "WAKE_FAILED",
+                        method: "EnsureSandBox"
+                    });
+                    error.runState = result.runState;
+                    throw error;
+                }
+                await abortableSleep(Math.min(interval, Math.max(0, timeout - elapsed)), signal);
+                result = await ensureSandbox(accessToken, {
+                    signal,
+                    wake: false,
+                    partial: true
+                });
+            }
+            return result;
         }
         async function connectGateway({ signal, account } = {}) {
             assertGatewayActive(signal);
@@ -25413,12 +25750,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!token) {
                 throw new GatewayError("Set CURSOR_ACCESS_TOKEN, or GROK_BOT_GATEWAY_URL + GROK_BOT_GATEWAY_TOKEN. Do not use a Cursor dashboard API key.");
             }
-            return ensureSandbox(token, {
-                signal
+            const sandbox = await ensureSandbox(token, {
+                signal,
+                wake: true
             });
+            return {
+                gatewayUrl: sandbox.gatewayUrl,
+                gatewayToken: sandbox.gatewayToken,
+                gatewayHeaders: sandbox.gatewayHeaders
+            };
         }
         function redactDetail(detail, session) {
-            let text = (0, _url_policy_js__rspack_import_3.fp)(String(detail ?? "").slice(0, 300));
+            let text = (0, _url_policy_js__rspack_import_7.fp)(String(detail ?? "").slice(0, 300));
             const secrets = [];
             if (typeof session?.gatewayToken === "string") secrets.push(session.gatewayToken);
             const headers = session?.gatewayHeaders;
@@ -25439,7 +25782,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (failureCode === "gateway/unknown-method") kind = "unsupported";
             else if (status === 401 || status === 403) kind = "auth";
             else if (status === 404 && type.includes("text/plain") && data && typeof data.raw === "string" && data.raw.includes("could not be routed")) kind = "routing";
-            else if (status === 417 && (/^pod_hibernated$/i.test(String(failureReason ?? "").trim()) || !failureCode || /sleep|hibernat/i.test(failureCode))) kind = "asleep";
+            else if (status === 417 && (/^pod_hibernated$/i.test(failureReason ?? "") || !failureReason && !failureCode || /sleep|hibernat/i.test(failureCode ?? ""))) kind = "asleep";
             else if (status >= 500) kind = "server";
             else if (status >= 400 && status < 500) kind = "client";
             return {
@@ -25447,9 +25790,145 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 kind
             };
         }
-        async function gatewayCall(session, method, body = {}, { signal } = {}) {
+        function autoWakeEnabled() {
+            return String(process.env.GBOT_AUTO_WAKE ?? "").trim() !== "0";
+        }
+        function canAutoWake(session) {
+            if (!autoWakeEnabled()) return false;
+            if (gatewayOverride()) return false;
+            return typeof session?.accountScope === "string" && /^[0-9a-f]{64}$/.test(session.accountScope);
+        }
+        function wakeReason(code) {
+            switch(code){
+                case "EXPIRED":
+                    return "token expired";
+                case "NO_SECRETS_FILE":
+                    return "no saved login";
+                case "UNSUPPORTED_VERSION":
+                    return "unsupported login file";
+                case "NO_ACCOUNT":
+                    return "no saved login for this account";
+                case "DECRYPT_FAILED":
+                    return "could not decrypt the login";
+                case "SCOPE_MISMATCH":
+                    return "login does not match this account";
+                case "NOT_JWT":
+                    return "saved login is not usable";
+                case "WAKE_TIMEOUT":
+                    return "timed out";
+                case "UNAUTHORIZED":
+                    return "unauthorized";
+                default:
+                    return "backend error";
+            }
+        }
+        function wakeFailure(error) {
+            if (error instanceof _app_auth_js__rspack_import_2.y) return {
+                code: error.code,
+                reason: wakeReason(error.code)
+            };
+            if (error instanceof GatewayError && (error.status === 401 || error.status === 403)) {
+                return {
+                    code: "UNAUTHORIZED",
+                    reason: "unauthorized"
+                };
+            }
+            if (error?.code === "WAKE_TIMEOUT" || error?.code === "WAKE_FAILED") {
+                return {
+                    code: error.code,
+                    reason: wakeReason(error.code)
+                };
+            }
+            return {
+                code: "WAKE_FAILED",
+                reason: "backend error"
+            };
+        }
+        function isCallerAbort(_error, signal) {
+            return Boolean(signal?.aborted);
+        }
+        const wakesByScope = new Map();
+        function wakeShared(scope, signal) {
+            let job = wakesByScope.get(scope);
+            if (!job) {
+                const controller = new AbortController();
+                job = {
+                    controller,
+                    waiters: new Set(),
+                    promise: null
+                };
+                job.promise = (async ()=>{
+                    const loaded = await (0, _app_auth_js__rspack_import_2.z)({
+                        scope,
+                        home: (0, node_os__rspack_import_1.homedir)(),
+                        env: process.env
+                    });
+                    const result = await wakeSandbox(loaded.token, {
+                        signal: controller.signal
+                    });
+                    if (process.env.GBOT_DEBUG) console.error("gbot: woke asleep box");
+                    return result;
+                })().finally(()=>{
+                    if (wakesByScope.get(scope) === job) wakesByScope.delete(scope);
+                });
+                wakesByScope.set(scope, job);
+            }
+            const waiter = {};
+            job.waiters.add(waiter);
+            const onAbort = ()=>{
+                job.waiters.delete(waiter);
+                if (job.waiters.size === 0) job.controller.abort(signal?.reason);
+            };
+            if (signal?.aborted) {
+                onAbort();
+                return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+            }
+            signal?.addEventListener("abort", onAbort, {
+                once: true
+            });
+            return job.promise.then((result)=>{
+                if (signal?.aborted) {
+                    throw signal.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted", "AbortError");
+                }
+                return result;
+            }).finally(()=>{
+                signal?.removeEventListener("abort", onAbort);
+                job.waiters.delete(waiter);
+            });
+        }
+        function applySandbox(session, sandbox) {
+            session.gatewayUrl = sandbox.gatewayUrl;
+            session.gatewayToken = sandbox.gatewayToken;
+            session.gatewayHeaders = sandbox.gatewayHeaders;
+        }
+        async function gatewayCall(session, method, body = {}, options = {}) {
+            try {
+                return await performGatewayCall(session, method, body, options);
+            } catch (error) {
+                if (options.allowWake === false || error?.code !== "BOX_ASLEEP" || !canAutoWake(session)) throw error;
+                let sandbox;
+                try {
+                    sandbox = await wakeShared(session.accountScope, options.signal);
+                } catch (wakeError) {
+                    if (isCallerAbort(wakeError, options.signal)) throw wakeError;
+                    const failure = wakeFailure(wakeError);
+                    error.message += ` (auto wake failed: ${failure.reason})`;
+                    error.wake = {
+                        attempted: true,
+                        error: failure.code
+                    };
+                    throw error;
+                }
+                applySandbox(session, sandbox);
+                return gatewayCall(session, method, body, {
+                    ...options,
+                    allowWake: false
+                });
+            }
+        }
+        async function performGatewayCall(session, method, body = {}, { signal } = {}) {
             assertGatewayActive(signal);
-            const base = (0, _url_policy_js__rspack_import_3.Re)(session.gatewayUrl, {
+            const base = (0, _url_policy_js__rspack_import_7.Re)(session.gatewayUrl, {
                 kind: "gateway"
             });
             const url = base + "/api/" + method;
@@ -25460,7 +25939,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 method: "POST",
                 redirect: "error",
                 signal: deadline,
-                headers: (0, _headers_js__rspack_import_5.A1)(session),
+                headers: (0, _headers_js__rspack_import_4.A1)(session),
                 body: JSON.stringify(body)
             };
             assertGatewayActive(signal);
@@ -25488,7 +25967,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!prompt) assertGatewayActive(signal);
             if (!res.ok) {
                 const detail = data.message || data.error || data.raw || res.statusText;
-                const classified = failureKind(res.status, res.headers.get("content-type"), data, res.headers.get("x-anyrun-failure-reason"));
+                const failureReason = String(res.headers.get("x-anyrun-failure-reason") ?? "").trim().slice(0, 64) || undefined;
+                const classified = failureKind(res.status, res.headers.get("content-type"), data, failureReason);
                 const asleep = classified.kind === "asleep";
                 throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session) + (asleep ? ASLEEP_HINT : ""), {
                     status: res.status,
@@ -25501,6 +25981,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     } : {},
                     ...classified.failureCode ? {
                         failureCode: classified.failureCode
+                    } : {},
+                    ...failureReason ? {
+                        failureReason
                     } : {}
                 });
             }
@@ -25989,6 +26472,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         });
     },
     "./src/core/headers.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var _client_version_js__rspack_import_0 = __webpack_require__("./src/core/client-version.js");
         function normalizeHeaderMap(obj) {
             if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
             const out = {};
@@ -26037,7 +26521,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "connect-protocol-version": "1",
                 authorization: "Bearer " + accessToken,
                 "x-cursor-client-type": "sand",
-                "x-cursor-client-version": process.env.SAND_CLIENT_VERSION || "0.20.0",
+                "x-cursor-client-version": (0, _client_version_js__rspack_import_0.Uz)(),
                 "x-sand-box-namespace": process.env.SAND_BOX_NAMESPACE || "prod"
             };
         }
