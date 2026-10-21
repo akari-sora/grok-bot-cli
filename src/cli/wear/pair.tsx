@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import { loadGrokBotGatewaySelection } from '../../core/app-session.js';
+import { isTestMode, secretStoreOffMessage, secretStoreOptions } from '../../core/secret-store.js';
 import {
   OUTCOME_MESSAGES,
   PAIR_MESSAGES,
@@ -129,10 +130,8 @@ const MESSAGES = {
   } as Record<string, string>,
 };
 
-const truthy = (value: string | undefined): boolean => ['1', 'true', 'yes'].includes((value ?? '').trim().toLowerCase());
-
 /** The fork's url-policy testMode(): GROK_BOT_TEST truthy or NODE_ENV=test. */
-const testMode = (): boolean => truthy(process.env.GROK_BOT_TEST) || process.env.NODE_ENV === 'test';
+const testMode = (): boolean => isTestMode();
 
 /** Control characters, line separators and bidi overrides in a label must not reach the terminal. */
 const printable = (text: string): string =>
@@ -146,31 +145,13 @@ const printable = (text: string): string =>
 const failure = (category: Category, error: string): Failure => ({ category, error, exitCode: EXIT[category] });
 
 /** Why the OS secret store is off in this run, for the message when no login can be read; empty when it is on. */
-const secretStoreOff = (): string => {
-  if (!testMode()) return '';
-  if (process.env.GROK_BOT_TEST === '1' && process.env.GBOT_TEST_KEYCHAIN_PASSWORD) return '';
-  return truthy(process.env.GROK_BOT_TEST)
-    ? ' GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode).'
-    : ' NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.';
-};
+const secretStoreOff = (): string => secretStoreOffMessage();
 
 /**
  * OS secret access. Tests never reach the real Keychain, secret-tool or DPAPI: in test mode the store is disabled,
  * and only GROK_BOT_TEST=1 may hand over a fixture password through GBOT_TEST_KEYCHAIN_PASSWORD.
  */
-const secretStore = () => {
-  if (!testMode()) return {};
-  const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
-  return {
-    getKeychainPassword: (): string => {
-      if (typeof fixture === 'string' && fixture) return fixture;
-      throw new Error('The OS secret store is disabled in test mode.');
-    },
-    unprotectData: (): Buffer => {
-      throw new Error('The OS secret store is disabled in test mode.');
-    },
-  };
-};
+const secretStore = () => secretStoreOptions();
 
 /**
  * Reads and deletes the 0600 file the wrapper (bin/gbot.mjs) wrote after the hidden prompt. Only a regular,

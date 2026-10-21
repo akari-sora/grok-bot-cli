@@ -42,6 +42,8 @@ npm run build
 npm link
 ```
 
+To install or restore this fork on another machine without a `git+https` spec, use `scripts/install-fork.sh` (macOS/Linux) or `scripts/install-fork.ps1` (Windows). Those scripts are described under [Switching logins and restoring gbot on another machine](#switching-logins-and-restoring-gbot-on-another-machine). The dry-run was tested; the scripts were not run against GitLab in this change.
+
 ### Verify, upgrade, uninstall
 
 ```sh
@@ -68,7 +70,7 @@ If you used `npm link`, run `npm unlink -g grok-bot-cli` in the clone.
 | Linux | `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot` | `secret-tool` (`libsecret-tools`), except the basic-text v10 key |
 | Windows | `%APPDATA%\Grok Bot` | DPAPI via PowerShell (`Local State`) |
 
-One saved login is used automatically. Several logins and no choice is an error that lists labels.
+One saved login is used automatically. Several logins and no choice is an error that lists labels, unless a config default alias is set (see below). `gbot doctor` and `gbot wear pair` do not use that default.
 
 ```sh
 gbot accounts
@@ -80,11 +82,54 @@ export GBOT_ACCOUNT="<label>"   # PowerShell: $env:GBOT_ACCOUNT = "<label>"
 gbot doctor
 ```
 
-`--account` overrides `GBOT_ACCOUNT`. There is no default label. The flag must follow the subcommand. `gbot --account <label> bots list` exits 2 with `Unknown option: --account.`
+`--account` overrides `GBOT_ACCOUNT`, which overrides the config default. The flag must follow the subcommand. `gbot --account <label> bots list` exits 2 with `Unknown option: --account.`
 
-`gbot accounts` prints labels only (email or display name when the descriptor has one, otherwise the app's account key), plus which row was saved last. It does not know which login the app window is showing. It never prints tokens.
+`gbot accounts` lists every signed-in login and every descriptor entry. It never prints tokens. The full rules are in the next section.
 
-`gbot accounts --json` is `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable" }] }`. `id` is the label when the descriptor has no separate name.
+`gbot accounts --json` is `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable", "email", "alias", "appActive", "hasDescriptorEntry" }] }`. Older fields stay. `email` and `alias` are `null` when absent.
+
+### Switching logins and restoring gbot on another machine
+
+The desktop app keeps the login it is showing in `gateway-descriptor.json`. Every signed-in login stays in `sand-secrets.json` under `cursor-accounts`. After the app switches logins, the other login can disappear from the descriptor. gbot still lists it. If that login has no descriptor entry, gbot builds a gateway session from the saved access token: EnsureSandBox `{ "wake": false }` first, then `{ "wake": true }` unless the box is already `RUNNING` and the answer has gateway fields. The session is not written to disk. The refresh token is never read. The app token is sent only to https Cursor API hosts.
+
+`gbot accounts` marks the app's current login `(app active)` and a login with no descriptor entry `(no app session; gbot builds one from the saved login)`. The label is the email from the decrypted profile, or the first 8 hex characters of the scope when the profile cannot be decrypted. Alias names are printed on their own line.
+
+Give a login a name and, if you want, make it the default. These are arguments of `gbot accounts` (this bundler cannot also make `accounts` a command group):
+
+```sh
+gbot accounts alias work owner@example.com
+gbot accounts default work
+gbot accounts unalias work
+gbot accounts default --clear
+```
+
+An alias name matches `^[A-Za-z0-9_-]{1,32}$`. A selector is that alias, an email (case-insensitive), a descriptor label, or an id or scope prefix of at least 8 hex characters. More than one match is the same error as before.
+
+Gateway commands (`gbot send`, `gbot wake`, and the rest that take `--account`) resolve in this order: `--account`, then `GBOT_ACCOUNT`, then the config `default`, then the single saved login. Several logins and none of those is an error. `gbot doctor` still inspects the descriptor and does not apply the config default. `gbot wear pair` still sends a descriptor session only, and still ignores `GBOT_ACCOUNT` and the config default. A login that exists only in `sand-secrets.json` is not offered to the watch.
+
+The config file holds aliases and the default. It has no tokens. On macOS and Linux it is `$XDG_CONFIG_HOME/grok-bot-cli/config.json`, or `~/.config/grok-bot-cli/config.json` when `XDG_CONFIG_HOME` is unset. On Windows it is `%APPDATA%\grok-bot-cli\config.json`. `GBOT_CONFIG` overrides the path. `gbot config path` prints it. The file is mode 0600 and is created only when alias, default, or import writes it.
+
+Export and import move the names to another machine. The export includes emails, because a restore should name the same logins. It never includes tokens. Keep the file in a password manager (or another place you already trust with account names). Do not commit it.
+
+```sh
+gbot config export --out gbot-accounts.json
+gbot config import gbot-accounts.json
+gbot config import gbot-accounts.json --replace
+```
+
+Import merges aliases by name unless `--replace`, which replaces the alias map and the default. Exit codes: 0 imported and every alias scope is signed in here; 2 usage or an invalid file (nothing is written); 3 the file was imported and at least one alias scope is not in `cursor-accounts` on this machine. That case prints `sign in to <email> in the Grok Bot app` for each missing login. Sign in to that account in the app, then run gbot again. These exit codes were checked with synthetic fixtures, not with a live export.
+
+On a new machine, install the fork and then import. Do not install with `npm install -g grok-bot-cli` or a `git+https` spec (that leaves a dangling `gbot` link).
+
+```sh
+scripts/install-fork.sh --config gbot-accounts.json
+# Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.4
+```
+
+The script clones `https://gitlab.com/aa22396584/grok-bot-cli.git` into `$XDG_CACHE_HOME/grok-bot-cli/src` (default `~/.cache/grok-bot-cli/src`), checks out the ref (`main` if you omit it), runs `npm ci` and `npm pack`, and installs that tarball globally. `npm ci` is required because `npm pack` runs `agent-bundle prepack`, which fills `dist/` from the committed `artifact/`. It then runs `gbot --version`, `gbot accounts`, `gbot config import` when `--config` was given, and `gbot wake --check --account <alias>` for each alias, and prints a summary. It refuses to run as root or Administrator unless `--allow-root` (PowerShell `-AllowRoot`) is given. `--dry-run` prints the steps and does not run git or npm. The script does not store or print tokens.
+
+What was tested: the shell script's `--dry-run` with fake `git` and `npm` on `PATH`, and a static check that the PowerShell script names the same steps. The scripts were not executed against GitLab, and a live switch between two Grok accounts was not run in this change.
 
 ### Wake an asleep box (`gbot wake`)
 
@@ -92,9 +137,9 @@ A gateway call for a saved app login that fails with `code: "BOX_ASLEEP"` wakes 
 
 `sendPrompt` wakes and resends only when the 417 carries sleep evidence. Only these read-only methods wake and retry on a bare 417 (no proxy reason and no failureCode): `listAgents`, `getAgentThread`, `getAgentTranscriptTail`, and `getAgentWorkflows`. Those are the only read-only gateway methods. Every other method wakes and retries only with positive sleep evidence: `failureReason` is `pod_hibernated`, or a `failureCode` matching sleep or hibernation. A bare 417 stays `BOX_ASLEEP` (the same label and hint) and is not resent.
 
-Polling covers `STARTING`, `RUNNING` without gateway fields, and an `unknown` run state that still names gateway fields. `unknown` plus a gateway is not treated as ready. Each EnsureSandBox call uses the time left in an about-90-second budget, and at most 30 seconds. The poll is `{ "wake": false }` about every 3 seconds. If `{ "wake": true }` is still `HIBERNATED`, gbot waits the shorter of the poll interval and the time left, sends `{ "wake": true }` once more, and then fails with `WAKE_FAILED` instead of polling. If an EnsureSandBox call hits its per-call deadline while budget remains, gbot keeps polling with the time left. When the budget is used up and the box is still not ready, the failure is `WAKE_TIMEOUT` (`gbot wake` exits 4), not `WAKE_FAILED`. Calls for the same login share one wake. Aborting one waiter cancels that waiter at once. Aborting the last waiter drops the shared wake, so the next caller starts a fresh one. `GBOT_AUTO_WAKE=0` turns this off. Both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` together are never woken. Success is the call's own result. If waking fails, the error stays `code: "BOX_ASLEEP"` and adds `wake: { attempted: true, error }` and a short reason (`auto wake failed: …`). A 401 whose text says the version is no longer supported uses `wake.error` `CLIENT_VERSION_REJECTED` and keeps the version hint. If the one retry is still `BOX_ASLEEP`, the error has `wake: { attempted: true, woke: true }` and says the wake ran. A `sendPrompt` retry posts the same `clientNonce`. If that retry's delivery is unknown, it stays unknown: do not send again. Cancelling during the wake rejects the send (`delivery: "rejected"`, `reason: "cancelled"`) and does not resend. `gbot send --json` includes `wake` and `failureReason` when the error has them.
+Polling covers `STARTING`, `RUNNING` without gateway fields, and an `unknown` run state that still names gateway fields. `unknown` plus a gateway is not treated as ready. Each EnsureSandBox call uses the time left in an about-90-second budget, and at most 30 seconds. The poll is `{ "wake": false }` about every 3 seconds. If `{ "wake": true }` is still `HIBERNATED`, gbot waits the shorter of the poll interval and the time left, sends `{ "wake": true }` once more, and then fails with `WAKE_FAILED` instead of polling. If that second reply is still `HIBERNATED` and the budget is already gone, the error is `WAKE_TIMEOUT`, not `WAKE_FAILED`. If an EnsureSandBox call hits its per-call deadline while budget remains, gbot keeps polling with the time left. When the budget is used up and the box is still not ready, the failure is `WAKE_TIMEOUT` (`gbot wake` exits 4), not `WAKE_FAILED`. Calls for the same login share one wake. Aborting one waiter cancels that waiter at once. Aborting the last waiter drops the shared wake, so the next caller starts a fresh one. `GBOT_AUTO_WAKE=0` turns this off. Both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` together are never woken. Success is the call's own result. If waking fails, the error stays `code: "BOX_ASLEEP"` and adds `wake: { attempted: true, error }` and a short reason (`auto wake failed: …`). A 401 whose text says the version is no longer supported uses `wake.error` `CLIENT_VERSION_REJECTED` and keeps the version hint. If the one retry is still `BOX_ASLEEP`, the error has `wake: { attempted: true, woke: true }` and says the wake ran. A `sendPrompt` retry posts the same `clientNonce`. If that retry's delivery is unknown, it stays unknown: do not send again. Cancelling during the wake rejects the send (`delivery: "rejected"`, `reason: "cancelled"`) and does not resend. `gbot send --json` includes `wake` and `failureReason` when the error has them.
 
-`x-cursor-client-version` is `SAND_CLIENT_VERSION` when that is `major.minor.patch` (`0.72.1.0` becomes `0.72.1`). Otherwise gbot reads the installed app: macOS `CFBundleShortVersionString` in `/Applications/Grok Bot.app` then `~/Applications`. On Windows it queries `reg.exe` by absolute path under `SystemRoot\System32`. It looks up uninstall key `8db316bb-b3e2-5dd2-9554-ecccb62be362` under HKCU, then HKLM, then HKLM WOW6432Node, then a narrow `reg query /f "Grok Bot" /d`. From that `/f` output gbot takes the `HKEY_…` key whose `DisplayName` matches `^Grok Bot(\s|$)`, queries that key with `/v DisplayVersion`, and if that query fails or the budget is gone, parses the version from the `DisplayName` suffix (`Grok Bot 0.72.1` becomes `0.72.1`). The whole lookup shares about a 3 second budget. Linux has no version lookup. Otherwise the built-in default is `0.72.1`. An invalid value uses `0.72.1` and does not read the app. The installed version is cached for the process. A 401 "no longer supported" drops that cache only when the cached value came from the installed app, not from `SAND_CLIENT_VERSION` and not from the built-in default, and at most once per 10 minutes. That 401 names the version gbot sent and that `SAND_CLIENT_VERSION` can override it. Live on 2026-10-21, `0.20.0` was rejected that way and `0.72.1` was accepted.
+`x-cursor-client-version` is `SAND_CLIENT_VERSION` when that is `major.minor.patch` (`0.72.1.0` becomes `0.72.1`). Otherwise gbot reads the installed app: macOS `CFBundleShortVersionString` in `/Applications/Grok Bot.app` then `~/Applications`. On Windows it queries `reg.exe` by absolute path under `SystemRoot\System32`. It looks up uninstall key `8db316bb-b3e2-5dd2-9554-ecccb62be362` under HKCU, then HKLM, then HKLM WOW6432Node, then a narrow `reg query /f "Grok Bot" /d`. From that `/f` output gbot takes the `HKEY_…` key whose `DisplayName` matches `^Grok Bot(\s|$)`. The key path may contain spaces; gbot keeps the whole line and trims it. It queries that key with `/v DisplayVersion`, and if that query fails or the budget is gone, parses the version from the `DisplayName` suffix (`Grok Bot 0.72.1` becomes `0.72.1`). A `DisplayName` of `Grok Bot` with no version suffix still queries `DisplayVersion` on the full key. The whole lookup shares about a 3 second budget. Linux has no version lookup. Otherwise the built-in default is `0.72.1`. An invalid value uses `0.72.1` and does not read the app. The installed version is cached for the process. A 401 "no longer supported" drops that cache only when the cached value came from the installed app, not from `SAND_CLIENT_VERSION` and not from the built-in default, and at most once per 10 minutes. That 401 names the version gbot sent and that `SAND_CLIENT_VERSION` can override it. Live on 2026-10-21, `0.20.0` was rejected that way and `0.72.1` was accepted.
 
 gbot reaches EnsureSandBox through `CURSOR_ACCESS_TOKEN` only when there is no usable app login and not both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` are set. That path uses the same client version, `{ "wake": true }`, and the same about-90-second poll, including a `STARTING` answer. If that wake ends with no gateway fields and no run state, the error says the auth may be a dashboard API key. `GROK_BOT_ALLOW_ANY_GATEWAY` still applies to this user-supplied token.
 
@@ -219,7 +264,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | Symptom | Fix |
 | --- | --- |
 | `bots list`, `send`, or `thread` says no Grok Bot login, or that no agents directory was found | Sign in once in the Grok Bot app as the same OS user, then run `gbot accounts`. `gbot doctor` shows where it looked. |
-| Several logins, no choice | `gbot accounts`, then `--account "<label>"` after the subcommand, or set `GBOT_ACCOUNT`. |
+| Several logins, no choice | `gbot accounts`, then `--account "<label>"` after the subcommand, set `GBOT_ACCOUNT`, or `gbot accounts default <alias>`. `gbot doctor` and `gbot wear pair` ignore that default. |
 | `Unknown option: --account.` | Put `--account` after the subcommand. |
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
@@ -309,6 +354,8 @@ npm run build
 npm link
 ```
 
+要在另一台機器安裝或還原這個 fork，又不要用 `git+https`，用 `scripts/install-fork.sh`（macOS／Linux）或 `scripts/install-fork.ps1`（Windows）。說明在[切換登入，以及在另一台機器還原 gbot](#切換登入以及在另一台機器還原-gbot)。這次只測了 dry-run，沒有對 GitLab 實際執行腳本。
+
 ### 確認、升級、移除
 
 ```sh
@@ -335,7 +382,7 @@ npm uninstall -g grok-bot-cli
 | Linux | `$XDG_CONFIG_HOME/Grok Bot` 或 `~/.config/Grok Bot` | `secret-tool`（套件 `libsecret-tools`）；basic-text v10 除外 |
 | Windows | `%APPDATA%\Grok Bot` | 透過 PowerShell 的 DPAPI（`Local State`） |
 
-只有一個登入時會直接使用。有多個又沒指定時會失敗並列出標籤。
+只有一個登入時會直接使用。有多個又沒指定時會失敗並列出標籤，除非設定了設定檔的預設別名（見下一節）。`gbot doctor` 與 `gbot wear pair` 不用那個預設。
 
 ```sh
 gbot accounts
@@ -347,11 +394,54 @@ export GBOT_ACCOUNT="<label>"   # PowerShell: $env:GBOT_ACCOUNT = "<label>"
 gbot doctor
 ```
 
-`--account` 覆寫 `GBOT_ACCOUNT`。沒有預設標籤。旗標必須寫在子命令後面。`gbot --account <label> bots list` 會以結束碼 2 結束，並顯示 `Unknown option: --account.`
+`--account` 覆寫 `GBOT_ACCOUNT`，`GBOT_ACCOUNT` 再覆寫設定檔的預設。旗標必須寫在子命令後面。`gbot --account <label> bots list` 會以結束碼 2 結束，並顯示 `Unknown option: --account.`
 
-`gbot accounts` 只印標籤（descriptor 有 email 或顯示名稱就用那個，否則用 App 的帳號鍵），並標出最後儲存的一筆。它不知道視窗目前選哪一個，也不印 token。
+`gbot accounts` 列出每一個已登入的帳號與每一筆 descriptor。它不印 token。完整規則在下一節。
 
-`gbot accounts --json` 的形狀是 `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable" }] }`。沒有另外的名稱時，`id` 就是標籤。
+`gbot accounts --json` 的形狀是 `{ "accounts": [{ "id", "label", "savedAtMs", "lastSaved", "usable", "email", "alias", "appActive", "hasDescriptorEntry" }] }`。舊欄位保留。沒有 email 或別名時，那兩個欄位是 `null`。
+
+### 切換登入，以及在另一台機器還原 gbot
+
+桌面版把目前顯示的登入放在 `gateway-descriptor.json`。每一個已登入的帳號都留在 `sand-secrets.json` 的 `cursor-accounts`。App 切換登入之後，另一個登入可能從 descriptor 消失。gbot 仍會列出它。若那個登入沒有 descriptor 項目，gbot 用已存的 access token 在記憶體裡建立 gateway 工作階段：先送 EnsureSandBox `{ "wake": false }`，除非雲端電腦已經是 `RUNNING` 而且回答帶有 gateway 欄位，否則再送 `{ "wake": true }`。這個工作階段不會寫回磁碟。refresh token 不會被讀。App token 只送到 https 的 Cursor API 主機。
+
+`gbot accounts` 把 App 目前的登入標成 `(app active)`。沒有 descriptor 項目的登入標成 `(no app session; gbot builds one from the saved login)`。標籤是解密後個人資料裡的 email；解不開時用 scope 的前 8 個十六進位字元。別名另起一行。
+
+替登入取名，需要的話設成預設。這些是 `gbot accounts` 的參數（這個打包器不能同時把 `accounts` 做成命令群組）：
+
+```sh
+gbot accounts alias work owner@example.com
+gbot accounts default work
+gbot accounts unalias work
+gbot accounts default --clear
+```
+
+別名符合 `^[A-Za-z0-9_-]{1,32}$`。選擇器可以是別名、email（不分大小寫）、descriptor 標籤，或至少 8 個十六進位字元的 id／scope 前綴。對到一個以上時，錯誤形式與以前相同。
+
+會吃 `--account` 的 gateway 命令（`gbot send`、`gbot wake` 等）依序使用：`--account`、`GBOT_ACCOUNT`、設定檔的 `default`、然後唯一的一筆登入。有多筆又都沒指定就是錯誤。`gbot doctor` 仍只看 descriptor，不用設定檔預設。`gbot wear pair` 仍只送 descriptor 裡的工作階段，而且仍忽略 `GBOT_ACCOUNT` 與設定檔預設。只存在於 `sand-secrets.json` 的登入不會被送到手錶。
+
+設定檔只有別名與預設，沒有 token。macOS 與 Linux 是 `$XDG_CONFIG_HOME/grok-bot-cli/config.json`；沒設 `XDG_CONFIG_HOME` 時是 `~/.config/grok-bot-cli/config.json`。Windows 是 `%APPDATA%\grok-bot-cli\config.json`。`GBOT_CONFIG` 可以改路徑。`gbot config path` 印出路徑。檔案模式是 0600，只有 alias、default 或 import 寫入時才會建立。
+
+匯出與匯入把這些名字搬到另一台機器。匯出包含 email，因為還原時要對到同一個登入。它不含 token。把這個檔案放在密碼管理器（或你已經用來放帳號名稱的地方）。不要提交進 git。
+
+```sh
+gbot config export --out gbot-accounts.json
+gbot config import gbot-accounts.json
+gbot config import gbot-accounts.json --replace
+```
+
+匯入預設依名稱合併；`--replace` 會換掉整份別名與預設。結束碼：0 已匯入且每個別名的 scope 在這台機器都已登入；2 用法錯誤或檔案不合法（不會寫入）；3 已匯入，但至少一個別名的 scope 不在這台機器的 `cursor-accounts`。後者會對每個缺少的登入印出 `sign in to <email> in the Grok Bot app`。先在 App 登入那個帳號，再執行 gbot。這些結束碼是用合成測試資料檢查的，不是用真實匯出檔。
+
+在新機器上先安裝 fork，再匯入。不要用 `npm install -g grok-bot-cli`，也不要用 `git+https`（那會留下斷掉的 `gbot` 連結）。
+
+```sh
+scripts/install-fork.sh --config gbot-accounts.json
+# Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.4
+```
+
+腳本把 `https://gitlab.com/aa22396584/grok-bot-cli.git` clone 到 `$XDG_CACHE_HOME/grok-bot-cli/src`（預設 `~/.cache/grok-bot-cli/src`），檢出指定的 ref（省略時是 `main`），執行 `npm ci` 與 `npm pack`，再全域安裝那個 tarball。需要 `npm ci` 是因為 `npm pack` 會跑 `agent-bundle prepack`，用已提交的 `artifact/` 填 `dist/`。接著執行 `gbot --version`、`gbot accounts`；有 `--config` 時執行 `gbot config import`；每個別名再跑 `gbot wake --check --account <別名>`，然後印摘要。以 root 或 Administrator 執行會拒絕，除非加上 `--allow-root`（PowerShell 是 `-AllowRoot`）。`--dry-run` 只印步驟，不跑 git 或 npm。腳本不儲存、也不印 token。
+
+這次測了什麼：shell 腳本的 `--dry-run`（PATH 上是假的 `git` 與 `npm`），以及靜態檢查 PowerShell 腳本有寫出同樣的步驟。腳本沒有對 GitLab 實際執行，這次也沒有用兩個真實的 Grok 帳號切換。
 
 ### 喚醒睡眠中的雲端電腦（`gbot wake`）
 
@@ -359,9 +449,9 @@ gbot doctor
 
 `sendPrompt` 只有在 417 帶有睡眠證據時才會喚醒並重送。只有這些唯讀方法會在沒有 proxy 原因、也沒有 failureCode 的 bare 417 上喚醒並重試：`listAgents`、`getAgentThread`、`getAgentTranscriptTail`、`getAgentWorkflows`。這四個是僅有的唯讀 gateway 方法。其他方法只有在有明確睡眠證據時才會喚醒並重試：`failureReason` 是 `pod_hibernated`，或 `failureCode` 符合 sleep／hibernat。沒有這些的 417 仍是 `BOX_ASLEEP`（標籤與提示不變），不會重送。
 
-輪詢涵蓋 `STARTING`、沒有 gateway 欄位的 `RUNNING`，以及仍帶 gateway 欄位的 `unknown`（帶 gateway 的 `unknown` 不算就緒）。每一次 EnsureSandBox 使用約 90 秒預算裡剩下的時間，而且最多 30 秒。輪詢是約每 3 秒送 `{ "wake": false }`。若 `{ "wake": true }` 仍是 `HIBERNATED`，gbot 先等輪詢間隔與剩餘時間中較短的那個，再送一次 `{ "wake": true }`，然後以 `WAKE_FAILED` 失敗，不再輪詢。若某次 EnsureSandBox 碰到自己的呼叫期限而預算還有剩，gbot 會用剩下的時間繼續輪詢。預算用完而雲端電腦仍未就緒時，錯誤是 `WAKE_TIMEOUT`（`gbot wake` 結束碼 4），不是 `WAKE_FAILED`。同一個登入的並行呼叫共用一次喚醒。中止其中一個等待者會立刻取消那一個；最後一個等待者中止時，共用的喚醒會被拿掉，下一個呼叫者會重新開始。`GBOT_AUTO_WAKE=0` 關閉這件事。同時設了 `GROK_BOT_GATEWAY_URL` 和 `GROK_BOT_GATEWAY_TOKEN` 的工作階段不會被喚醒。成功時回的是該呼叫自己的結果。喚醒失敗時，錯誤仍是 `code: "BOX_ASLEEP"`，並加上 `wake: { attempted: true, error }` 與一句短原因（`auto wake failed: …`）。401 若寫版本已不再支援，`wake.error` 是 `CLIENT_VERSION_REJECTED`，並保留版本提示。若那一次重試仍是 `BOX_ASLEEP`，錯誤的 `wake` 是 `{ attempted: true, woke: true }`，並說明喚醒已跑過。`sendPrompt` 的重試使用同一個 `clientNonce`。若那次重試的 delivery 是 unknown，就維持 unknown：不要再送一次。喚醒途中取消會拒絕送出（`delivery: "rejected"`、`reason: "cancelled"`），不會重送。`gbot send --json` 在錯誤帶有 `wake` 與 `failureReason` 時會把它們印出來。
+輪詢涵蓋 `STARTING`、沒有 gateway 欄位的 `RUNNING`，以及仍帶 gateway 欄位的 `unknown`（帶 gateway 的 `unknown` 不算就緒）。每一次 EnsureSandBox 使用約 90 秒預算裡剩下的時間，而且最多 30 秒。輪詢是約每 3 秒送 `{ "wake": false }`。若 `{ "wake": true }` 仍是 `HIBERNATED`，gbot 先等輪詢間隔與剩餘時間中較短的那個，再送一次 `{ "wake": true }`，然後以 `WAKE_FAILED` 失敗，不再輪詢。若第二次回答仍是 `HIBERNATED` 而且預算已經用完，錯誤是 `WAKE_TIMEOUT`，不是 `WAKE_FAILED`。若某次 EnsureSandBox 碰到自己的呼叫期限而預算還有剩，gbot 會用剩下的時間繼續輪詢。預算用完而雲端電腦仍未就緒時，錯誤是 `WAKE_TIMEOUT`（`gbot wake` 結束碼 4），不是 `WAKE_FAILED`。同一個登入的並行呼叫共用一次喚醒。中止其中一個等待者會立刻取消那一個；最後一個等待者中止時，共用的喚醒會被拿掉，下一個呼叫者會重新開始。`GBOT_AUTO_WAKE=0` 關閉這件事。同時設了 `GROK_BOT_GATEWAY_URL` 和 `GROK_BOT_GATEWAY_TOKEN` 的工作階段不會被喚醒。成功時回的是該呼叫自己的結果。喚醒失敗時，錯誤仍是 `code: "BOX_ASLEEP"`，並加上 `wake: { attempted: true, error }` 與一句短原因（`auto wake failed: …`）。401 若寫版本已不再支援，`wake.error` 是 `CLIENT_VERSION_REJECTED`，並保留版本提示。若那一次重試仍是 `BOX_ASLEEP`，錯誤的 `wake` 是 `{ attempted: true, woke: true }`，並說明喚醒已跑過。`sendPrompt` 的重試使用同一個 `clientNonce`。若那次重試的 delivery 是 unknown，就維持 unknown：不要再送一次。喚醒途中取消會拒絕送出（`delivery: "rejected"`、`reason: "cancelled"`），不會重送。`gbot send --json` 在錯誤帶有 `wake` 與 `failureReason` 時會把它們印出來。
 
-`x-cursor-client-version` 在 `SAND_CLIENT_VERSION` 是 `major.minor.patch` 時用那個值（`0.72.1.0` 會變成 `0.72.1`）。否則讀已安裝的 app：macOS 先看 `/Applications/Grok Bot.app` 再看 `~/Applications` 的 `CFBundleShortVersionString`。Windows 以絕對路徑執行 `SystemRoot\System32\reg.exe`，先查解除安裝鍵 `8db316bb-b3e2-5dd2-9554-ecccb62be362`（HKCU，然後 HKLM，然後 HKLM WOW6432Node），再以較窄的 `reg query /f "Grok Bot" /d` 搜尋。gbot 從那份 `/f` 輸出取出 `DisplayName` 符合 `^Grok Bot(\s|$)` 的 `HKEY_…` 鍵，再用 `/v DisplayVersion` 查那支鍵；若那次查詢失敗或預算已經用完，就從 `DisplayName` 尾端解析版本（`Grok Bot 0.72.1` 變成 `0.72.1`）。所有查詢共用約 3 秒預算。Linux 不查版本。再不然內建預設是 `0.72.1`。不合法的值用 `0.72.1`，而且不去讀 app。已安裝版本會在這個行程裡快取。401「不再支援」只有在快取值來自已安裝的 app 時才會丟掉快取（不是 `SAND_CLIENT_VERSION`，也不是內建預設），而且 10 分鐘內最多重讀一次。那個 401 會標出 gbot 送出的版本，以及可以用 `SAND_CLIENT_VERSION` 覆寫。2026-10-21 實測：`0.20.0` 被這樣拒絕，`0.72.1` 被接受。
+`x-cursor-client-version` 在 `SAND_CLIENT_VERSION` 是 `major.minor.patch` 時用那個值（`0.72.1.0` 會變成 `0.72.1`）。否則讀已安裝的 app：macOS 先看 `/Applications/Grok Bot.app` 再看 `~/Applications` 的 `CFBundleShortVersionString`。Windows 以絕對路徑執行 `SystemRoot\System32\reg.exe`，先查解除安裝鍵 `8db316bb-b3e2-5dd2-9554-ecccb62be362`（HKCU，然後 HKLM，然後 HKLM WOW6432Node），再以較窄的 `reg query /f "Grok Bot" /d` 搜尋。gbot 從那份 `/f` 輸出取出 `DisplayName` 符合 `^Grok Bot(\s|$)` 的 `HKEY_…` 鍵。鍵路徑可以含空白；gbot 保留整行並去掉首尾空白。再用 `/v DisplayVersion` 查那支鍵；若那次查詢失敗或預算已經用完，就從 `DisplayName` 尾端解析版本（`Grok Bot 0.72.1` 變成 `0.72.1`）。`DisplayName` 只有 `Grok Bot`、沒有版本尾碼時，仍會對完整的鍵查 `DisplayVersion`。所有查詢共用約 3 秒預算。Linux 不查版本。再不然內建預設是 `0.72.1`。不合法的值用 `0.72.1`，而且不去讀 app。已安裝版本會在這個行程裡快取。401「不再支援」只有在快取值來自已安裝的 app 時才會丟掉快取（不是 `SAND_CLIENT_VERSION`，也不是內建預設），而且 10 分鐘內最多重讀一次。那個 401 會標出 gbot 送出的版本，以及可以用 `SAND_CLIENT_VERSION` 覆寫。2026-10-21 實測：`0.20.0` 被這樣拒絕，`0.72.1` 被接受。
 
 gbot 只有在沒有可用的 app 登入，而且並非同時設了 `GROK_BOT_GATEWAY_URL` 與 `GROK_BOT_GATEWAY_TOKEN` 時，才會經由 `CURSOR_ACCESS_TOKEN` 呼叫 EnsureSandBox。那條路用同一個 client 版本、`{ "wake": true }`，以及同樣約 90 秒的輪詢，包含 `STARTING`。若那次喚醒結束時沒有 gateway 欄位、也沒有 run state，錯誤會說這個 auth 可能是 dashboard API key。`GROK_BOT_ALLOW_ANY_GATEWAY` 仍適用於這個使用者提供的 token。
 
@@ -486,7 +576,7 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | 症狀 | 修法 |
 | --- | --- |
 | `bots list`、`send` 或 `thread` 說沒有 Grok Bot 登入，或找不到 agents 目錄 | 用同一個系統使用者在 Grok Bot app 登入一次，再跑 `gbot accounts`。`gbot doctor` 會列出它找過的位置。 |
-| 有多個登入、選不出來 | `gbot accounts`，再把 `--account "<標籤>"` 放在子命令後面，或設 `GBOT_ACCOUNT`。 |
+| 有多個登入、選不出來 | `gbot accounts`，再把 `--account "<標籤>"` 放在子命令後面，設 `GBOT_ACCOUNT`，或 `gbot accounts default <別名>`。`gbot doctor` 與 `gbot wear pair` 忽略那個預設。 |
 | `Unknown option: --account.` | 把 `--account` 放到子命令後面。 |
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |

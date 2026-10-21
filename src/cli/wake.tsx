@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { AppAuthError, loadAppAccessToken } from '../core/app-auth.js';
 import { loadGrokBotGatewaySelection } from '../core/app-session.js';
 import { describeSandbox, GatewayError, listAgents, wakeSandbox } from '../core/gateway.js';
+import { resolveGrokBotLogin } from '../core/logins.js';
+import { secretStoreOptions } from '../core/secret-store.js';
 import { withRedactedErrors } from '../gbot.js';
 
 export const config = {
@@ -55,23 +57,8 @@ export const resultSchema = z.union([okSchema, failSchema]);
 
 type WakeResult = z.infer<typeof resultSchema>;
 
-const truthy = (value: string | undefined): boolean => ['1', 'true', 'yes'].includes((value ?? '').trim().toLowerCase());
-const testMode = (): boolean => truthy(process.env.GROK_BOT_TEST) || process.env.NODE_ENV === 'test';
-
 /** Same test-mode secret store as `gbot wear pair`: never the real Keychain unless this is a real run. */
-const secretStore = () => {
-  if (!testMode()) return {};
-  const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
-  return {
-    getKeychainPassword: (): string => {
-      if (typeof fixture === 'string' && fixture) return fixture;
-      throw new Error('The OS secret store is disabled in test mode.');
-    },
-    unprotectData: (): Buffer => {
-      throw new Error('The OS secret store is disabled in test mode.');
-    },
-  };
-};
+const secretStore = () => secretStoreOptions();
 
 const printable = (text: string): string =>
   Array.from(text, (char) => {
@@ -113,10 +100,9 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
   if (overrideUrl && overrideToken) {
     return { error: 'gbot wake uses the saved app login; unset the override', exitCode: 2 };
   }
-  const account = input.account || process.env.GBOT_ACCOUNT?.trim() || undefined;
-  let selection;
+  let choice;
   try {
-    selection = loadGrokBotGatewaySelection({ account, ...secretStore() });
+    choice = resolveGrokBotLogin({ account: input.account, ...secretStore() });
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
@@ -124,11 +110,23 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
       ? { error: safeError(message), exitCode: 2 }
       : { error: safeError(message), exitCode: 3 };
   }
-  if (!selection) {
+  if (!choice) {
     return { error: 'No saved Grok Bot login. Open the Grok Bot app and sign in once.', exitCode: 3 };
   }
-  const label = printable(String(selection.label));
-  const scope = selection.session.accountScope;
+  let label = printable(String(choice.label));
+  let scope = choice.scope ?? undefined;
+  if (choice.hasDescriptorEntry) {
+    try {
+      const selection = loadGrokBotGatewaySelection({ account: choice.id, ...secretStore() });
+      if (selection) {
+        label = printable(String(selection.label));
+        scope = selection.session.accountScope;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
+      return { account: label, error: safeError(message), exitCode: 3, seconds: secondsOf(started) };
+    }
+  }
   if (!scope) {
     return {
       account: label,

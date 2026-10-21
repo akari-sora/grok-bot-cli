@@ -74,8 +74,10 @@ List targets with `gbot bots list` / `gbot groups list` when the name is ambiguo
 Same order as `gbot`: `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`,
 else the Grok Bot app session, else `CURSOR_ACCESS_TOKEN`. An asleep app-login
 box (`BOX_ASLEEP`) is woken once with the app's saved access token and the call
-is retried; `GBOT_AUTO_WAKE=0` turns that off. `gbot doctor` shows
-which source is present.
+is retried; `GBOT_AUTO_WAKE=0` turns that off. A bare 417 wakes only these read
+calls: `listAgents`, `getAgentThread`, `getAgentTranscriptTail`, and
+`getAgentWorkflows`. `sendPrompt` and every other call wake only when the 417
+has sleep evidence. `gbot doctor` shows which source is present.
 
 ## Claude Code channel
 

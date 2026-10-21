@@ -4,6 +4,8 @@ import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
 import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
 import { ensureSandboxHeaders, headersFromEnsureSandbox, headersFromEnv, mergeGatewayHeaders, normalizeHeaderMap, requestHeaders } from "./headers.js";
 import { hasGrokBotGatewaySession, loadGrokBotGatewaySession } from "./app-session.js";
+import { listSavedLogins, resolveGrokBotLogin } from "./logins.js";
+import { secretStoreOptions } from "./secret-store.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
 import { assertAllowedCredentialUrl, redactSecrets } from "./url-policy.js";
 import { grokApproval, grokApprovalResponseSchema } from "./grok-approvals.js";
@@ -100,30 +102,15 @@ function gatewayOverride() {
   return null;
 }
 
-// CLI tests encrypt the descriptor with GBOT_TEST_KEYCHAIN_PASSWORD. Honor that
-// only in test mode so `gbot send` can use the same fixture without the real keychain.
-function fixtureKeychainPassword() {
-  if (!/^(1|true|yes)$/i.test(String(process.env.GROK_BOT_TEST ?? "").trim())) return null;
-  const password = process.env.GBOT_TEST_KEYCHAIN_PASSWORD;
-  return typeof password === "string" && password.length > 0 ? password : null;
-}
-
-function fixtureSecretOptions() {
-  const password = fixtureKeychainPassword();
-  return password ? { getKeychainPassword: () => password } : {};
-}
-
-function sessionFromApp(account) {
-  let loaded;
-  try {
-    loaded = loadGrokBotGatewaySession({ account, ...fixtureSecretOptions() });
-  } catch (error) {
-    // Descriptor present but unusable (e.g. Windows Local State missing). Fall
-    // through to CURSOR_ACCESS_TOKEN → EnsureSandBox when that token is set.
-    if (accessTokenFromEnv()) return null;
-    throw error instanceof Error ? new GatewayError(error.message) : error;
+function toGatewayError(error) {
+  if (error instanceof GatewayError) return error;
+  if (error instanceof Error) {
+    return new GatewayError(error.message, error.code ? { code: error.code } : {});
   }
-  if (!loaded) return null;
+  return error;
+}
+
+function sessionFields(loaded) {
   return {
     gatewayUrl: assertAllowedCredentialUrl(loaded.gatewayUrl, { kind: "gateway" }),
     gatewayToken: loaded.gatewayToken,
@@ -132,8 +119,70 @@ function sessionFromApp(account) {
   };
 }
 
+function descriptorSession(account) {
+  const loaded = loadGrokBotGatewaySession({ account, ...secretStoreOptions() });
+  return loaded ? sessionFields(loaded) : null;
+}
+
+async function sessionFromSavedLogin(scope, signal) {
+  let loaded;
+  try {
+    loaded = loadAppAccessToken({ scope, home: homedir(), env: process.env, ...secretStoreOptions() });
+  } catch (error) {
+    throw toGatewayError(error);
+  }
+  let described;
+  try {
+    described = await describeSandbox(loaded.token, { signal, appLogin: true });
+  } catch (error) {
+    throw toGatewayError(error);
+  }
+  const running = described?.runState === "RUNNING" && described.gatewayUrl && described.gatewayToken;
+  const sandbox = running ? described : await wakeSandbox(loaded.token, { signal, appLogin: true });
+  return {
+    gatewayUrl: sandbox.gatewayUrl,
+    gatewayToken: sandbox.gatewayToken,
+    gatewayHeaders: sandbox.gatewayHeaders,
+    accountScope: scope,
+  };
+}
+
+// A descriptor entry is used exactly as before. A saved login with no descriptor entry
+// is turned into a session in memory (describe, then wake) and never written back.
+async function sessionFromApp(account, signal) {
+  let choice;
+  try {
+    choice = resolveGrokBotLogin({ account, ...secretStoreOptions() });
+  } catch (error) {
+    if (accessTokenFromEnv()) return null;
+    throw toGatewayError(error);
+  }
+  if (!choice) {
+    try {
+      return descriptorSession(account);
+    } catch (error) {
+      if (accessTokenFromEnv()) return null;
+      throw toGatewayError(error);
+    }
+  }
+  if (choice.hasDescriptorEntry) {
+    try {
+      return descriptorSession(choice.id);
+    } catch (error) {
+      if (accessTokenFromEnv()) return null;
+      throw toGatewayError(error);
+    }
+  }
+  return sessionFromSavedLogin(choice.scope, signal);
+}
+
 export function hasGatewayAuth() {
-  return Boolean(gatewayOverride() || accessTokenFromEnv() || hasGrokBotGatewaySession());
+  if (gatewayOverride() || accessTokenFromEnv() || hasGrokBotGatewaySession()) return true;
+  try {
+    return listSavedLogins().some((row) => row.hasToken);
+  } catch {
+    return false;
+  }
 }
 
 function raceSignal(promise, signal, onAbort) {
@@ -343,13 +392,13 @@ function shouldPollSandbox(result) {
   return false;
 }
 
-export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false } = {}) {
+export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false, now = Date.now } = {}) {
   const budget = sandboxWakeBudget();
   const timeout = timeoutMs ?? budget.timeoutMs;
   const interval = intervalMs ?? budget.intervalMs;
   const callCap = positiveTestMs(process.env, "GBOT_WAKE_CALL_CAP_MS") ?? ENSURE_CALL_CAP_MS;
-  const started = Date.now();
-  const left = () => timeout - (Date.now() - started);
+  const started = now();
+  const left = () => timeout - (now() - started);
   const call = async (wake) => {
     const remaining = left();
     if (remaining <= 0) return null;
@@ -374,9 +423,9 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
   let wakePosts = 1;
   while (!sandboxReady(result)) {
     if (result?.runState === "HIBERNATED") {
+      if (left() <= 0) budgetExpired(result);
       if (wakePosts >= 2) throw wakeFailureError(result);
       const remaining = left();
-      if (remaining <= 0) budgetExpired(result);
       await abortableSleep(Math.min(interval, remaining), signal);
       const again = await call(true);
       wakePosts += 1;
@@ -408,7 +457,7 @@ export async function connectGateway({ signal, account } = {}) {
   assertGatewayActive(signal);
   const override = gatewayOverride();
   if (override) return override;
-  const fromApp = sessionFromApp(account);
+  const fromApp = await sessionFromApp(account, signal);
   if (fromApp) return fromApp;
   const token = accessTokenFromEnv();
   if (!token) {
@@ -554,7 +603,7 @@ function wakeShared(scope, signal) {
           scope,
           home: homedir(),
           env: process.env,
-          ...fixtureSecretOptions(),
+          ...secretStoreOptions(),
         });
         const result = await wakeSandbox(loaded.token, { signal: controller.signal, appLogin: true });
         if (process.env.GBOT_DEBUG) console.error("gbot: woke asleep box");

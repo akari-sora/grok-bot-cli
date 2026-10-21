@@ -33,10 +33,10 @@ function macVersion(home, readFile) {
     "/Applications/Grok Bot.app/Contents/Info.plist",
     path.join(home, "Applications/Grok Bot.app/Contents/Info.plist"),
   ];
-  for (const path of paths) {
+  for (const file of paths) {
     let text = "";
     try {
-      text = readFile(path, "utf8");
+      text = readFile(file, "utf8");
     } catch {
       continue;
     }
@@ -81,9 +81,9 @@ function installFromSearch(output) {
   for (const block of regBlocks(output)) {
     const name = DISPLAY_NAME_LINE.exec(block);
     if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
-    const key = /^(HKEY_\S+)/.exec(block);
+    const key = /^(HKEY_[^\r\n]+)/.exec(block);
     if (!key) continue;
-    return { key: key[1], displayName: name[1].trim() };
+    return { key: key[1].trim(), displayName: name[1].trim() };
   }
   return null;
 }
