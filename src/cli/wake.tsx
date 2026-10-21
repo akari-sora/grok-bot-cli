@@ -93,19 +93,26 @@ const scrub = (message: string, secret?: string): string => {
     : message;
 };
 
+const safeError = (message: string, secret?: string): string => printable(scrub(message, secret));
+
 const textOf = (value: WakeResult): string => {
   const lines = [
     value.account ? `account: ${printable(value.account)}` : '',
     value.before ? `before: ${value.before}` : '',
     value.after ? `after: ${value.after}` : '',
     value.seconds != null ? `seconds: ${value.seconds}` : '',
-    'error' in value ? value.error : '',
+    'error' in value && value.error ? printable(value.error) : '',
   ].filter(Boolean);
   return lines.join('\n');
 };
 
 async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Promise<WakeResult> {
   const started = Date.now();
+  const overrideUrl = (process.env.GROK_BOT_GATEWAY_URL ?? '').trim();
+  const overrideToken = (process.env.GROK_BOT_GATEWAY_TOKEN ?? '').trim();
+  if (overrideUrl && overrideToken) {
+    return { error: 'gbot wake uses the saved app login; unset the override', exitCode: 2 };
+  }
   const account = input.account || process.env.GBOT_ACCOUNT?.trim() || undefined;
   let selection;
   try {
@@ -114,8 +121,8 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
     return code === 'AMBIGUOUS_ENTRIES' || code === 'UNKNOWN_ACCOUNT'
-      ? { error: scrub(message), exitCode: 2 }
-      : { error: scrub(message), exitCode: 3 };
+      ? { error: safeError(message), exitCode: 2 }
+      : { error: safeError(message), exitCode: 3 };
   }
   if (!selection) {
     return { error: 'No saved Grok Bot login. Open the Grok Bot app and sign in once.', exitCode: 3 };
@@ -137,29 +144,30 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
     const message = error instanceof AppAuthError
       ? error.message
       : 'Could not read the saved Grok Bot login. Open the Grok Bot app and sign in to that login once.';
-    return { account: label, error: scrub(message), exitCode: 3, seconds: secondsOf(started) };
+    return { account: label, error: safeError(message), exitCode: 3, seconds: secondsOf(started) };
   }
   let before: RunState;
   try {
-    before = asState((await describeSandbox(token, { signal })).runState);
+    before = asState((await describeSandbox(token, { signal, appLogin: true })).runState);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not read the Grok Bot box.';
-    return { account: label, error: scrub(message, token), exitCode: 3, seconds: secondsOf(started) };
+    return { account: label, error: safeError(message, token), exitCode: 3, seconds: secondsOf(started) };
   }
   if (input.check) {
     return { account: label, before, after: before, exitCode: 0, seconds: secondsOf(started) };
   }
   let woke;
   try {
-    woke = await wakeSandbox(token, { signal });
+    woke = await wakeSandbox(token, { signal, appLogin: true });
   } catch (error) {
     const timedOut = error instanceof GatewayError && error.code === 'WAKE_TIMEOUT';
+    const runState = error instanceof GatewayError ? error.runState : undefined;
     const message = error instanceof Error ? error.message : 'Could not wake the Grok Bot box.';
     return {
       account: label,
       before,
-      after: timedOut ? 'STARTING' : before,
-      error: scrub(message, token),
+      after: typeof runState === 'string' && (runStates as readonly string[]).includes(runState) ? runState as RunState : before,
+      error: safeError(message, token),
       exitCode: timedOut ? 4 : 3,
       seconds: secondsOf(started),
     };
@@ -195,7 +203,7 @@ export default async function wakeCommand({ input, signal }: CliRouteProps<typeo
       return await wake(input, signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not wake the Grok Bot box.';
-      return { error: scrub(message), exitCode: 3 as const };
+      return { error: safeError(message), exitCode: 3 as const };
     }
   });
   return (

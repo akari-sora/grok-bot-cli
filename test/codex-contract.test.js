@@ -70,6 +70,18 @@ describe("codex contract — outcomeFromError", () => {
     assert.equal(out.exitCode, 1);
   });
 
+  it("keeps wake and failureReason on the failure document", () => {
+    const err = Object.assign(new Error("sendPrompt failed: 417"), {
+      delivery: "rejected",
+      failureReason: "pod_hibernated",
+      wake: { attempted: true, woke: true },
+    });
+    const out = outcomeFromError(err);
+    assert.equal(out.failureReason, "pod_hibernated");
+    assert.deepEqual(out.wake, { attempted: true, woke: true });
+    assert.equal(out.exitCode, 1);
+  });
+
   it("marks route input errors as usage", () => {
     const out = outcomeFromError(new RangeError("bad flag"));
     assert.equal(out.reason, "usage");

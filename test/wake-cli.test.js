@@ -247,3 +247,76 @@ test("gbot wake rejects an unknown flag with exit 2", {
   const result = spawnSync(process.execPath, [CLI, "wake", "--nope"], { encoding: "utf8", env: { ...process.env, GROK_BOT_TEST: "1" } });
   assert.equal(result.status, 2, result.stderr);
 });
+
+test("gbot wake refuses a gateway override", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  let hits = 0;
+  const fx = await fixture(async (req, res) => {
+    hits += 1;
+    await readBody(req);
+    res.end("{}");
+  });
+  try {
+    const result = await run(["wake", "--json"], {
+      ...fx.env,
+      GROK_BOT_GATEWAY_URL: "http://127.0.0.1:9",
+      GROK_BOT_GATEWAY_TOKEN: "override-token",
+      GBOT_WAKE_TIMEOUT_MS: "200",
+      GBOT_WAKE_POLL_MS: "50",
+    });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stdout, /gbot wake uses the saved app login; unset the override/);
+    assert.equal(hits, 0);
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("gbot wake prints backend errors without control characters and keeps the failed run state", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  const noisy = await fixture(async (req, res) => {
+    await readBody(req);
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ message: "bad\u001b[31mname\u0007" }));
+  });
+  try {
+    const result = await run(["wake", "--json"], noisy.env);
+    assert.equal(result.status, 3, result.stdout + result.stderr);
+    assert.match(result.stdout, /\?\[31mname\?/);
+    assert.doesNotMatch(result.stdout, /\\u001b|\\u0007/);
+    assert.equal(result.stdout.includes("\u001b"), false);
+    assert.equal(result.stdout.includes("\u0007"), false);
+    assertNoSecrets(result);
+  } finally {
+    await noisy.close();
+  }
+
+  const bodies = [];
+  const failed = await fixture(async (req, res) => {
+    const body = await readBody(req);
+    bodies.push(body);
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      runState: body.wake === false ? "SAND_BOX_RUN_STATE_STARTING" : "SAND_BOX_RUN_STATE_HIBERNATED",
+    }));
+  });
+  try {
+    const result = await run(["wake", "--json"], {
+      ...failed.env,
+      GBOT_WAKE_TIMEOUT_MS: "1500",
+      GBOT_WAKE_POLL_MS: "200",
+    });
+    assert.equal(result.status, 3, result.stdout + result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.before, "STARTING");
+    assert.equal(payload.after, "HIBERNATED");
+    assert.deepEqual(bodies.map((body) => body.wake), [false, true, true]);
+    assertNoSecrets(result);
+  } finally {
+    await failed.close();
+  }
+});

@@ -45,7 +45,7 @@ Requires Node.js 22.19.0+ and the Grok Bot desktop app on macOS, Linux, or Windo
 
 If the app has exactly one saved gateway login, `gbot` uses it. If several are saved, choose with `--account <label>` or `GBOT_ACCOUNT`. `gbot accounts` prints those labels and nothing else from the login: an email or display name when the saved descriptor has one, otherwise the app's account key. It marks the most recently saved login. This file does not record which login the app window currently has selected. `--account` overrides `GBOT_ACCOUNT`. Commands without an `--account` flag still honor the environment variable. On Linux the app keeps its session under `~/.config/Grok Bot` (or `$XDG_CONFIG_HOME`); when it is stored in the system keyring, `gbot` reads the key with `secret-tool` (package `libsecret-tools`). On Windows the session lives under `%APPDATA%\\Grok Bot` and decrypts with the app's DPAPI-wrapped Safe Storage key.
 
-When a call for that saved login fails because the box is asleep (`BOX_ASLEEP`), `gbot` wakes it with the app's saved access token and retries the call once. `gbot wake` prints the run state; `gbot wake --check` only looks. `GBOT_AUTO_WAKE=0` turns the automatic wake off. See [FORK.md](FORK.md).
+When a call for that saved login fails because the box is asleep (`BOX_ASLEEP`), `gbot` wakes it with the app's saved access token and retries the call once. A `sendPrompt` is resent only when the 417 has sleep evidence. The wait is about 90 seconds. `gbot wake` prints the run state; `gbot wake --check` only looks. `GBOT_AUTO_WAKE=0` turns the automatic wake off. If both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` are set, `gbot wake` exits 2. See [FORK.md](FORK.md).
 
 ## Use
 
@@ -219,7 +219,7 @@ By default `gbot` only sends credentials to expected hosts:
 - **Backend** URLs (`EnsureSandBox` / `CURSOR_API_BASE_URL`): `https` on `*.cursor.sh` / `*.cursor.com` only — never `*.cursorvm.com`, so a Cursor access token cannot be pointed at a box host.
 
 - `GROK_BOT_ALLOW_LOCAL_GATEWAY=1` — permit `http(s)://127.0.0.1`, `localhost`, and `::1` for **gateways** only (local/dev). Prints a one-shot stderr warning.
-- `GROK_BOT_ALLOW_ANY_GATEWAY=1` — disable host checks (unsafe; for break-glass only). Prints a one-shot stderr warning.
+- `GROK_BOT_ALLOW_ANY_GATEWAY=1` — disable host checks for a gateway URL and for a user-supplied `CURSOR_ACCESS_TOKEN` (unsafe; for break-glass only). It does not apply to the app login token gbot reads itself: that token is sent only to an https Cursor API host. Prints a one-shot stderr warning.
 
 All gateway / `EnsureSandBox` fetches use `redirect: "error"` so credentials are not followed across redirects.
 

@@ -7,6 +7,9 @@
  * never *.cursorvm.com, so a CURSOR_ACCESS_TOKEN cannot be pointed at a box host.
  * Local/dev gateways: http(s)://127.0.0.1|localhost|::1 when GROK_BOT_ALLOW_LOCAL_GATEWAY=1.
  * Escape hatch: GROK_BOT_ALLOW_ANY_GATEWAY=1 (unsafe; disables host checks; warns once).
+ * It does not apply when `ignoreAllowAny` is set. Auto wake and `gbot wake` set that
+ * for the app login token, which is only sent to an https Cursor API host.
+ * A user-supplied CURSOR_ACCESS_TOKEN still follows ALLOW_ANY.
  * Test mode (GROK_BOT_TEST=1 or NODE_ENV=test): loopback only, for gateway and backend
  * alike, and the escape hatches are ignored — a test can never reach a live thread.
  */
@@ -60,7 +63,7 @@ function isCursorGatewayHostname(hostname) {
 
 /**
  * @param {string} rawUrl
- * @param {{ kind?: "gateway" | "backend" }} [opts]
+ * @param {{ kind?: "gateway" | "backend", ignoreAllowAny?: boolean }} [opts]
  * @returns {string} normalized URL without trailing slash
  */
 export function assertAllowedCredentialUrl(rawUrl, opts = {}) {
@@ -87,7 +90,7 @@ export function assertAllowedCredentialUrl(rawUrl, opts = {}) {
     return String(rawUrl).replace(/\/$/, "");
   }
 
-  if (allowAnyGateway()) {
+  if (allowAnyGateway() && !opts.ignoreAllowAny) {
     warnOnce(
       "ALLOW_ANY",
       "warning: GROK_BOT_ALLOW_ANY_GATEWAY is set; credential host checks are disabled.",
@@ -136,6 +139,9 @@ export function assertAllowedCredentialUrl(rawUrl, opts = {}) {
       kind === "backend"
         ? "*.cursor.sh / *.cursor.com"
         : "*.cursor.sh / *.cursor.com / *.cursorvm.com";
+    const escape = opts.ignoreAllowAny
+      ? ". An app login token is only sent to https Cursor API hosts."
+      : ", or set GROK_BOT_ALLOW_LOCAL_GATEWAY=1 / GROK_BOT_ALLOW_ANY_GATEWAY=1.";
     throw new Error(
       "Rejected " +
         label +
@@ -143,7 +149,7 @@ export function assertAllowedCredentialUrl(rawUrl, opts = {}) {
         host +
         "\". Expected " +
         expected +
-        ", or set GROK_BOT_ALLOW_LOCAL_GATEWAY=1 / GROK_BOT_ALLOW_ANY_GATEWAY=1.",
+        escape,
     );
   }
 

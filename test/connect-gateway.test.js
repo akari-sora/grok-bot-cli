@@ -65,6 +65,7 @@ test("unusable app session falls through to CURSOR_ACCESS_TOKEN EnsureSandBox", 
     calls.push({ url: String(url), body: options.body });
     return new Response(
       JSON.stringify({
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
         gatewayUrl: "http://127.0.0.1:1341",
         gatewayToken: "from-ensure",
       }),
@@ -117,6 +118,47 @@ test("removed token and gateway env aliases do not select gateway auth", () => {
     },
     () => assert.equal(hasGatewayAuth(), false),
   );
+});
+
+test("CURSOR_ACCESS_TOKEN polls a STARTING box instead of reporting a dashboard API key", async (t) => {
+  if (!["darwin", "linux", "win32"].includes(process.platform)) {
+    t.skip("app session platforms only");
+    return;
+  }
+  const { home, env } = writeBrokenAppSession();
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls += 1;
+    const body = calls === 1
+      ? { runState: "SAND_BOX_RUN_STATE_STARTING" }
+      : {
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
+        gatewayUrl: "http://127.0.0.1:1341",
+        gatewayToken: "from-ensure",
+      };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  await withEnv({
+    HOME: home,
+    USERPROFILE: home,
+    CURSOR_ACCESS_TOKEN: "cursor-access-token",
+    CURSOR_API_BASE_URL: "http://127.0.0.1:1340",
+    GROK_BOT_GATEWAY_URL: null,
+    GROK_BOT_GATEWAY_TOKEN: null,
+    GROK_BOT_ALLOW_ANY_GATEWAY: null,
+    SAND_CLIENT_VERSION: "9.9.9",
+    GBOT_WAKE_POLL_MS: "1",
+    GBOT_WAKE_TIMEOUT_MS: "5000",
+    GROK_BOT_TEST: "1",
+    ...env,
+  }, async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "from-ensure");
+    assert.equal(calls, 2);
+  });
 });
 
 test("unusable app session without access token surfaces the session error", async (t) => {

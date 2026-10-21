@@ -79,25 +79,104 @@ test("macOS plist: /Applications then ~/Applications", () => {
   ]);
 });
 
-test("a Windows DisplayVersion 0.72.1.0 becomes 0.72.1", () => {
-  const output = [
-    "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{gbot}",
-    "    DisplayName    REG_SZ    Grok Bot",
-    "    DisplayVersion    REG_SZ    0.72.1.0",
+const REG_APP_ID = "8db316bb-b3e2-5dd2-9554-ecccb62be362";
+const LIVE_REG = [
+  `HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${REG_APP_ID}`,
+  "    DisplayName    REG_SZ    Grok Bot 0.72.1",
+  "    DisplayVersion    REG_SZ    0.72.1",
+  "    Publisher    REG_SZ    SpaceXAI",
+  "",
+].join("\r\n");
+
+test("Windows registry lookup uses an absolute reg.exe and the live install key", () => {
+  const calls = [];
+  const version = cursorClientVersion({
+    env: { SystemRoot: "D:\\Windows" },
+    platform: "win32",
+    execFile: (cmd, args, options) => {
+      calls.push({ cmd, args, timeout: options.timeout, maxBuffer: options.maxBuffer });
+      return LIVE_REG;
+    },
+  });
+  assert.equal(version, "0.72.1");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cmd, join("D:\\Windows", "System32", "reg.exe"));
+  assert.notEqual(calls[0].cmd, "reg");
+  assert.deepEqual(calls[0].args, [
+    "query",
+    `HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${REG_APP_ID}`,
+  ]);
+  assert.equal(typeof calls[0].maxBuffer, "number");
+  assert.ok(calls[0].maxBuffer >= 1024);
+  assert.ok(calls[0].timeout <= 3000 && calls[0].timeout > 0);
+  assert.equal(withEnv({ SAND_CLIENT_VERSION: "0.72.1.0" }, () => ensureSandboxHeaders("t")["x-cursor-client-version"]), "0.72.1");
+});
+
+test("Windows registry falls back to a narrow Grok Bot search within one 3s budget", () => {
+  let clock = 5_000;
+  const calls = [];
+  const fallback = [
+    "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\custom",
+    "    DisplayName    REG_SZ    Grok Bot 0.72.1",
+    "    DisplayVersion    REG_SZ    1.2.3",
+    "    Publisher    REG_SZ    SpaceXAI",
     "",
   ].join("\r\n");
   const version = cursorClientVersion({
     env: {},
     platform: "win32",
+    now: () => clock,
     execFile: (cmd, args, options) => {
-      assert.equal(cmd, "reg");
-      assert.ok(args.includes("/s"));
-      assert.equal(options.timeout > 0, true);
-      return output;
+      calls.push({ cmd, args, timeout: options.timeout });
+      clock += 100;
+      if (args.includes("/f")) return fallback;
+      throw new Error("missing key");
     },
   });
+  assert.equal(version, "1.2.3");
+  assert.equal(calls[0].cmd, join("C:\\Windows", "System32", "reg.exe"));
+  const searched = calls.find((call) => call.args.includes("/f"));
+  assert.ok(searched);
+  assert.deepEqual(searched.args, [
+    "query",
+    "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+    "/s",
+    "/f",
+    "Grok Bot",
+    "/d",
+  ]);
+  assert.ok(calls.every((call) => call.timeout <= 3000 && call.timeout > 0));
+});
+
+test("Windows registry queries share one 3s budget", () => {
+  let clock = 0;
+  const timeouts = [];
+  cursorClientVersion({
+    env: {},
+    platform: "win32",
+    now: () => clock,
+    execFile: (_cmd, _args, options) => {
+      timeouts.push(options.timeout);
+      clock += 2500;
+      throw new Error("slow miss");
+    },
+  });
+  assert.deepEqual(timeouts, [3000, 500]);
+});
+
+test("a DisplayName that does not start with Grok Bot is ignored", () => {
+  const output = [
+    `HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${REG_APP_ID}`,
+    "    DisplayName    REG_SZ    Grok BotExtra",
+    "    DisplayVersion    REG_SZ    9.9.9",
+    "",
+  ].join("\r\n");
+  const version = cursorClientVersion({
+    env: {},
+    platform: "win32",
+    execFile: () => output,
+  });
   assert.equal(version, "0.72.1");
-  assert.equal(withEnv({ SAND_CLIENT_VERSION: "0.72.1.0" }, () => ensureSandboxHeaders("t")["x-cursor-client-version"]), "0.72.1");
 });
 
 test("invalid client versions fall back to the built-in default", () => {

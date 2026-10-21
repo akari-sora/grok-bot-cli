@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
-import { cursorClientVersion } from "./client-version.js";
+import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
 import { ensureSandboxHeaders, headersFromEnsureSandbox, headersFromEnv, mergeGatewayHeaders, normalizeHeaderMap, requestHeaders } from "./headers.js";
 import { hasGrokBotGatewaySession, loadGrokBotGatewaySession } from "./app-session.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
@@ -20,6 +20,7 @@ export class GatewayError extends Error {
     if (info.kind !== undefined) this.kind = info.kind;
     if (info.wake !== undefined) this.wake = info.wake;
     if (info.failureReason !== undefined) this.failureReason = info.failureReason;
+    if (info.runState !== undefined) this.runState = info.runState;
   }
 }
 
@@ -205,7 +206,9 @@ const RUN_STATE = {
 };
 
 function normalizeRunState(value) {
-  if (value == null || value === "") return "unknown";
+  // Omitted runState stays unset. Callers treat gateway fields with no runState as the
+  // historical EnsureSandBox success shape. An unrecognized value is `unknown`.
+  if (value == null || value === "") return undefined;
   return RUN_STATE[String(value)] || "unknown";
 }
 
@@ -236,18 +239,24 @@ function sandboxFields(body) {
 }
 
 function sandboxReady(result) {
-  return result?.runState === "RUNNING" && Boolean(result.gatewayUrl) && Boolean(result.gatewayToken);
+  const hasGateway = Boolean(result?.gatewayUrl) && Boolean(result?.gatewayToken);
+  if (!hasGateway) return false;
+  // Gateway fields and no runState is the historical success body. An explicit
+  // `unknown` is not ready, even when it names a gateway.
+  return result.runState == null || result.runState === "RUNNING";
 }
 
-async function ensureSandbox(accessToken, { signal, wake = true, partial = false } = {}) {
+async function ensureSandbox(accessToken, { signal, wake = true, partial = false, appLogin = false, timeoutMs } = {}) {
   assertGatewayActive(signal);
-  const url = assertAllowedCredentialUrl(backendBase(), { kind: "backend" }) + "/aiserver.v1.GrokBotService/EnsureSandBox";
+  // The app login token is an account credential gbot reads itself. ALLOW_ANY stays a
+  // break-glass for gateway hosts and a user-supplied CURSOR_ACCESS_TOKEN only.
+  const url = assertAllowedCredentialUrl(backendBase(), { kind: "backend", ignoreAllowAny: appLogin }) + "/aiserver.v1.GrokBotService/EnsureSandBox";
   let res, body;
   try {
     res = await fetch(url, {
       method: "POST",
       redirect: "error",
-      signal: gatewayDeadline(signal),
+      signal: gatewayDeadline(signal, timeoutMs ?? GATEWAY_TIMEOUT_MS),
       headers: ensureSandboxHeaders(accessToken),
       // Live on macOS 2026-10-21: {wake:true} with an app login token took a hibernated box to
       // RUNNING in about 10s. {wake:false} only describes it.
@@ -264,6 +273,9 @@ async function ensureSandbox(accessToken, { signal, wake = true, partial = false
     if (res.status === 401 && /no longer supported/i.test(String(detail))) {
       const version = cursorClientVersion();
       detail = `${detail} (gbot sent x-cursor-client-version ${version}; set SAND_CLIENT_VERSION to override)`;
+      // The version in the message is the one this request sent. A long-running relay or MCP
+      // then re-reads the installed app on the next call instead of keeping the rejected one.
+      forgetCachedAppVersion();
     }
     throw new GatewayError("EnsureSandBox failed: " + res.status + " " + redactSecrets(detail), { status: res.status, method: "EnsureSandBox" });
   }
@@ -295,24 +307,74 @@ export async function describeSandbox(accessToken, options = {}) {
   return ensureSandbox(accessToken, { ...options, wake: false, partial: true });
 }
 
-export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs } = {}) {
+const ENSURE_CALL_CAP_MS = 30_000;
+
+function wakeFailureError(result, { timedOut = false } = {}) {
+  const starting = result?.runState === "STARTING" && timedOut;
+  return new GatewayError(
+    starting ? "The Grok Bot box is still starting." : "The Grok Bot box did not start.",
+    {
+      code: starting ? "WAKE_TIMEOUT" : "WAKE_FAILED",
+      method: "EnsureSandBox",
+      ...(result?.runState ? { runState: result.runState } : {}),
+    },
+  );
+}
+
+// Poll STARTING, RUNNING that still has no gateway fields, and an explicit `unknown`
+// that names gateway fields. `unknown` plus a gateway is not ready: the host named a
+// gateway but not a known running state, so keep polling instead of applying the session.
+// A missing runState is not `unknown`; with gateway fields it is ready.
+function shouldPollSandbox(result) {
+  const hasGateway = Boolean(result?.gatewayUrl) && Boolean(result?.gatewayToken);
+  if (result?.runState === "unknown" && hasGateway) return true;
+  if (result?.runState === "STARTING") return true;
+  if (result?.runState === "RUNNING" && !hasGateway) return true;
+  return false;
+}
+
+export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false } = {}) {
   const budget = sandboxWakeBudget();
   const timeout = timeoutMs ?? budget.timeoutMs;
   const interval = intervalMs ?? budget.intervalMs;
   const started = Date.now();
-  let result = await ensureSandbox(accessToken, { signal, wake: true, partial: true });
-  while (!sandboxReady(result)) {
-    const elapsed = Date.now() - started;
-    if (elapsed >= timeout) {
-      const error = new GatewayError(
-        result.runState === "STARTING" ? "The Grok Bot box is still starting." : "The Grok Bot box did not start.",
-        { code: result.runState === "STARTING" ? "WAKE_TIMEOUT" : "WAKE_FAILED", method: "EnsureSandBox" },
-      );
-      error.runState = result.runState;
+  const left = () => timeout - (Date.now() - started);
+  const call = async (wake) => {
+    const remaining = left();
+    if (remaining <= 0) return null;
+    try {
+      return await ensureSandbox(accessToken, {
+        signal,
+        wake,
+        partial: true,
+        appLogin,
+        timeoutMs: Math.min(ENSURE_CALL_CAP_MS, remaining),
+      });
+    } catch (error) {
+      if (signal?.aborted || error?.reason === "cancelled") throw error;
+      if (isDeadlineError(error)) return null;
       throw error;
     }
-    await abortableSleep(Math.min(interval, Math.max(0, timeout - elapsed)), signal);
-    result = await ensureSandbox(accessToken, { signal, wake: false, partial: true });
+  };
+  let result = await call(true);
+  if (!result) throw wakeFailureError(null, { timedOut: true });
+  let wakePosts = 1;
+  while (!sandboxReady(result)) {
+    if (result.runState === "HIBERNATED") {
+      if (wakePosts >= 2) throw wakeFailureError(result);
+      const again = await call(true);
+      if (!again) throw wakeFailureError(result, { timedOut: true });
+      result = again;
+      wakePosts += 1;
+      continue;
+    }
+    if (!shouldPollSandbox(result)) throw wakeFailureError(result);
+    const remaining = left();
+    if (remaining <= 0) throw wakeFailureError(result, { timedOut: true });
+    await abortableSleep(Math.min(interval, remaining), signal);
+    const polled = await call(false);
+    if (!polled) throw wakeFailureError(result, { timedOut: true });
+    result = polled;
   }
   return result;
 }
@@ -327,7 +389,7 @@ export async function connectGateway({ signal, account } = {}) {
   if (!token) {
     throw new GatewayError("Set CURSOR_ACCESS_TOKEN, or GROK_BOT_GATEWAY_URL + GROK_BOT_GATEWAY_TOKEN. Do not use a Cursor dashboard API key.");
   }
-  const sandbox = await ensureSandbox(token, { signal, wake: true });
+  const sandbox = await wakeSandbox(token, { signal });
   return { gatewayUrl: sandbox.gatewayUrl, gatewayToken: sandbox.gatewayToken, gatewayHeaders: sandbox.gatewayHeaders };
 }
 
@@ -379,10 +441,16 @@ function autoWakeEnabled() {
   return String(process.env.GBOT_AUTO_WAKE ?? "").trim() !== "0";
 }
 
+function overrideEnvConfigured() {
+  return Boolean((process.env.GROK_BOT_GATEWAY_URL || "").trim() && (process.env.GROK_BOT_GATEWAY_TOKEN || "").trim());
+}
+
 function canAutoWake(session) {
+  if (typeof session?.accountScope !== "string" || !/^[0-9a-f]{64}$/.test(session.accountScope)) return false;
   if (!autoWakeEnabled()) return false;
-  if (gatewayOverride()) return false;
-  return typeof session?.accountScope === "string" && /^[0-9a-f]{64}$/.test(session.accountScope);
+  // Both env vars set means an override, even when the URL would throw in gatewayOverride().
+  if (overrideEnvConfigured()) return false;
+  return true;
 }
 
 function wakeReason(code) {
@@ -402,58 +470,77 @@ function wakeReason(code) {
 
 function wakeFailure(error) {
   if (error instanceof AppAuthError) return { code: error.code, reason: wakeReason(error.code) };
+  if (error instanceof GatewayError && error.status === 401 && /no longer supported/i.test(error.message)) {
+    const hint = /\(gbot sent x-cursor-client-version [^)]*\)/.exec(error.message);
+    return {
+      code: "CLIENT_VERSION_REJECTED",
+      reason: hint ? `client version rejected ${hint[0]}` : "client version rejected",
+    };
+  }
   if (error instanceof GatewayError && (error.status === 401 || error.status === 403)) {
     return { code: "UNAUTHORIZED", reason: "unauthorized" };
   }
   if (error?.code === "WAKE_TIMEOUT" || error?.code === "WAKE_FAILED") {
     return { code: error.code, reason: wakeReason(error.code) };
   }
+  if (error instanceof Error && /Rejected backend URL/.test(error.message)) {
+    return { code: "WAKE_FAILED", reason: error.message };
+  }
   return { code: "WAKE_FAILED", reason: "backend error" };
 }
 
-function isCallerAbort(_error, signal) {
-  return Boolean(signal?.aborted);
+function cancelledSubmission() {
+  const error = new GatewayError("Gateway submission cancelled before transmission");
+  error.delivery = "rejected";
+  error.reason = "cancelled";
+  return error;
+}
+
+function sleepEvidence(error) {
+  return /^pod_hibernated$/i.test(String(error?.failureReason ?? ""))
+    || /sleep|hibernat/i.test(String(error?.failureCode ?? ""));
 }
 
 const wakesByScope = new Map();
 
 function wakeShared(scope, signal) {
+  // An already-aborted caller must not create a job or read the login. The job
+  // promise is always caught so a wake can never surface as an unhandledRejection.
+  if (signal?.aborted) return Promise.reject(cancelledSubmission());
   let job = wakesByScope.get(scope);
-  if (!job) {
+  if (!job || job.controller.signal.aborted) {
     const controller = new AbortController();
-    job = { controller, waiters: new Set(), promise: null };
-    job.promise = (async () => {
-      const loaded = await loadAppAccessToken({ scope, home: homedir(), env: process.env });
-      const result = await wakeSandbox(loaded.token, { signal: controller.signal });
-      if (process.env.GBOT_DEBUG) console.error("gbot: woke asleep box");
-      return result;
-    })().finally(() => {
-      if (wakesByScope.get(scope) === job) wakesByScope.delete(scope);
-    });
-    wakesByScope.set(scope, job);
+    const created = { controller, waiters: new Set(), promise: null };
+    // Register before the async function starts. loadAppAccessToken throws
+    // synchronously, and that finally would otherwise run before the map insert
+    // and leave the rejected job in place for the next caller.
+    wakesByScope.set(scope, created);
+    created.promise = (async () => {
+      try {
+        const loaded = await loadAppAccessToken({ scope, home: homedir(), env: process.env });
+        const result = await wakeSandbox(loaded.token, { signal: controller.signal, appLogin: true });
+        if (process.env.GBOT_DEBUG) console.error("gbot: woke asleep box");
+        return result;
+      } finally {
+        if (wakesByScope.get(scope) === created) wakesByScope.delete(scope);
+      }
+    })();
+    created.promise.catch(() => {});
+    job = created;
   }
   const waiter = {};
   job.waiters.add(waiter);
-  const onAbort = () => {
+  let left = false;
+  const leave = (abortJob) => {
+    if (left) return;
+    left = true;
     job.waiters.delete(waiter);
-    if (job.waiters.size === 0) job.controller.abort(signal?.reason);
-  };
-  if (signal?.aborted) {
-    onAbort();
-    return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
-  }
-  signal?.addEventListener("abort", onAbort, { once: true });
-  return job.promise.then((result) => {
-    if (signal?.aborted) {
-      throw signal.reason instanceof Error
-        ? signal.reason
-        : new DOMException("The operation was aborted", "AbortError");
+    if (abortJob && job.waiters.size === 0) {
+      if (wakesByScope.get(scope) === job) wakesByScope.delete(scope);
+      job.controller.abort();
     }
-    return result;
-  }).finally(() => {
-    signal?.removeEventListener("abort", onAbort);
-    job.waiters.delete(waiter);
-  });
+  };
+  return raceSignal(job.promise, signal, () => leave(true)).finally(() => leave(false));
 }
 
 function applySandbox(session, sandbox) {
@@ -462,23 +549,41 @@ function applySandbox(session, sandbox) {
   session.gatewayHeaders = sandbox.gatewayHeaders;
 }
 
+function canRetryAsleep(method, error, session, options) {
+  if (options.allowWake === false || error?.code !== "BOX_ASLEEP" || !canAutoWake(session)) return false;
+  // A bare 417 is still BOX_ASLEEP, but sendPrompt resends only with positive sleep evidence.
+  if (method === "sendPrompt" && !sleepEvidence(error)) return false;
+  return true;
+}
+
 async function gatewayCall(session, method, body = {}, options = {}) {
   try {
     return await performGatewayCall(session, method, body, options);
   } catch (error) {
-    if (options.allowWake === false || error?.code !== "BOX_ASLEEP" || !canAutoWake(session)) throw error;
+    if (!canRetryAsleep(method, error, session, options)) throw error;
     let sandbox;
     try {
       sandbox = await wakeShared(session.accountScope, options.signal);
     } catch (wakeError) {
-      if (isCallerAbort(wakeError, options.signal)) throw wakeError;
+      if (options.signal?.aborted) throw cancelledSubmission();
+      if (!(error instanceof GatewayError)) throw wakeError;
       const failure = wakeFailure(wakeError);
       error.message += ` (auto wake failed: ${failure.reason})`;
       error.wake = { attempted: true, error: failure.code };
       throw error;
     }
     applySandbox(session, sandbox);
-    return gatewayCall(session, method, body, { ...options, allowWake: false });
+    try {
+      return await gatewayCall(session, method, body, { ...options, allowWake: false });
+    } catch (retryError) {
+      if (retryError instanceof GatewayError && retryError.code === "BOX_ASLEEP") {
+        if (!String(retryError.message).includes("auto wake ran")) {
+          retryError.message += " (auto wake ran, but the box is still asleep)";
+        }
+        retryError.wake = { attempted: true, woke: true };
+      }
+      throw retryError;
+    }
   }
 }
 
@@ -824,7 +929,7 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
     if (err && err.targetId == null) err.targetId = rec.id;
     if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
-    if (err && err.delivery === "unknown" && err instanceof Error && !/delivery unknown/.test(err.message)) {
+    if (err instanceof GatewayError && err.delivery === "unknown" && !/delivery unknown/.test(err.message)) {
       err.message += " (delivery unknown; check the thread before resending)";
     }
     throw err;

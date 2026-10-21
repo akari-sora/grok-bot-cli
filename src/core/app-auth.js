@@ -5,6 +5,9 @@ import { dirname, join } from "node:path";
 
 import { decryptGrokBotSafeStorage, grokBotGatewayDescriptorPath } from "./app-session.js";
 
+// Property lookup so a caller can count reads. Node's ESM `fs` bindings cannot be replaced.
+export const secretFiles = { readFileSync };
+
 export class AppAuthError extends Error {
   constructor(code, message) {
     super(message);
@@ -59,6 +62,7 @@ function accessTokenValue(secrets, accounts, scope) {
 }
 
 function reveal(value, options) {
+  // The app's main bundle defines `plaintext:v1:` for the no-OS-keyring secret store.
   if (value.startsWith("plaintext:v1:")) return value.slice("plaintext:v1:".length);
   try {
     return decryptGrokBotSafeStorage(value, options);
@@ -89,8 +93,10 @@ function readPayload(token) {
 }
 
 /**
- * The Grok Bot app's saved access token for one login. Never reads the refresh
- * token and never writes the app's files. `scope` defaults to `cursor-accounts.active`.
+ * The Grok Bot app's saved access token for one login. The secrets file is parsed
+ * whole, so the saved refresh token is in memory as ciphertext. gbot never decrypts
+ * or uses the refresh token and never writes the app's files. `scope` defaults to
+ * `cursor-accounts.active`.
  *
  * @param {object} [options]
  * @param {string} [options.scope]
@@ -111,7 +117,7 @@ export function loadAppAccessToken({
   getKeychainPassword,
   unprotectData,
   now = () => Date.now(),
-  readFile = readFileSync,
+  readFile = secretFiles.readFileSync,
 } = {}) {
   const path = join(dirname(grokBotGatewayDescriptorPath(home, platform, env)), "sand-secrets.json");
   let text;

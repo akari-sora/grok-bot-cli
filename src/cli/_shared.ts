@@ -18,6 +18,14 @@ export const failureDocumentSchema = z
     delivery: z.enum(['accepted', 'queued', 'rejected', 'unknown']),
     error: z.string(),
     exitCode: z.literal(1),
+    failureReason: z.string().optional(),
+    wake: z
+      .object({
+        attempted: z.literal(true),
+        error: z.string().optional(),
+        woke: z.boolean().optional(),
+      })
+      .optional(),
   })
   .catchall(z.json());
 

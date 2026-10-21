@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
+
+// Property lookup so a caller can count keychain, secret-tool, and DPAPI commands.
+export const osSecretCommands = { execFileSync };
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -225,13 +228,13 @@ export function hasGrokBotGatewaySession({
 
 function readKeychainPassword(platform = process.platform) {
   if (platform === "linux") {
-    return execFileSync(
+    return osSecretCommands.execFileSync(
       "secret-tool",
       ["lookup", "xdg:schema", "chrome_libsecret_os_crypt_password_v2", "application", "Grok Bot"],
       { encoding: "utf8" },
     ).trimEnd();
   }
-  return execFileSync(
+  return osSecretCommands.execFileSync(
     "/usr/bin/security",
     ["find-generic-password", "-w", "-s", "Grok Bot Safe Storage"],
     { encoding: "utf8" },
@@ -243,7 +246,7 @@ function unprotectWithDpapi(blob) {
     "Add-Type -AssemblyName System.Security; " +
     "$blob = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); " +
     "[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($blob, $null, 'CurrentUser'))";
-  const out = execFileSync(
+  const out = osSecretCommands.execFileSync(
     join(
       process.env.SystemRoot ?? "C:\\Windows",
       "System32/WindowsPowerShell/v1.0/powershell.exe",
