@@ -15,14 +15,23 @@ function withEnv(values, fn) {
     if (v == null) delete process.env[key];
     else process.env[key] = v;
   }
-  try {
-    return fn();
-  } finally {
+  const restore = () => {
     for (const key of Object.keys(values)) {
       if (prev[key] === undefined) delete process.env[key];
       else process.env[key] = prev[key];
     }
+  };
+  let result;
+  try {
+    result = fn();
+  } catch (error) {
+    restore();
+    throw error;
   }
+  // Keep the variables set until an async body settles.
+  if (result && typeof result.then === "function") return result.finally(restore);
+  restore();
+  return result;
 }
 
 function writeBrokenAppSession() {
@@ -82,6 +91,9 @@ test("unusable app session falls through to CURSOR_ACCESS_TOKEN EnsureSandBox", 
       assert.equal(session.gatewayToken, "from-ensure");
       assert.equal(calls.length, 1);
       assert.match(calls[0].url, /EnsureSandBox/);
+      // The app's EnsureSandBoxRequest has `wake` (2) and `supports_asleep_box` (3). gbot needs an awake box
+      // and cannot show an asleep state, so it asks for wake only.
+      assert.deepEqual(JSON.parse(calls[0].body), { wake: true });
     },
   );
 });

@@ -22,7 +22,30 @@ export class GatewayError extends Error {
 // is delivery-unknown, and waiting longer only delays the "do not resend" error.
 export const GATEWAY_TIMEOUT_MS = 30000;
 export const SEND_GATEWAY_TIMEOUT_MS = 15_000;
-export const GATEWAY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Default read cap. `skills list` on a real account passed the old 2 MiB (2026-10-20); the read
+// still streams and stops at the cap. GBOT_MAX_RESPONSE_BYTES sets it to a byte count from 64 KiB to
+// 64 MiB (peak memory is a few times the cap); any other value is ignored.
+export const GATEWAY_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const MIN_RESPONSE_BYTES = 64 * 1024;
+const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+function responseBytesFromEnv(env) {
+  const raw = String(env.GBOT_MAX_RESPONSE_BYTES ?? "").trim();
+  if (!raw) return { set: false, value: null };
+  const n = /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+  const ok = Number.isSafeInteger(n) && n >= MIN_RESPONSE_BYTES && n <= MAX_RESPONSE_BYTES;
+  return { set: true, value: ok ? n : null };
+}
+
+export function gatewayMaxResponseBytes(env = process.env) {
+  return responseBytesFromEnv(env).value ?? GATEWAY_MAX_RESPONSE_BYTES;
+}
+
+// Live (2026-10-20): while a login's box is asleep, every gateway call answers 417 Expectation Failed
+// with an empty body and `x-anyrun-failure-reason: pod_hibernated` (`proxy-status: anyrun-proxy;
+// error=destination_unavailable; details="pod_hibernated"`). Bringing the app forward (`open -g`, a
+// bare `grokbot://`) did not wake it; selecting a bot of that login in the app did.
+const ASLEEP_HINT = " (the Grok Bot box for this login is asleep: open the Grok Bot app and select a bot of this login, or switch the app to this login, then retry)";
 
 function assertGatewayActive(signal) {
   if (signal?.aborted) {
@@ -118,11 +141,19 @@ function raceSignal(promise, signal, onAbort) {
   });
 }
 
+function tooLargeMessage(maxBytes) {
+  const env = responseBytesFromEnv(process.env);
+  let hint = "";
+  if (env.set && env.value === null) hint = "; GBOT_MAX_RESPONSE_BYTES was ignored: not a byte count from " + MIN_RESPONSE_BYTES + " to " + MAX_RESPONSE_BYTES;
+  else if (maxBytes < MAX_RESPONSE_BYTES) hint = "; set GBOT_MAX_RESPONSE_BYTES to a byte count up to " + MAX_RESPONSE_BYTES + " to read it";
+  return "Gateway response too large (over " + maxBytes + " bytes)" + hint;
+}
+
 async function readTextCapped(res, maxBytes, signal) {
   if (!res.body || typeof res.body.getReader !== "function") {
     const text = await raceSignal(res.text(), signal);
     if (Buffer.byteLength(text, "utf8") > maxBytes) {
-      throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+      throw new GatewayError(tooLargeMessage(maxBytes));
     }
     return text;
   }
@@ -135,7 +166,7 @@ async function readTextCapped(res, maxBytes, signal) {
     bytes += value.byteLength ?? value.length;
     if (bytes > maxBytes) {
       try { await reader.cancel(); } catch { /* already closed */ }
-      throw new GatewayError("Gateway response too large (over " + maxBytes + " bytes)");
+      throw new GatewayError(tooLargeMessage(maxBytes));
     }
     chunks.push(value);
   }
@@ -143,7 +174,7 @@ async function readTextCapped(res, maxBytes, signal) {
 }
 
 async function readJson(res, signal) {
-  const text = await readTextCapped(res, GATEWAY_MAX_RESPONSE_BYTES, signal);
+  const text = await readTextCapped(res, gatewayMaxResponseBytes(), signal);
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -170,7 +201,9 @@ async function ensureSandbox(accessToken, { signal } = {}) {
       redirect: "error",
       signal: gatewayDeadline(signal),
       headers: ensureSandboxHeaders(accessToken),
-      body: "{}",
+      // EnsureSandBoxRequest: wake (2), supports_asleep_box (3). gbot needs an awake box and cannot show an
+      // asleep one, so it asks for wake only. Not verified live (needs CURSOR_ACCESS_TOKEN).
+      body: JSON.stringify({ wake: true }),
     });
     body = await readJson(res);
   } catch (error) {
@@ -220,7 +253,7 @@ function redactDetail(detail, session) {
 }
 
 // Live gateway failures are distinct: auth, a moved box, an unknown method, and a down server.
-function failureKind(status, contentType, data) {
+function failureKind(status, contentType, data, failureReason) {
   const failureCode = data && typeof data.failureCode === "string" && data.failureCode
     ? data.failureCode
     : undefined;
@@ -235,6 +268,12 @@ function failureKind(status, contentType, data) {
     && typeof data.raw === "string"
     && data.raw.includes("could not be routed")
   ) kind = "routing";
+  // A 417 is an asleep box when the proxy says pod_hibernated, has no failureCode (the live answer), or its
+  // failureCode says so; other 417 codes stay client failures.
+  else if (
+    status === 417
+    && (/^pod_hibernated$/i.test(String(failureReason ?? "").trim()) || !failureCode || /sleep|hibernat/i.test(failureCode))
+  ) kind = "asleep";
   else if (status >= 500) kind = "server";
   else if (status >= 400 && status < 500) kind = "client";
   return { failureCode, kind };
@@ -278,10 +317,12 @@ async function gatewayCall(session, method, body = {}, { signal } = {}) {
   if (!prompt) assertGatewayActive(signal);
   if (!res.ok) {
     const detail = data.message || data.error || data.raw || res.statusText;
-    const classified = failureKind(res.status, res.headers.get("content-type"), data);
-    throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session), {
+    const classified = failureKind(res.status, res.headers.get("content-type"), data, res.headers.get("x-anyrun-failure-reason"));
+    const asleep = classified.kind === "asleep";
+    throw new GatewayError(method + " failed: " + res.status + " " + redactDetail(detail, session) + (asleep ? ASLEEP_HINT : ""), {
       status: res.status,
       method,
+      ...(asleep ? { code: "BOX_ASLEEP" } : {}),
       ...(classified.kind ? { kind: classified.kind } : {}),
       ...(classified.failureCode ? { failureCode: classified.failureCode } : {}),
     });
@@ -432,7 +473,7 @@ export async function addSkill(session, markdown) {
     data = await gatewayCall(session, "importAgentWorkflowText", { id, markdown: text });
   } catch (error) {
     if (error instanceof GatewayError && /response too large/.test(error.message)) {
-      throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list.");
+      throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list (raise GBOT_MAX_RESPONSE_BYTES if that is too large too).");
     }
     throw error;
   }
@@ -544,7 +585,17 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
   assertGatewayActive(extra.signal);
   // Keep this roster check. Live (2026-10-10): sendPrompt to an agentId that is not on the roster
   // answers 409 send/agent-unavailable yet still creates an empty placeholder bot named "New Agent".
-  const rec = await resolveRef(session, ref, { signal: extra.signal });
+  let rec;
+  try {
+    rec = await resolveRef(session, ref, { signal: extra.signal });
+  } catch (err) {
+    // The prompt was never transmitted (roster lookup failed, e.g. an asleep box): a definite rejection.
+    if (err && typeof err === "object") {
+      if (err.delivery == null) err.delivery = "rejected";
+      if (err.clientNonce == null && extra.clientNonce) err.clientNonce = extra.clientNonce;
+    }
+    throw err;
+  }
   const body = {
     agentId: rec.id,
     prompt,
