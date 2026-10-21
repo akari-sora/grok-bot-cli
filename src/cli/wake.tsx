@@ -191,7 +191,7 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
   return {
     account: label,
     before,
-    after: asState(woke.runState),
+    after: woke.runState ? asState(woke.runState) : 'RUNNING',
     exitCode: 0,
     seconds: secondsOf(started),
   };

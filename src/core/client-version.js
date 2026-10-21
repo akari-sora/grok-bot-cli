@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 
 // Live on 2026-10-21: EnsureSandBox rejects x-cursor-client-version 0.20.0 with 401
 // "no longer supported" and accepts the installed app's 0.72.1.
@@ -31,7 +31,7 @@ export function normalizeClientVersion(raw) {
 function macVersion(home, readFile) {
   const paths = [
     "/Applications/Grok Bot.app/Contents/Info.plist",
-    join(home, "Applications/Grok Bot.app/Contents/Info.plist"),
+    path.join(home, "Applications/Grok Bot.app/Contents/Info.plist"),
   ];
   for (const path of paths) {
     let text = "";
@@ -47,21 +47,51 @@ function macVersion(home, readFile) {
   return null;
 }
 
+const DISPLAY_NAME_LINE = /^\s*DisplayName\s+REG_\w+\s+(.*)$/m;
+const DISPLAY_VERSION_LINE = /^\s*DisplayVersion\s+REG_\w+\s+(.*)$/m;
+const DISPLAY_NAME_VERSION = /^Grok Bot\s+(\d+\.\d+\.\d+(?:\.\d+)?)$/;
+
+function regBlocks(output) {
+  return String(output).split(/\r?\n(?=HKEY_)/);
+}
+
+function versionFromValue(output) {
+  const found = DISPLAY_VERSION_LINE.exec(String(output));
+  return found ? normalizeClientVersion(found[1]) : null;
+}
+
+function versionFromDisplayName(displayName) {
+  const match = DISPLAY_NAME_VERSION.exec(String(displayName).trim());
+  return match ? normalizeClientVersion(match[1]) : null;
+}
+
 function versionFromReg(output) {
-  const blocks = String(output).split(/\r?\n(?=HKEY_)/);
-  for (const block of blocks) {
-    const name = /^\s*DisplayName\s+REG_\w+\s+(.*)$/m.exec(block);
+  for (const block of regBlocks(output)) {
+    const name = DISPLAY_NAME_LINE.exec(block);
     if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
-    const found = /^\s*DisplayVersion\s+REG_\w+\s+(.*)$/m.exec(block);
-    const version = found ? normalizeClientVersion(found[1]) : null;
+    const version = versionFromValue(block);
     if (version) return version;
+  }
+  return null;
+}
+
+// `/f /d` lists only values whose data matches, so DisplayVersion is not in that output.
+// The key path is the HKEY line above a matching DisplayName.
+function installFromSearch(output) {
+  for (const block of regBlocks(output)) {
+    const name = DISPLAY_NAME_LINE.exec(block);
+    if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
+    const key = /^(HKEY_\S+)/.exec(block);
+    if (!key) continue;
+    return { key: key[1], displayName: name[1].trim() };
   }
   return null;
 }
 
 function regExe(env) {
   // Absolute path: a bare `reg` is resolved from the current directory first.
-  return join(env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
+  // win32.join so the path is correct when this file is loaded on macOS or Linux too.
+  return path.win32.join(env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
 }
 
 function windowsVersion(execFile, env = process.env, now = Date.now) {
@@ -90,12 +120,23 @@ function windowsVersion(execFile, env = process.env, now = Date.now) {
     }
   }
   for (const root of REG_ROOTS) {
+    let listed;
     try {
-      const version = versionFromReg(query(["query", root, "/s", "/f", "Grok Bot", "/d"]));
-      if (version) return version;
+      listed = query(["query", root, "/s", "/f", "Grok Bot", "/d"]);
     } catch {
       // ENOBUFS, timeout, or no match. A spent budget stops the rest.
+      continue;
     }
+    const install = installFromSearch(listed);
+    if (!install) continue;
+    try {
+      const version = versionFromValue(query(["query", install.key, "/v", "DisplayVersion"]));
+      if (version) return version;
+    } catch {
+      // The follow-up failed, or the shared budget was already gone.
+    }
+    const named = versionFromDisplayName(install.displayName);
+    if (named) return named;
   }
   return null;
 }
@@ -107,19 +148,56 @@ function installedVersion({ platform, home, readFile, execFile, env, now }) {
 }
 
 let cachedAppVersion;
+let versionSource;
+let lastAppRereadAt = 0;
+const APP_VERSION_REREAD_MS = 10 * 60 * 1000;
 
-/** Drop the per-process installed-version cache so the next call reads the app again. */
-export function forgetCachedAppVersion() {
+// Property lookup so a test can stub the installed-app read without touching the real disk or registry.
+export const clientVersionRuntime = {
+  now: () => Date.now(),
+  platform: () => process.platform,
+  home: () => homedir(),
+  readFile: readFileSync,
+  execFile: execFileSync,
+};
+
+/** Drop cache, source, and the re-read clock. Tests use this between cases. */
+export function resetClientVersionCache() {
   cachedAppVersion = undefined;
+  versionSource = undefined;
+  lastAppRereadAt = 0;
+}
+
+/**
+ * Drop the cached installed version so the next call reads the app again.
+ * Only an installed-app value is dropped (not `SAND_CLIENT_VERSION`, not the
+ * built-in default), and at most once per 10 minutes.
+ */
+export function forgetCachedAppVersion() {
+  if (versionSource !== "app") return false;
+  const now = clientVersionRuntime.now();
+  if (lastAppRereadAt !== 0 && now - lastAppRereadAt < APP_VERSION_REREAD_MS) return false;
+  cachedAppVersion = undefined;
+  versionSource = undefined;
+  lastAppRereadAt = now;
+  return true;
+}
+
+function envClientVersion(env) {
+  const raw = env.SAND_CLIENT_VERSION;
+  if (raw == null || String(raw).trim() === "") return null;
+  const version = normalizeClientVersion(String(raw));
+  return { version: version ?? DEFAULT_SAND_CLIENT_VERSION, source: version ? "env" : "default" };
 }
 
 /**
  * `SAND_CLIENT_VERSION` when it is a `major.minor.patch` (a fourth numeric
  * segment is dropped). Otherwise the installed Grok Bot app, cached for the
  * process, otherwise {@link DEFAULT_SAND_CLIENT_VERSION}. An invalid env value
- * does not fall through to the app. A long-running relay or MCP keeps the
- * version it read first until EnsureSandBox answers 401 "no longer supported",
- * which clears this cache so the next call reads the app again.
+ * does not fall through to the app. A 401 "no longer supported" drops the
+ * cache only when this call's value came from the installed app, and at most
+ * once per 10 minutes, so a long-running relay or MCP does not re-run the
+ * Windows registry lookup on every rejection.
  */
 export function cursorClientVersion({
   env = process.env,
@@ -129,22 +207,24 @@ export function cursorClientVersion({
   execFile,
   now,
 } = {}) {
-  const raw = env.SAND_CLIENT_VERSION;
-  if (raw != null && String(raw).trim() !== "") {
-    return normalizeClientVersion(String(raw)) ?? DEFAULT_SAND_CLIENT_VERSION;
-  }
+  const fromEnv = envClientVersion(env);
   const injected = platform != null || home != null || readFile != null || execFile != null || now != null;
+  if (fromEnv) {
+    if (!injected) versionSource = fromEnv.source;
+    return fromEnv.version;
+  }
   if (!injected) {
     if (cachedAppVersion === undefined) {
       cachedAppVersion = installedVersion({
-        platform: process.platform,
-        home: homedir(),
-        readFile: readFileSync,
-        execFile: execFileSync,
+        platform: clientVersionRuntime.platform(),
+        home: clientVersionRuntime.home(),
+        readFile: clientVersionRuntime.readFile,
+        execFile: clientVersionRuntime.execFile,
         env: process.env,
-        now: Date.now,
+        now: clientVersionRuntime.now,
       });
     }
+    versionSource = cachedAppVersion ? "app" : "default";
     return cachedAppVersion ?? DEFAULT_SAND_CLIENT_VERSION;
   }
   return installedVersion({

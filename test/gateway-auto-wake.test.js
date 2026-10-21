@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
-import { listAgents, sendPrompt, wakeSandbox } from "../src/core/gateway.js";
+import { createAgent, listAgents, sendPrompt, wakeSandbox } from "../src/core/gateway.js";
 import { shouldSkipUnixOnlyTests } from "./helpers/win32-test.js";
 
 const SUB = "user_synthetic_auto_wake";
@@ -438,18 +438,33 @@ test("abort during wake polling rejects and does not send wake false", async (t)
   assert.deepEqual(bodies, [{ wake: true }]);
 });
 
-function writeScopedLogin(sub) {
+const ABORT_KEYCHAIN_PASSWORD = "synthetic-abort-keychain-password";
+
+function encryptAccessToken(text, password) {
+  const linux = process.platform === "linux";
+  const key = crypto.pbkdf2Sync(password, "saltysalt", linux ? 1 : 1003, 16, "sha1");
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
+  return Buffer.concat([
+    Buffer.from(linux ? "v11" : "v10"),
+    cipher.update(text, "utf8"),
+    cipher.final(),
+  ]).toString("base64");
+}
+
+function writeScopedLogin(sub, { keychainPassword } = {}) {
   const scope = scopeFor(sub);
   const home = mkdtempSync(join(tmpdir(), "gbot-auto-wake-"));
   const secretsPath = join(dirname(grokBotGatewayDescriptorPath(home, process.platform, {})), "sand-secrets.json");
   mkdirSync(dirname(secretsPath), { recursive: true });
+  const token = jwt(Math.floor(Date.now() / 1000) + 3600, sub);
+  const stored = keychainPassword ? encryptAccessToken(token, keychainPassword) : `plaintext:v1:${token}`;
   writeFileSync(secretsPath, JSON.stringify({
     version: 1,
     "cursor-accounts": JSON.stringify({
       active: scope,
       accounts: {
         [scope]: {
-          "cursor-access-token": `plaintext:v1:${jwt(Math.floor(Date.now() / 1000) + 3600, sub)}`,
+          "cursor-access-token": stored,
           "cursor-refresh-token": "refresh-secret-do-not-touch",
         },
       },
@@ -482,7 +497,10 @@ async function countSecretReads() {
     return origRead(path, ...args);
   };
   osSecretCommands.execFileSync = (cmd, ...args) => {
-    if (/security|secret-tool|powershell/i.test(String(cmd))) counts.keychain += 1;
+    if (/security|secret-tool|powershell/i.test(String(cmd))) {
+      counts.keychain += 1;
+      return `${ABORT_KEYCHAIN_PASSWORD}\n`;
+    }
     return origExec(cmd, ...args);
   };
   return {
@@ -521,7 +539,10 @@ test("an already-aborted sendPrompt does not read the login or reject unhandled"
     counted.restore();
   });
   const sub = "user_synthetic_abort_inflight";
-  const { home, scope } = writeScopedLogin(sub);
+  // Encrypted (not plaintext:v1:) so a login read would have to call the keychain stub.
+  const { home, scope } = writeScopedLogin(sub, {
+    ...(process.platform === "win32" ? {} : { keychainPassword: ABORT_KEYCHAIN_PASSWORD }),
+  });
   const controller = new AbortController();
   const prompts = [];
   const gateway = await listen(async (req, res) => {
@@ -555,7 +576,7 @@ test("an already-aborted sendPrompt does not read the login or reject unhandled"
   assert.equal(prompts[0].clientNonce, "nonce-already-aborted");
   assert.equal(counted.available, true);
   assert.equal(counted.counts.readFile, 0);
-  assert.equal(counted.counts.keychain, 0);
+  if (process.platform !== "win32") assert.equal(counted.counts.keychain, 0);
 });
 
 test("sendPrompt aborted during STARTING polling is rejected as cancelled", async (t) => {
@@ -1035,14 +1056,16 @@ test("a wake EnsureSandBox call stays inside the remaining budget", async (t) =>
   assert.ok(elapsed < 3000, `wake waited ${elapsed}ms`);
   assert.equal(error.code, "BOX_ASLEEP");
   assert.equal(error.wake.attempted, true);
-  assert.equal(error.wake.error === "WAKE_FAILED" || error.wake.error === "WAKE_TIMEOUT", true);
+  assert.equal(error.wake.error, "WAKE_TIMEOUT");
 });
 
-test("HIBERNATED after wake true is sent once more and then fails", async (t) => {
+test("HIBERNATED after wake true waits one poll interval, sends wake true once more, then fails", async (t) => {
   const sub = "user_synthetic_hibernated";
   const { home, scope } = writeScopedLogin(sub);
   const bodies = [];
+  const times = [];
   const backend = await listen(async (req, res) => {
+    times.push(Date.now());
     bodies.push(await readBody(req));
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ runState: "SAND_BOX_RUN_STATE_HIBERNATED" }));
@@ -1052,15 +1075,15 @@ test("HIBERNATED after wake true is sent once more and then fails", async (t) =>
     asleep(res);
   });
   t.after(() => closeServers([backend, gateway]));
-  const started = Date.now();
   const error = await withEnv({
     ...envFor(home, backend),
     GBOT_WAKE_TIMEOUT_MS: "8000",
+    GBOT_WAKE_POLL_MS: "250",
   }, () => listAgents(sessionFor(origin(gateway), scope)))
     .then(() => assert.fail("expected wake failure"), (err) => err);
   assert.deepEqual(bodies, [{ wake: true }, { wake: true }]);
   assert.equal(error.wake.error, "WAKE_FAILED");
-  assert.ok(Date.now() - started < 1500, "hibernated wake should fail fast");
+  assert.ok(times[1] - times[0] >= 200, `second wake followed after ${times[1] - times[0]}ms`);
 });
 
 test("unknown without gateway fields fails fast and unknown with fields is polled", async (t) => {
@@ -1115,4 +1138,120 @@ test("unknown without gateway fields fails fast and unknown with fields is polle
   }, () => listAgents(sessionFor(origin(gateway), second.scope)));
   assert.equal(rows[0].id, "bot-1");
   assert.deepEqual(bodies.map((body) => body.wake), [true, false]);
+});
+
+test("createAgent does not wake or resend a bare 417", async (t) => {
+  const sub = "user_synthetic_create_bare";
+  const { home, scope } = writeScopedLogin(sub);
+  const creates = [];
+  let ensures = 0;
+  const gateway = await listen(async (req, res) => {
+    creates.push(await readBody(req));
+    res.statusCode = 417;
+    res.end();
+  });
+  const backend = await listen(async (req, res) => {
+    ensures += 1;
+    await readBody(req);
+    res.statusCode = 500;
+    res.end();
+  });
+  t.after(() => closeServers([gateway, backend]));
+  const error = await withEnv(envFor(home, backend), () => createAgent(sessionFor(origin(gateway), scope), { name: "Foo" }))
+    .then(() => assert.fail("expected bare 417"), (err) => err);
+  assert.equal(error.code, "BOX_ASLEEP");
+  assert.equal(error.wake, undefined);
+  assert.equal(ensures, 0);
+  assert.equal(creates.length, 1);
+  assert.equal(creates[0].name, "Foo");
+});
+
+test("createAgent with pod_hibernated wakes and resends once", async (t) => {
+  const sub = "user_synthetic_create_pod";
+  const { home, scope } = writeScopedLogin(sub);
+  const creates = [];
+  let ensures = 0;
+  const gateway = await listen(async (req, res) => {
+    creates.push(await readBody(req));
+    asleep(res);
+  });
+  const awake = await listen(async (req, res) => {
+    creates.push(await readBody(req));
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ agent: { id: "bot-new", name: "Foo" } }));
+  });
+  const backend = await listen(async (req, res) => {
+    ensures += 1;
+    await readBody(req);
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(runningBody(origin(awake))));
+  });
+  t.after(() => closeServers([gateway, awake, backend]));
+  const created = await withEnv(envFor(home, backend), () => createAgent(sessionFor(origin(gateway), scope), { name: "Foo" }));
+  assert.equal(created.id, "bot-new");
+  assert.equal(ensures, 1);
+  assert.equal(creates.length, 2);
+  assert.equal(creates[0].name, "Foo");
+  assert.deepEqual(creates[0], creates[1]);
+});
+
+test("a per-call EnsureSandBox timeout keeps polling while budget remains", async (t) => {
+  const sub = "user_synthetic_call_timeout";
+  const { home, scope } = writeScopedLogin(sub);
+  const bodies = [];
+  const awake = await listen(async (req, res) => {
+    await readBody(req);
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ agents: [{ id: "bot-1", name: "General" }] }));
+  });
+  const backend = await listen(async (req, res) => {
+    const body = await readBody(req);
+    bodies.push(body);
+    if (bodies.length === 1) {
+      await new Promise(() => {});
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(runningBody(origin(awake))));
+  });
+  const gateway = await listen(async (req, res) => {
+    await readBody(req);
+    asleep(res);
+  });
+  t.after(() => closeServers([awake, backend, gateway]));
+  const rows = await withEnv({
+    ...envFor(home, backend),
+    GBOT_WAKE_TIMEOUT_MS: "800",
+    GBOT_WAKE_CALL_CAP_MS: "100",
+    GBOT_WAKE_POLL_MS: "15",
+  }, () => listAgents(sessionFor(origin(gateway), scope)));
+  assert.equal(rows[0].id, "bot-1");
+  assert.deepEqual(bodies.map((body) => body.wake), [true, false]);
+});
+
+test("a wake that uses the whole budget is WAKE_TIMEOUT", async (t) => {
+  const sub = "user_synthetic_budget_timeout";
+  const { home, scope } = writeScopedLogin(sub);
+  let ensures = 0;
+  const backend = await listen(async (req, res) => {
+    ensures += 1;
+    await readBody(req);
+    await new Promise(() => {});
+    res.end();
+  });
+  const gateway = await listen(async (req, res) => {
+    await readBody(req);
+    asleep(res);
+  });
+  t.after(() => closeServers([backend, gateway]));
+  const error = await withEnv({
+    ...envFor(home, backend),
+    GBOT_WAKE_TIMEOUT_MS: "220",
+    GBOT_WAKE_CALL_CAP_MS: "40",
+    GBOT_WAKE_POLL_MS: "15",
+  }, () => listAgents(sessionFor(origin(gateway), scope)))
+    .then(() => assert.fail("expected timeout"), (err) => err);
+  assert.equal(error.code, "BOX_ASLEEP");
+  assert.equal(error.wake.error, "WAKE_TIMEOUT");
+  assert.ok(ensures >= 2, `expected more than one EnsureSandBox call, got ${ensures}`);
 });

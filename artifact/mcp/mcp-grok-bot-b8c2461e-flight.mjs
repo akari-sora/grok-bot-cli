@@ -25282,7 +25282,7 @@ var __webpack_modules__ = {
         function macVersion(home, readFile) {
             const paths = [
                 "/Applications/Grok Bot.app/Contents/Info.plist",
-                (0, node_path__rspack_import_3.join)(home, "Applications/Grok Bot.app/Contents/Info.plist")
+                node_path__rspack_import_3["default"].join(home, "Applications/Grok Bot.app/Contents/Info.plist")
             ];
             for (const path of paths){
                 let text = "";
@@ -25297,19 +25297,44 @@ var __webpack_modules__ = {
             }
             return null;
         }
+        const DISPLAY_NAME_LINE = /^\s*DisplayName\s+REG_\w+\s+(.*)$/m;
+        const DISPLAY_VERSION_LINE = /^\s*DisplayVersion\s+REG_\w+\s+(.*)$/m;
+        const DISPLAY_NAME_VERSION = /^Grok Bot\s+(\d+\.\d+\.\d+(?:\.\d+)?)$/;
+        function regBlocks(output) {
+            return String(output).split(/\r?\n(?=HKEY_)/);
+        }
+        function versionFromValue(output) {
+            const found = DISPLAY_VERSION_LINE.exec(String(output));
+            return found ? normalizeClientVersion(found[1]) : null;
+        }
+        function versionFromDisplayName(displayName) {
+            const match = DISPLAY_NAME_VERSION.exec(String(displayName).trim());
+            return match ? normalizeClientVersion(match[1]) : null;
+        }
         function versionFromReg(output) {
-            const blocks = String(output).split(/\r?\n(?=HKEY_)/);
-            for (const block of blocks){
-                const name = /^\s*DisplayName\s+REG_\w+\s+(.*)$/m.exec(block);
+            for (const block of regBlocks(output)){
+                const name = DISPLAY_NAME_LINE.exec(block);
                 if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
-                const found = /^\s*DisplayVersion\s+REG_\w+\s+(.*)$/m.exec(block);
-                const version = found ? normalizeClientVersion(found[1]) : null;
+                const version = versionFromValue(block);
                 if (version) return version;
             }
             return null;
         }
+        function installFromSearch(output) {
+            for (const block of regBlocks(output)){
+                const name = DISPLAY_NAME_LINE.exec(block);
+                if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
+                const key = /^(HKEY_\S+)/.exec(block);
+                if (!key) continue;
+                return {
+                    key: key[1],
+                    displayName: name[1].trim()
+                };
+            }
+            return null;
+        }
         function regExe(env) {
-            return (0, node_path__rspack_import_3.join)(env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
+            return node_path__rspack_import_3["default"].win32.join(env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
         }
         function windowsVersion(execFile, env = process.env, now = Date.now) {
             const exe = regExe(env);
@@ -25338,17 +25363,32 @@ var __webpack_modules__ = {
                 } catch  {}
             }
             for (const root of REG_ROOTS){
+                let listed;
                 try {
-                    const version = versionFromReg(query([
+                    listed = query([
                         "query",
                         root,
                         "/s",
                         "/f",
                         "Grok Bot",
                         "/d"
+                    ]);
+                } catch  {
+                    continue;
+                }
+                const install = installFromSearch(listed);
+                if (!install) continue;
+                try {
+                    const version = versionFromValue(query([
+                        "query",
+                        install.key,
+                        "/v",
+                        "DisplayVersion"
                     ]));
                     if (version) return version;
                 } catch  {}
+                const named = versionFromDisplayName(install.displayName);
+                if (named) return named;
             }
             return null;
         }
@@ -25358,26 +25398,58 @@ var __webpack_modules__ = {
             return null;
         }
         let cachedAppVersion;
-        function forgetCachedAppVersion() {
+        let versionSource;
+        let lastAppRereadAt = 0;
+        const APP_VERSION_REREAD_MS = 10 * 60 * 1000;
+        const clientVersionRuntime = {
+            now: ()=>Date.now(),
+            platform: ()=>process.platform,
+            home: ()=>(0, node_os__rspack_import_2.homedir)(),
+            readFile: node_fs__rspack_import_1.readFileSync,
+            execFile: node_child_process__rspack_import_0.execFileSync
+        };
+        function resetClientVersionCache() {
             cachedAppVersion = undefined;
+            versionSource = undefined;
+            lastAppRereadAt = 0;
+        }
+        function forgetCachedAppVersion() {
+            if (versionSource !== "app") return false;
+            const now = clientVersionRuntime.now();
+            if (lastAppRereadAt !== 0 && now - lastAppRereadAt < APP_VERSION_REREAD_MS) return false;
+            cachedAppVersion = undefined;
+            versionSource = undefined;
+            lastAppRereadAt = now;
+            return true;
+        }
+        function envClientVersion(env) {
+            const raw = env.SAND_CLIENT_VERSION;
+            if (raw == null || String(raw).trim() === "") return null;
+            const version = normalizeClientVersion(String(raw));
+            return {
+                version: version ?? DEFAULT_SAND_CLIENT_VERSION,
+                source: version ? "env" : "default"
+            };
         }
         function cursorClientVersion({ env = process.env, platform, home, readFile, execFile, now } = {}) {
-            const raw = env.SAND_CLIENT_VERSION;
-            if (raw != null && String(raw).trim() !== "") {
-                return normalizeClientVersion(String(raw)) ?? DEFAULT_SAND_CLIENT_VERSION;
-            }
+            const fromEnv = envClientVersion(env);
             const injected = platform != null || home != null || readFile != null || execFile != null || now != null;
+            if (fromEnv) {
+                if (!injected) versionSource = fromEnv.source;
+                return fromEnv.version;
+            }
             if (!injected) {
                 if (cachedAppVersion === undefined) {
                     cachedAppVersion = installedVersion({
-                        platform: process.platform,
-                        home: (0, node_os__rspack_import_2.homedir)(),
-                        readFile: node_fs__rspack_import_1.readFileSync,
-                        execFile: node_child_process__rspack_import_0.execFileSync,
+                        platform: clientVersionRuntime.platform(),
+                        home: clientVersionRuntime.home(),
+                        readFile: clientVersionRuntime.readFile,
+                        execFile: clientVersionRuntime.execFile,
                         env: process.env,
-                        now: Date.now
+                        now: clientVersionRuntime.now
                     });
                 }
+                versionSource = cachedAppVersion ? "app" : "default";
                 return cachedAppVersion ?? DEFAULT_SAND_CLIENT_VERSION;
             }
             return installedVersion({
@@ -28280,11 +28352,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return null;
         }
+        function fixtureKeychainPassword() {
+            if (!/^(1|true|yes)$/i.test(String(process.env.GROK_BOT_TEST ?? "").trim())) return null;
+            const password = process.env.GBOT_TEST_KEYCHAIN_PASSWORD;
+            return typeof password === "string" && password.length > 0 ? password : null;
+        }
+        function fixtureSecretOptions() {
+            const password = fixtureKeychainPassword();
+            return password ? {
+                getKeychainPassword: ()=>password
+            } : {};
+        }
         function sessionFromApp(account) {
             let loaded;
             try {
                 loaded = (0, _app_session_js__rspack_import_5.Z2)({
-                    account
+                    account,
+                    ...fixtureSecretOptions()
                 });
             } catch (error) {
                 if (accessTokenFromEnv()) return null;
@@ -28421,7 +28505,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!hasGateway) return false;
             return result.runState == null || result.runState === "RUNNING";
         }
-        async function ensureSandbox(accessToken, { signal, wake = true, partial = false, appLogin = false, timeoutMs } = {}) {
+        async function ensureSandbox(accessToken, { signal, wake = true, appLogin = false, timeoutMs } = {}) {
             assertGatewayActive(signal);
             const url = (0, _url_policy_js__rspack_import_7.Re)(backendBase(), {
                 kind: "backend",
@@ -28457,9 +28541,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
             }
             const fields = sandboxFields(body);
-            if ((!fields.gatewayUrl || !fields.gatewayToken) && !partial) {
-                throw new GatewayError("EnsureSandBox returned no gatewayUrl/gatewayToken. Auth may be a dashboard API key (those do not work).");
-            }
             return {
                 ...fields,
                 runState: normalizeRunState(pick(body, "runState", "run_state"))
@@ -28486,15 +28567,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         async function describeSandbox(accessToken, options = {}) {
             return ensureSandbox(accessToken, {
                 ...options,
-                wake: false,
-                partial: true
+                wake: false
             });
         }
         const ENSURE_CALL_CAP_MS = 30000;
         function wakeFailureError(result, { timedOut = false } = {}) {
-            const starting = result?.runState === "STARTING" && timedOut;
+            const starting = result?.runState === "STARTING";
             return new GatewayError(starting ? "The Grok Bot box is still starting." : "The Grok Bot box did not start.", {
-                code: starting ? "WAKE_TIMEOUT" : "WAKE_FAILED",
+                code: timedOut ? "WAKE_TIMEOUT" : "WAKE_FAILED",
                 method: "EnsureSandBox",
                 ...result?.runState ? {
                     runState: result.runState
@@ -28512,6 +28592,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const budget = sandboxWakeBudget();
             const timeout = timeoutMs ?? budget.timeoutMs;
             const interval = intervalMs ?? budget.intervalMs;
+            const callCap = positiveTestMs(process.env, "GBOT_WAKE_CALL_CAP_MS") ?? ENSURE_CALL_CAP_MS;
             const started = Date.now();
             const left = ()=>timeout - (Date.now() - started);
             const call = async (wake)=>{
@@ -28521,9 +28602,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     return await ensureSandbox(accessToken, {
                         signal,
                         wake,
-                        partial: true,
                         appLogin,
-                        timeoutMs: Math.min(ENSURE_CALL_CAP_MS, remaining)
+                        timeoutMs: Math.min(callCap, remaining)
                     });
                 } catch (error) {
                     if (signal?.aborted || error?.reason === "cancelled") throw error;
@@ -28531,32 +28611,39 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     throw error;
                 }
             };
+            const budgetExpired = (result)=>{
+                throw wakeFailureError(result, {
+                    timedOut: true
+                });
+            };
             let result = await call(true);
-            if (!result) throw wakeFailureError(null, {
-                timedOut: true
-            });
             let wakePosts = 1;
             while(!sandboxReady(result)){
-                if (result.runState === "HIBERNATED") {
+                if (result?.runState === "HIBERNATED") {
                     if (wakePosts >= 2) throw wakeFailureError(result);
+                    const remaining = left();
+                    if (remaining <= 0) budgetExpired(result);
+                    await abortableSleep(Math.min(interval, remaining), signal);
                     const again = await call(true);
-                    if (!again) throw wakeFailureError(result, {
-                        timedOut: true
-                    });
-                    result = again;
                     wakePosts += 1;
+                    if (again) {
+                        result = again;
+                        continue;
+                    }
+                    if (left() <= 0) budgetExpired(result);
+                    result = null;
+                } else if (result && !shouldPollSandbox(result)) {
+                    throw wakeFailureError(result);
+                } else {
+                    const remaining = left();
+                    if (remaining <= 0) budgetExpired(result);
+                    await abortableSleep(Math.min(interval, remaining), signal);
+                }
+                const polled = await call(false);
+                if (!polled) {
+                    if (left() <= 0) budgetExpired(result);
                     continue;
                 }
-                if (!shouldPollSandbox(result)) throw wakeFailureError(result);
-                const remaining = left();
-                if (remaining <= 0) throw wakeFailureError(result, {
-                    timedOut: true
-                });
-                await abortableSleep(Math.min(interval, remaining), signal);
-                const polled = await call(false);
-                if (!polled) throw wakeFailureError(result, {
-                    timedOut: true
-                });
                 result = polled;
             }
             return result;
@@ -28571,9 +28658,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!token) {
                 throw new GatewayError("Set CURSOR_ACCESS_TOKEN, or GROK_BOT_GATEWAY_URL + GROK_BOT_GATEWAY_TOKEN. Do not use a Cursor dashboard API key.");
             }
-            const sandbox = await wakeSandbox(token, {
-                signal
-            });
+            let sandbox;
+            try {
+                sandbox = await wakeSandbox(token, {
+                    signal
+                });
+            } catch (error) {
+                if (error instanceof GatewayError && error.code === "WAKE_FAILED" && error.runState == null) {
+                    throw new GatewayError("EnsureSandBox returned no gatewayUrl/gatewayToken. Auth may be a dashboard API key (those do not work).");
+                }
+                throw error;
+            }
             return {
                 gatewayUrl: sandbox.gatewayUrl,
                 gatewayToken: sandbox.gatewayToken,
@@ -28707,7 +28802,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         const loaded = await (0, _app_auth_js__rspack_import_2.zM)({
                             scope,
                             home: (0, node_os__rspack_import_1.homedir)(),
-                            env: process.env
+                            env: process.env,
+                            ...fixtureSecretOptions()
                         });
                         const result = await wakeSandbox(loaded.token, {
                             signal: controller.signal,
@@ -28741,9 +28837,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             session.gatewayToken = sandbox.gatewayToken;
             session.gatewayHeaders = sandbox.gatewayHeaders;
         }
+        const BARE_417_WAKE_METHODS = new Set([
+            "listAgents",
+            "getAgentThread",
+            "getAgentTranscriptTail",
+            "getAgentWorkflows"
+        ]);
         function canRetryAsleep(method, error, session, options) {
             if (options.allowWake === false || error?.code !== "BOX_ASLEEP" || !canAutoWake(session)) return false;
-            if (method === "sendPrompt" && !sleepEvidence(error)) return false;
+            if (!BARE_417_WAKE_METHODS.has(method) && !sleepEvidence(error)) return false;
             return true;
         }
         async function gatewayCall(session, method, body = {}, options = {}) {

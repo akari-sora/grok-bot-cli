@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-
-// Property lookup so a caller can count keychain, secret-tool, and DPAPI commands.
-export const osSecretCommands = { execFileSync };
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// Property lookup so a caller can count keychain, secret-tool, and DPAPI commands.
+export const osSecretCommands = { execFileSync };
 
 // Chromium OSCrypt: "v10" = fixed password (macOS: the Keychain password; Linux: "peanuts"),
 // "v11" = Linux Secret Service password. macOS stretches with 1003 PBKDF2 rounds, Linux with 1.

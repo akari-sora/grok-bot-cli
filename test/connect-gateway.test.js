@@ -161,6 +161,40 @@ test("CURSOR_ACCESS_TOKEN polls a STARTING box instead of reporting a dashboard 
   });
 });
 
+test("CURSOR_ACCESS_TOKEN wake with no gateway fields and no run state names a dashboard API key", async (t) => {
+  if (!["darwin", "linux", "win32"].includes(process.platform)) {
+    t.skip("app session platforms only");
+    return;
+  }
+  const home = mkdtempSync(join(tmpdir(), "gbot-connect-dashboard-"));
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({}), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  }));
+  await withEnv({
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: join(home, "AppData/Roaming"),
+    XDG_CONFIG_HOME: join(home, ".config"),
+    CURSOR_ACCESS_TOKEN: "cursor-access-token",
+    CURSOR_API_BASE_URL: "http://127.0.0.1:1340",
+    GROK_BOT_GATEWAY_URL: null,
+    GROK_BOT_GATEWAY_TOKEN: null,
+    GROK_BOT_ALLOW_ANY_GATEWAY: null,
+    SAND_CLIENT_VERSION: "9.9.9",
+    GBOT_WAKE_POLL_MS: "1",
+    GBOT_WAKE_TIMEOUT_MS: "5000",
+    GROK_BOT_TEST: "1",
+  }, async () => {
+    await assert.rejects(connectGateway(), (error) => {
+      assert.equal(error.name, "GatewayError");
+      assert.match(error.message, /Auth may be a dashboard API key \(those do not work\)/);
+      assert.doesNotMatch(error.message, /did not start/);
+      return true;
+    });
+  });
+});
+
 test("unusable app session without access token surfaces the session error", async (t) => {
   if (!["darwin", "linux", "win32"].includes(process.platform)) {
     t.skip("app session platforms only");

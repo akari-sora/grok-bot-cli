@@ -91,7 +91,7 @@ snapshot with `gapReset: true`. The gateway request remains limit-only.
 Run `gbot --help` for every command.
 Options are command-local (for example, `gbot send --history-dir DIR ...`);
 `--json` prints the canonical JSON result; `send`, `wake`, and the `codex` commands also report failures as
-a JSON document on stdout with `exitCode` (see below). `gbot wake` exits 0 when the box is running or `--check` succeeded, 2 for usage, 3 when it could not wake, and 4 when the box is still starting. Every other command
+a JSON document on stdout with `exitCode` (see below). `gbot wake` exits 0 when the box is running or `--check` succeeded, 2 for usage, 3 when it could not wake, and 4 when the wake budget ran out before the box was ready. Every other command
 prints the failure message on stderr and exits 1.
 
 ## Messaging a live Claude Code session

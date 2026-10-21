@@ -100,10 +100,23 @@ function gatewayOverride() {
   return null;
 }
 
+// CLI tests encrypt the descriptor with GBOT_TEST_KEYCHAIN_PASSWORD. Honor that
+// only in test mode so `gbot send` can use the same fixture without the real keychain.
+function fixtureKeychainPassword() {
+  if (!/^(1|true|yes)$/i.test(String(process.env.GROK_BOT_TEST ?? "").trim())) return null;
+  const password = process.env.GBOT_TEST_KEYCHAIN_PASSWORD;
+  return typeof password === "string" && password.length > 0 ? password : null;
+}
+
+function fixtureSecretOptions() {
+  const password = fixtureKeychainPassword();
+  return password ? { getKeychainPassword: () => password } : {};
+}
+
 function sessionFromApp(account) {
   let loaded;
   try {
-    loaded = loadGrokBotGatewaySession({ account });
+    loaded = loadGrokBotGatewaySession({ account, ...fixtureSecretOptions() });
   } catch (error) {
     // Descriptor present but unusable (e.g. Windows Local State missing). Fall
     // through to CURSOR_ACCESS_TOKEN → EnsureSandBox when that token is set.
@@ -246,7 +259,7 @@ function sandboxReady(result) {
   return result.runState == null || result.runState === "RUNNING";
 }
 
-async function ensureSandbox(accessToken, { signal, wake = true, partial = false, appLogin = false, timeoutMs } = {}) {
+async function ensureSandbox(accessToken, { signal, wake = true, appLogin = false, timeoutMs } = {}) {
   assertGatewayActive(signal);
   // The app login token is an account credential gbot reads itself. ALLOW_ANY stays a
   // break-glass for gateway hosts and a user-supplied CURSOR_ACCESS_TOKEN only.
@@ -273,16 +286,13 @@ async function ensureSandbox(accessToken, { signal, wake = true, partial = false
     if (res.status === 401 && /no longer supported/i.test(String(detail))) {
       const version = cursorClientVersion();
       detail = `${detail} (gbot sent x-cursor-client-version ${version}; set SAND_CLIENT_VERSION to override)`;
-      // The version in the message is the one this request sent. A long-running relay or MCP
-      // then re-reads the installed app on the next call instead of keeping the rejected one.
+      // cursorClientVersion() just above recorded whether this value came from the app.
+      // Forget drops that cache only for an installed-app value, at most once per 10 minutes.
       forgetCachedAppVersion();
     }
     throw new GatewayError("EnsureSandBox failed: " + res.status + " " + redactSecrets(detail), { status: res.status, method: "EnsureSandBox" });
   }
   const fields = sandboxFields(body);
-  if ((!fields.gatewayUrl || !fields.gatewayToken) && !partial) {
-    throw new GatewayError("EnsureSandBox returned no gatewayUrl/gatewayToken. Auth may be a dashboard API key (those do not work).");
-  }
   return { ...fields, runState: normalizeRunState(pick(body, "runState", "run_state")) };
 }
 
@@ -304,17 +314,17 @@ function abortableSleep(ms, signal) {
 }
 
 export async function describeSandbox(accessToken, options = {}) {
-  return ensureSandbox(accessToken, { ...options, wake: false, partial: true });
+  return ensureSandbox(accessToken, { ...options, wake: false });
 }
 
 const ENSURE_CALL_CAP_MS = 30_000;
 
 function wakeFailureError(result, { timedOut = false } = {}) {
-  const starting = result?.runState === "STARTING" && timedOut;
+  const starting = result?.runState === "STARTING";
   return new GatewayError(
     starting ? "The Grok Bot box is still starting." : "The Grok Bot box did not start.",
     {
-      code: starting ? "WAKE_TIMEOUT" : "WAKE_FAILED",
+      code: timedOut ? "WAKE_TIMEOUT" : "WAKE_FAILED",
       method: "EnsureSandBox",
       ...(result?.runState ? { runState: result.runState } : {}),
     },
@@ -337,6 +347,7 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
   const budget = sandboxWakeBudget();
   const timeout = timeoutMs ?? budget.timeoutMs;
   const interval = intervalMs ?? budget.intervalMs;
+  const callCap = positiveTestMs(process.env, "GBOT_WAKE_CALL_CAP_MS") ?? ENSURE_CALL_CAP_MS;
   const started = Date.now();
   const left = () => timeout - (Date.now() - started);
   const call = async (wake) => {
@@ -346,9 +357,8 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
       return await ensureSandbox(accessToken, {
         signal,
         wake,
-        partial: true,
         appLogin,
-        timeoutMs: Math.min(ENSURE_CALL_CAP_MS, remaining),
+        timeoutMs: Math.min(callCap, remaining),
       });
     } catch (error) {
       if (signal?.aborted || error?.reason === "cancelled") throw error;
@@ -356,24 +366,39 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
       throw error;
     }
   };
+  const budgetExpired = (result) => {
+    throw wakeFailureError(result, { timedOut: true });
+  };
   let result = await call(true);
-  if (!result) throw wakeFailureError(null, { timedOut: true });
+  // The first request was wake:true even when that call hit its own deadline.
   let wakePosts = 1;
   while (!sandboxReady(result)) {
-    if (result.runState === "HIBERNATED") {
+    if (result?.runState === "HIBERNATED") {
       if (wakePosts >= 2) throw wakeFailureError(result);
+      const remaining = left();
+      if (remaining <= 0) budgetExpired(result);
+      await abortableSleep(Math.min(interval, remaining), signal);
       const again = await call(true);
-      if (!again) throw wakeFailureError(result, { timedOut: true });
-      result = again;
       wakePosts += 1;
+      if (again) {
+        result = again;
+        continue;
+      }
+      if (left() <= 0) budgetExpired(result);
+      // The extra wake:true timed out. The HIBERNATED body is stale, so keep polling.
+      result = null;
+    } else if (result && !shouldPollSandbox(result)) {
+      throw wakeFailureError(result);
+    } else {
+      const remaining = left();
+      if (remaining <= 0) budgetExpired(result);
+      await abortableSleep(Math.min(interval, remaining), signal);
+    }
+    const polled = await call(false);
+    if (!polled) {
+      if (left() <= 0) budgetExpired(result);
       continue;
     }
-    if (!shouldPollSandbox(result)) throw wakeFailureError(result);
-    const remaining = left();
-    if (remaining <= 0) throw wakeFailureError(result, { timedOut: true });
-    await abortableSleep(Math.min(interval, remaining), signal);
-    const polled = await call(false);
-    if (!polled) throw wakeFailureError(result, { timedOut: true });
     result = polled;
   }
   return result;
@@ -389,7 +414,15 @@ export async function connectGateway({ signal, account } = {}) {
   if (!token) {
     throw new GatewayError("Set CURSOR_ACCESS_TOKEN, or GROK_BOT_GATEWAY_URL + GROK_BOT_GATEWAY_TOKEN. Do not use a Cursor dashboard API key.");
   }
-  const sandbox = await wakeSandbox(token, { signal });
+  let sandbox;
+  try {
+    sandbox = await wakeSandbox(token, { signal });
+  } catch (error) {
+    if (error instanceof GatewayError && error.code === "WAKE_FAILED" && error.runState == null) {
+      throw new GatewayError("EnsureSandBox returned no gatewayUrl/gatewayToken. Auth may be a dashboard API key (those do not work).");
+    }
+    throw error;
+  }
   return { gatewayUrl: sandbox.gatewayUrl, gatewayToken: sandbox.gatewayToken, gatewayHeaders: sandbox.gatewayHeaders };
 }
 
@@ -517,7 +550,12 @@ function wakeShared(scope, signal) {
     wakesByScope.set(scope, created);
     created.promise = (async () => {
       try {
-        const loaded = await loadAppAccessToken({ scope, home: homedir(), env: process.env });
+        const loaded = await loadAppAccessToken({
+          scope,
+          home: homedir(),
+          env: process.env,
+          ...fixtureSecretOptions(),
+        });
         const result = await wakeSandbox(loaded.token, { signal: controller.signal, appLogin: true });
         if (process.env.GBOT_DEBUG) console.error("gbot: woke asleep box");
         return result;
@@ -549,10 +587,19 @@ function applySandbox(session, sandbox) {
   session.gatewayHeaders = sandbox.gatewayHeaders;
 }
 
+// A bare 417 is still BOX_ASLEEP. Only these reads wake without sleep evidence.
+// Every other gateway method, including sendPrompt, needs failureReason pod_hibernated
+// or a failureCode matching sleep/hibernat. There are no other read-only gateway methods.
+const BARE_417_WAKE_METHODS = new Set([
+  "listAgents",
+  "getAgentThread",
+  "getAgentTranscriptTail",
+  "getAgentWorkflows",
+]);
+
 function canRetryAsleep(method, error, session, options) {
   if (options.allowWake === false || error?.code !== "BOX_ASLEEP" || !canAutoWake(session)) return false;
-  // A bare 417 is still BOX_ASLEEP, but sendPrompt resends only with positive sleep evidence.
-  if (method === "sendPrompt" && !sleepEvidence(error)) return false;
+  if (!BARE_417_WAKE_METHODS.has(method) && !sleepEvidence(error)) return false;
   return true;
 }
 

@@ -41,7 +41,7 @@ function readBody(req) {
   });
 }
 
-async function fixture(handler) {
+async function fixture(handler, { gatewayOnServer = false } = {}) {
   const server = createServer(handler);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -54,7 +54,7 @@ async function fixture(handler) {
     entries: {
       [SCOPE]: {
         encrypted: encryptEntry({
-          baseUrl: "https://fake-wake.example",
+          baseUrl: gatewayOnServer ? `http://127.0.0.1:${server.address().port}` : "https://fake-wake.example",
           token: "descriptor-gateway-token-unused",
           headers: {},
           email: "wake-cli@example.com",
@@ -83,7 +83,10 @@ async function fixture(handler) {
   return {
     env,
     server,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () => new Promise((resolve) => {
+      server.closeAllConnections?.();
+      server.close(resolve);
+    }),
   };
 }
 
@@ -318,5 +321,99 @@ test("gbot wake prints backend errors without control characters and keeps the f
     assertNoSecrets(result);
   } finally {
     await failed.close();
+  }
+});
+
+test("gbot wake reports RUNNING when EnsureSandBox has gateway fields and no runState", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  let listed = 0;
+  const fx = await fixture(async (req, res) => {
+    await readBody(req);
+    if (String(req.url).includes("EnsureSandBox")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        gatewayUrl: `http://127.0.0.1:${fx.server.address().port}`,
+        gatewayToken: GATEWAY_TOKEN,
+        networkToken: NETWORK,
+      }));
+      return;
+    }
+    listed += 1;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ agents: [{ id: "bot-1", name: "General" }] }));
+  });
+  try {
+    const result = await run(["wake", "--json"], fx.env);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.before, "unknown");
+    assert.equal(payload.after, "RUNNING");
+    assert.equal(payload.exitCode, 0);
+    assert.equal(listed, 1);
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("gbot wake exits 4 when the wake budget runs out before the box answers", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  const fx = await fixture(async (req, res) => {
+    const body = await readBody(req);
+    if (body.wake === false) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ runState: "SAND_BOX_RUN_STATE_HIBERNATED" }));
+      return;
+    }
+    await new Promise(() => {});
+  });
+  try {
+    const result = await run(["wake", "--json"], {
+      ...fx.env,
+      GBOT_WAKE_TIMEOUT_MS: "200",
+      GBOT_WAKE_POLL_MS: "20",
+    });
+    assert.equal(result.status, 4, result.stdout + result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.exitCode, 4);
+    assert.equal(payload.before, "HIBERNATED");
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("gbot send --json includes wake and failureReason when auto wake fails", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  const fx = await fixture(async (req, res) => {
+    const url = String(req.url);
+    await readBody(req);
+    if (url.includes("EnsureSandBox")) {
+      res.statusCode = 500;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "backend down" }));
+      return;
+    }
+    if (url === "/api/listAgents") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ agents: [{ id: "bot-1", name: "General", isGroup: false }] }));
+      return;
+    }
+    res.statusCode = 417;
+    res.setHeader("x-anyrun-failure-reason", "pod_hibernated");
+    res.end();
+  }, { gatewayOnServer: true });
+  try {
+    const result = await run(["send", "General", "hello", "--json"], fx.env);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.failureReason, "pod_hibernated");
+    assert.deepEqual(payload.wake, { attempted: true, error: "WAKE_FAILED" });
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
   }
 });
