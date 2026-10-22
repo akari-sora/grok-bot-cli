@@ -25,6 +25,25 @@ export const ALREADY_SENT_NOTICE = "The session was already sent; the watch may 
 const PAIR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 /**
+ * `import.meta.main` is required by the generated CLI. Node 23 and Node 24.0–24.1
+ * leave it undefined, which would otherwise make the child exit successfully
+ * without running a command.
+ */
+export function requireLauncherRuntime(mainValue, {
+  nodeVersion = process.versions.node,
+  writeError = (message) => process.stderr.write(message),
+  setExitCode = (code) => { process.exitCode = code; },
+} = {}) {
+  if (typeof mainValue === "boolean") return mainValue;
+  writeError(
+    `gbot cannot run on Node.js ${nodeVersion}: import.meta.main is unavailable. `
+      + "Use Node.js 22.19+ (22.x) or Node.js 24.2+.\n",
+  );
+  setExitCode(1);
+  return false;
+}
+
+/**
  * True when argv carries `--code` or `--code=…` anywhere (any command, any position, also after `--`) outside
  * GROK_BOT_TEST=1. Only `wear pair` has a `--code` option, and it is for tests; refusing it everywhere means a
  * production pairing code never reaches a worker's argv, however the command line is arranged.
@@ -351,6 +370,5 @@ async function main() {
 }
 
 // Run only as the executable (also through npm's bin symlink); importing this file for tests runs nothing.
-// import.meta.main exists on every Node this package supports (engines >= 22.19.0); older Nodes leave it
-// undefined and still run.
-if (import.meta.main !== false) await main();
+// The engine contract is Node 22.19+ (22.x) or Node 24.2+, where import.meta.main is always boolean.
+if (requireLauncherRuntime(import.meta.main)) await main();

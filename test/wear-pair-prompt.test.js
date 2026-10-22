@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import {
   PAIR_CODE_MAX,
   refusesCodeFlag,
+  requireLauncherRuntime,
   UNKNOWN_OUTCOME_TEXT,
   makePairDir,
   readHiddenCode,
@@ -200,6 +201,21 @@ test("sent marker and the wrapper's unknown result in every output mode", (t) =>
 test("importing the wrapper runs nothing", () => {
   // This file imported bin/gbot.mjs above; had main() run, it would have spawned dist/bin/gbot.mjs and exited.
   assert.equal(typeof readHiddenCode, "function");
+});
+
+test("the launcher rejects a runtime without import.meta.main", () => {
+  let stderr = "";
+  let exitCode;
+  const isMain = requireLauncherRuntime(undefined, {
+    nodeVersion: "24.1.0",
+    writeError: (message) => { stderr += message; },
+    setExitCode: (code) => { exitCode = code; },
+  });
+  assert.equal(isMain, false);
+  assert.equal(exitCode, 1);
+  assert.match(stderr, /Node\.js 24\.1\.0/);
+  assert.match(stderr, /import\.meta\.main is unavailable/);
+  assert.match(stderr, /22\.19\+ \(22\.x\).*24\.2\+/);
 });
 
 // --- One real pseudo-terminal run through script(1) ---------------------------------------------------------------

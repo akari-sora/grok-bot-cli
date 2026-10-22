@@ -12,7 +12,7 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 ### Install
 
-Requires Node.js 22.19.0 or newer and the Grok Bot desktop app signed in once on the same OS user.
+Use Node.js 22.19+ (22.x) or 24.2+, with the Grok Bot desktop app signed in once on the same OS user. The generated CLI uses [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain), which is absent in Node 23 and Node 24.0–24.1; the launcher rejects those versions with a nonzero exit and a version diagnostic.
 
 Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.4` release and install that file.
 
@@ -202,7 +202,7 @@ Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. 
 
 The watch app is [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) (unofficial; download the APK from its [releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases), step-by-step install in its [install guide](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md), in Traditional Chinese).
 
-`wear pair` ships in `v0.11.2-iml1s.4` and later. Install that release as in [Install](#install) (Node.js 22.19.0 or newer; the Grok Bot desktop app signed in on this computer), then check the login before pairing:
+`wear pair` ships in `v0.11.2-iml1s.4` and later. Install that release as in [Install](#install) (the Node.js versions listed in [Install](#install); the Grok Bot desktop app signed in on this computer), then check the login before pairing:
 
 ```sh
 gbot accounts                        # saved logins, no credentials
@@ -294,11 +294,19 @@ Use this fork with trinity-cli: https://gitlab.com/aa22396584/trinity-cli
 
 | OS | Node.js | Status | Evidence |
 | --- | --- | --- | --- |
-| macOS | 22.19+ and 24 | Supported | Checked locally: unit, route, and type checks |
-| Linux | 22.19+ | Supported | Unit tests in GitLab CI (`node:22-slim`). 23 desktop-shim tests skip because the image has no `python3` |
-| Windows | 22.19+ | Supported except Codex/Claude channels and the relay | Unit tests in GitLab CI. Unix-socket suites skip, listed below |
+| macOS | 22.19+ (22.x) or 24.2+ | Supported | Checked locally: unit, route, and type checks |
+| Linux | 22.19+ (22.x) | Supported | GitLab CI (`node:22-slim`): 696 tests, 671 pass, 0 fail, 25 skip (23 need Python; 2 use macOS-shaped descriptors) |
+| Windows | 22.19+ (22.x) or 24.2+ | Supported except Codex/Claude channels and the relay | GitLab CI and isolated full CI script: 696 tests, 386 pass, 0 fail, 310 platform skips |
 
 CI uses GitLab.com runners by default. Maintainers can point jobs at their own runners by setting the CI/CD variables `LINUX_RUNNER_TAG` and `WINDOWS_RUNNER_TAG`. Linux unit tests run in CI (`node:22-slim`). Windows unit tests run when that runner is available. macOS is checked locally. Both jobs pass the same `test/*.test.js` list to `node --test`. Tracked text stays LF (`.gitattributes`), so a Windows checkout does not rewrite plugin command frontmatter to CRLF. The Windows unit job loads the MCP client with a `file://` URL because Node rejects a `C:` path in `import()`. Upstream Codex and Claude sockets stay Unix-only.
+
+### Account profile verification (2026-10-22)
+
+[MR !7](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/7), source `c7f18c6b7fbe4a982097eb58c64471c6eb6a7f62`, merged as `74704f554227fe71641af924b17ddadc3859e019`; both commits have the same Git tree. On macOS, the unit suite passed 695/695 and the route suite passed 94/94. Source validation, artifact build/validation, typecheck, and the three release configuration checks passed. Independent native review approved the final candidate. Claude and agy review attempts were blocked by quota/credits and supplied no approval.
+
+Linux passed on both the [source pipeline](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines/2974528600) and the [merged-main job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17368454058): 695 tests, 670 pass, 0 fail, 25 environment skips. The final runtime candidate passed 696/696 unit tests and 94/94 route tests on macOS. An isolated Windows run of the full CI script passed: 696 tests, 386 pass, 0 fail, 310 platform skips. With the normal `APPDATA` preserved, it detected that Node 24.1 lacks `import.meta.main`, downloaded Node 22.23.4, verified its SHA-256, and completed install, build, and tests; the job-owned runtime directory was removed. The fixture environments now isolate both `APPDATA` and `XDG_CONFIG_HOME`. The original protected `hx370` GitLab runner was offline during initial validation, and the optional hosted job exhausted its CI quota. The same runtime fixes at `113e1c671eaf882b792888416260468f47d331b1` also passed [pipeline 2974718228](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines/2974718228): [Linux job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17369336982), 696 tests / 671 pass / 0 fail / 25 skip; [Windows job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17369336988), 696 tests / 386 pass / 0 fail / 310 skip. Both jobs ran on temporary project runners; the original pending main Windows job was canceled as superseded, rather than counted as passing.
+
+These checks use synthetic account fixtures. They do not prove a live account switch, Windows saved-login decryption, or a PowerShell installer run; the PowerShell installer checks remain static. No global CLI installation or npm publication was performed.
 
 ### Windows limitations
 
@@ -324,7 +332,7 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 ### 安裝
 
-需要 Node.js 22.19.0 以上，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
+使用 Node.js 22.19+（22.x）或 24.2+，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。產生的 CLI 使用 [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain)；Node 23 與 Node 24.0–24.1 沒有此功能，啟動器會以非零結束碼與版本說明拒絕執行。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
 
 不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.4` 附的套件檔再安裝。
 
@@ -514,7 +522,7 @@ gbot thread Researcher --after "<cursor>" --json
 
 手錶 App 是 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear)（非官方；APK 在它的 [Releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases)，逐步安裝見它的[安裝指南](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md)）。
 
-`wear pair` 從 `v0.11.2-iml1s.4` 起包含在套件裡。照上面的「安裝」裝好那個版本（Node.js 22.19.0 以上；這台電腦已登入 Grok Bot 桌面版），配對前先確認登入：
+`wear pair` 從 `v0.11.2-iml1s.4` 起包含在套件裡。照上面的「安裝」裝好那個版本（使用「安裝」所列的 Node.js 版本；這台電腦已登入 Grok Bot 桌面版），配對前先確認登入：
 
 ```sh
 gbot accounts                       # 列出存的登入，不印憑證
@@ -606,11 +614,19 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 
 | 系統 | Node.js | 狀態 | 依據 |
 | --- | --- | --- | --- |
-| macOS | 22.19+ 與 24 | 支援 | 在本機檢查：單元、路由、型別 |
-| Linux | 22.19+ | 支援 | GitLab CI 跑單元測試（`node:22-slim`）。映像檔沒有 `python3`，23 則 desktop-shim 測試略過 |
-| Windows | 22.19+ | 支援；Codex／Claude channel 與 relay 除外 | GitLab CI 跑單元測試。需要 Unix socket 的測試略過，清單在下面 |
+| macOS | 22.19+（22.x）或 24.2+ | 支援 | 在本機檢查：單元、路由、型別 |
+| Linux | 22.19+（22.x） | 支援 | GitLab CI（`node:22-slim`）：696 項，671 通過、0 失敗、25 略過（23 項需要 Python，2 項使用 macOS 格式 descriptor） |
+| Windows | 22.19+（22.x）或 24.2+ | 支援；Codex／Claude channel 與 relay 除外 | GitLab CI 與隔離完整 CI 腳本：696 項，386 通過、0 失敗、310 項平台條件略過 |
 
 CI 預設使用 GitLab.com 的 runner。維護者可設定 CI/CD 變數 `LINUX_RUNNER_TAG` 與 `WINDOWS_RUNNER_TAG`，把 job 指到自己的 runner。Linux 單元測試在 CI 跑（`node:22-slim`）。Windows 單元測試在該 runner 可用時執行。macOS 在本機確認。兩個 job 都把同一份 `test/*.test.js` 清單交給 `node --test`。追蹤的文字檔維持 LF（`.gitattributes`），Windows checkout 不會把 plugin 指令的 frontmatter 改成 CRLF。Windows 單元測試用 `file://` 載入 MCP client，因為 Node 的 `import()` 不接受 `C:` 路徑。上游的 Codex 與 Claude socket 仍只有 Unix。
+
+### 帳戶設定驗證（2026-10-22）
+
+[MR !7](https://gitlab.com/aa22396584/grok-bot-cli/-/merge_requests/7) 的 source `c7f18c6b7fbe4a982097eb58c64471c6eb6a7f62` 已合併為 `74704f554227fe71641af924b17ddadc3859e019`，兩者 Git tree 相同。macOS 單元測試 695/695、路由測試 94/94 通過；source validation、artifact 建置與驗證、型別檢查及三項 release configuration 檢查通過。native 獨立重審批准最終候選。Claude 與 agy 審查受額度或 credits 阻擋，沒有外部批准結論。
+
+Linux 的 [source pipeline](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines/2974528600) 與[合併後 main job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17368454058) 都通過：695 項，670 通過、0 失敗、25 項環境條件略過。最終 runtime 候選在 macOS 通過單元測試 696/696 與路由測試 94/94。隔離 Windows 環境實跑完整 CI 腳本通過：696 項，386 通過、0 失敗、310 項平台條件略過。保留正常 `APPDATA`，探測出 Node 24.1 缺少 `import.meta.main` 後，自動下載 Node 22.23.4、核對 SHA-256，完成安裝、建置與測試，並清除該次專屬 runtime 暫存。fixture 環境已隔離 `APPDATA` 與 `XDG_CONFIG_HOME`。初次驗證時，原 protected `hx370` GitLab runner 離線，可選 hosted job 的 CI 額度用盡。同一份 runtime 修正 `113e1c671eaf882b792888416260468f47d331b1` 的 [pipeline 2974718228](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelines/2974718228) 亦已通過：[Linux job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17369336982) 為 696 項、671 通過、0 失敗、25 略過；[Windows job](https://gitlab.com/aa22396584/grok-bot-cli/-/jobs/17369336988) 為 696 項、386 通過、0 失敗、310 略過。兩者使用本輪臨時專案 runner；原本排隊的 main Windows job 已因新修正取代而取消，沒有算成通過。
+
+上述帳戶檢查使用合成 fixture，沒有驗證真實帳戶切換、Windows 已存登入解密或 PowerShell 安裝器實跑；PowerShell 安裝器仍只有靜態檢查。本輪沒有全域安裝 CLI 或發布 npm。
 
 ### Windows 限制
 

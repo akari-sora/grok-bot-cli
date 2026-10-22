@@ -293,6 +293,8 @@ test("EnsureSandBox 401 no longer supported names the version gbot sent", async 
     await withEnv({
       HOME: home,
       USERPROFILE: home,
+      APPDATA: join(home, "AppData", "Roaming"),
+      XDG_CONFIG_HOME: join(home, ".config"),
       CURSOR_ACCESS_TOKEN: "cursor-access-token",
       CURSOR_API_BASE_URL: `http://127.0.0.1:${port}`,
       GROK_BOT_GATEWAY_URL: null,
