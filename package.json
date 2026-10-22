@@ -9,7 +9,7 @@
     "grok-bot": "./bin/gbot.mjs"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.2.0"
   },
   "scripts": {
     "build": "agent-bundle build",

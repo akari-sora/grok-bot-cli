@@ -115,6 +115,8 @@ function envFor(home, backend) {
   return {
     HOME: home,
     USERPROFILE: home,
+    APPDATA: join(home, "AppData", "Roaming"),
+    XDG_CONFIG_HOME: join(home, ".config"),
     CURSOR_API_BASE_URL: origin(backend),
     CURSOR_ACCESS_TOKEN: null,
     GROK_BOT_GATEWAY_URL: null,
