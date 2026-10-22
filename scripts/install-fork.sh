@@ -30,6 +30,10 @@ while [ $# -gt 0 ]; do
       ;;
     --)
       shift
+      if [ $# -gt 0 ]; then
+        ref=$1
+        shift
+      fi
       break
       ;;
     -*)
@@ -42,6 +46,26 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+case "$ref" in
+  -*)
+    echo "install-fork.sh: invalid ref" >&2
+    exit 2
+    ;;
+esac
+printf '%s' "$ref" | grep -Eq '^[A-Za-z0-9._/-]+$' || {
+  echo "install-fork.sh: invalid ref" >&2
+  exit 2
+}
+
+if [ -n "$config" ]; then
+  config_dir=$(CDPATH= cd -- "$(dirname "$config")" && pwd) || exit $?
+  config="$config_dir/$(basename "$config")"
+  if [ ! -f "$config" ] || [ ! -r "$config" ]; then
+    echo "install-fork.sh: config is not a readable file: $config" >&2
+    exit 2
+  fi
+fi
 
 if [ "$(id -u)" -eq 0 ] && [ "$allow_root" -ne 1 ]; then
   echo "install-fork.sh: refusing to run as root; pass --allow-root" >&2
@@ -77,7 +101,8 @@ print_plan() {
   if [ -n "$config" ]; then
     say "gbot config import $config"
   fi
-  for name in $(alias_names); do
+  names=$(alias_names) || exit $?
+  for name in $names; do
     say "gbot wake --check --account $name"
   done
   say "summary: install ref $ref from $repo"
@@ -89,24 +114,45 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 if [ -d "$cache/.git" ]; then
-  git -C "$cache" remote set-url origin "$repo"
-  git -C "$cache" fetch --tags origin
+  git -C "$cache" remote set-url origin "$repo" || exit $?
+  git -C "$cache" fetch --tags origin || exit $?
 else
-  mkdir -p "$(dirname "$cache")"
-  git clone "$repo" "$cache"
-fi
-git -C "$cache" checkout "$ref"
-if git -C "$cache" rev-parse --verify --quiet "origin/$ref" >/dev/null; then
-  git -C "$cache" merge --ff-only "origin/$ref"
+  mkdir -p "$(dirname "$cache")" || exit $?
+  git clone "$repo" "$cache" || exit $?
 fi
 
+dirty=$(git -C "$cache" status --porcelain) || exit $?
+if [ -n "$dirty" ]; then
+  echo "install-fork.sh: cache is dirty; refusing to overwrite $cache" >&2
+  exit 2
+fi
+
+sha=""
+if git -C "$cache" rev-parse --verify --quiet "refs/remotes/origin/$ref^{commit}" >/dev/null; then
+  sha=$(git -C "$cache" rev-parse --verify "refs/remotes/origin/$ref^{commit}") || exit $?
+elif git -C "$cache" rev-parse --verify --quiet "refs/tags/$ref^{commit}" >/dev/null; then
+  sha=$(git -C "$cache" rev-parse --verify "refs/tags/$ref^{commit}") || exit $?
+else
+  git -C "$cache" fetch origin -- "$ref" || exit $?
+  sha=$(git -C "$cache" rev-parse --verify "FETCH_HEAD^{commit}") || exit $?
+fi
+git -C "$cache" checkout --detach -- "$sha" || exit $?
+say "resolved commit $sha"
+
 cd "$cache"
-npm ci
-npm pack
-tarball=$(ls -1 grok-bot-cli-*.tgz | head -n 1)
-npm install -g "./$tarball"
-gbot --version
-gbot accounts
+npm ci || exit $?
+pack_dir=$(mktemp -d "${TMPDIR:-/tmp}/grok-bot-cli-pack.XXXXXX") || exit $?
+trap 'rm -rf -- "$pack_dir"' EXIT HUP INT TERM
+pack_out=$(npm pack --pack-destination "$pack_dir") || exit 1
+tarball=$(printf '%s\n' "$pack_out" | awk 'NF { line=$0 } END { print line }')
+tarball=$(basename "$tarball")
+if [ -z "$tarball" ] || [ ! -f "$pack_dir/$tarball" ]; then
+  echo "install-fork.sh: npm pack did not create $tarball" >&2
+  exit 1
+fi
+npm install -g "$pack_dir/$tarball" || exit $?
+gbot --version || exit $?
+gbot accounts || true
 
 import_status=0
 if [ -n "$config" ]; then
@@ -114,17 +160,21 @@ if [ -n "$config" ]; then
   gbot config import "$config"
   import_status=$?
   set -e
-  if [ "$import_status" -eq 2 ]; then
-    exit 2
+  if [ "$import_status" -ne 0 ] && [ "$import_status" -ne 3 ]; then
+    exit "$import_status"
   fi
 fi
 
-for name in $(alias_names); do
+names=$(alias_names) || exit $?
+for name in $names; do
   set +e
   gbot wake --check --account "$name"
   status=$?
   set -e
-  printf 'wake %s exit %s\n' "$name" "$status"
+  if [ "$status" -ne 0 ]; then
+    printf 'wake %s exit %s\n' "$name" "$status" >&2
+    exit "$status"
+  fi
 done
 
 if [ "$import_status" -eq 3 ]; then

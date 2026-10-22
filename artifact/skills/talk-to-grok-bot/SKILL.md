@@ -12,7 +12,7 @@ Reply in the user's language.
 
 Fork CLI (this install is ImL1s's fork; details in `FORK.md`):
 
-1. If several Grok Bot logins are saved, pass `--account <label>` after the subcommand, or set `GBOT_ACCOUNT`. `gbot accounts` lists labels only. `gbot --account` before the subcommand is an unknown option.
+1. If several Grok Bot logins are saved, pass `--account <alias-email-or-label>` after the subcommand, or set `GBOT_ACCOUNT`. `gbot accounts` lists each login's label, email, and alias. `gbot --account` before the subcommand is an unknown option.
 2. Send exact text with `gbot send <bot> --stdin` (default off). Do not combine it with a positional message.
 3. Read with `gbot --json thread <bot> --normalized` (default off; requires `--json`) or `gbot thread <bot> --after <cursor> --json`. `--after` JSON includes `cursor`, `entryCount`, and `gapReset`.
 4. A send that returns `delivery: "unknown"` may have landed. Read the thread. Do not send again.

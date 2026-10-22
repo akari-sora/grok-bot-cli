@@ -12217,10 +12217,15 @@ var __webpack_modules__ = {
         });
         const respondSchema = _grok_approvals_js__rspack_import_1.T5;
         const resultSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP(), zod__rspack_import_3.Pq9());
-        const listOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)(), listSchema.parse(input).target));
+        const accountScope = ()=>process.env.GBOT_ACCOUNT_SCOPE || undefined;
+        const listOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)({
+                    account: accountScope()
+                }), listSchema.parse(input).target));
         const respondOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>{
                 const { target, ...response } = respondSchema.parse(input);
-                return (0, _gateway_js__rspack_import_0.OR)(await (0, _gateway_js__rspack_import_0.Vq)(), target, response);
+                return (0, _gateway_js__rspack_import_0.OR)(await (0, _gateway_js__rspack_import_0.Vq)({
+                    account: accountScope()
+                }), target, response);
             });
         __webpack_require__.d(__webpack_exports__, {}, {
             FD: resultSchema,
@@ -12326,7 +12331,9 @@ var __webpack_modules__ = {
                 }, options(context)));
             if (input.replyMode === "auto") throw Error("Automatic reply delivery requires a native Codex source, codexThreadId or bindingId");
             const message = input.hop !== undefined || input.correlationId !== undefined ? (0, _codex_bridge_js__rspack_import_2.Mr)(input.message, (0, _codex_bridge_js__rspack_import_2.nq)(input)) : input.message;
-            const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)(), input.target, message));
+            const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)({
+                    account: process.env.GBOT_ACCOUNT_SCOPE || undefined
+                }), input.target, message));
             return {
                 result: sent.result,
                 target: (0, _gbot_js__rspack_import_1.rW)(sent.target),
@@ -13868,7 +13875,9 @@ var __webpack_modules__ = {
             }),
             title: 'Read a Grok Bot thread'
         }, async ({ after, limit, target, full })=>{
-            const tail = await (0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gbot_js__rspack_import_2.bA)(await (0, _gbot_js__rspack_import_2.Vq)(), target, limit));
+            const tail = await (0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gbot_js__rspack_import_2.bA)(await (0, _gbot_js__rspack_import_2.Vq)({
+                    account: process.env.GBOT_ACCOUNT_SCOPE || undefined
+                }), target, limit));
             const delta = (0, _gbot_js__rspack_import_2.N3)(tail.transcript, {
                 after,
                 limit
@@ -24433,12 +24442,13 @@ var __webpack_modules__ = {
         var node_os__rspack_import_2 = __webpack_require__("node:os");
         var node_path__rspack_import_3 = __webpack_require__("node:path");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _url_policy_js__rspack_import_5 = __webpack_require__("./src/core/url-policy.js");
         const secretFiles = {
             readFileSync: node_fs__rspack_import_1.readFileSync
         };
         class AppAuthError extends Error {
             constructor(code, message){
-                super(message);
+                super((0, _url_policy_js__rspack_import_5.fp)(message));
                 this.name = "AppAuthError";
                 this.code = code;
             }
@@ -24790,9 +24800,11 @@ var __webpack_modules__ = {
             }
             return unprotectData(blob.subarray(5));
         }
-        function listGrokBotGatewayAccounts(options = {}) {
+        function loadGatewayRows(options = {}) {
             if (!hasGrokBotGatewaySession1(options)) return [];
             const { platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, appData, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = options;
+            const password = once(getKeychainPassword);
+            const unprotect = once(unprotectData);
             const effectiveEnv = sessionEnv({
                 env,
                 appData
@@ -24803,14 +24815,17 @@ var __webpack_modules__ = {
                     platform,
                     home,
                     env: effectiveEnv,
-                    getKeychainPassword,
-                    unprotectData
+                    getKeychainPassword: password,
+                    unprotectData: unprotect
                 });
             const rows = decorateEntries(savedEntries(wrapped), decrypt).map((row)=>({
                     ...row,
                     usable: row.descriptor != null && !row.decryptError
                 }));
-            return markLastSaved(rows).map((row)=>({
+            return markLastSaved(rows);
+        }
+        function listGrokBotGatewayAccounts(options = {}) {
+            return loadGatewayRows(options).map((row)=>({
                     id: row.id,
                     label: row.label,
                     ...row.savedAtMs !== undefined ? {
@@ -24818,6 +24833,18 @@ var __webpack_modules__ = {
                     } : {},
                     lastSaved: row.lastSaved,
                     usable: row.usable
+                }));
+        }
+        function listGrokBotGatewayAccountSources(options = {}) {
+            return loadGatewayRows(options).map((row)=>({
+                    id: row.id,
+                    label: row.label,
+                    ...row.savedAtMs !== undefined ? {
+                        savedAtMs: row.savedAtMs
+                    } : {},
+                    lastSaved: row.lastSaved,
+                    usable: row.usable,
+                    descriptor: row.descriptor ?? null
                 }));
         }
         function decryptGrokBotSafeStorage(encrypted, { platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
@@ -24951,6 +24978,9 @@ var __webpack_modules__ = {
                 };
             });
         }
+        function maskLoginSecrets(rows) {
+            return maskSecretAliases(rows);
+        }
         function chooseSavedEntryByFlag(rows, selector) {
             if (rows.length === 0) {
                 throw new GrokBotGatewaySessionError("EMPTY_ENTRIES", "Grok Bot gateway descriptor has no saved gateway entries.");
@@ -25037,10 +25067,11 @@ var __webpack_modules__ = {
             }
         }
         __webpack_require__.d(__webpack_exports__, {
+            If: ()=>listGrokBotGatewayAccountSources,
             KK: ()=>decryptGrokBotSafeStorage,
-            Nn: ()=>listGrokBotGatewayAccounts,
             Z2: ()=>loadGrokBotGatewaySession,
             ZN: ()=>hasGrokBotGatewaySession1,
+            bI: ()=>maskLoginSecrets,
             dQ: ()=>grokBotGatewayDescriptorPath1
         });
     },
@@ -28282,7 +28313,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _grok_approvals_js__rspack_import_9 = __webpack_require__("./src/core/grok-approvals.js");
         class GatewayError extends Error {
             constructor(message, info = {}){
-                super(message);
+                super((0, _url_policy_js__rspack_import_8.fp)(message));
                 this.name = "GatewayError";
                 this.status = info.status;
                 this.method = info.method;
@@ -28386,7 +28417,75 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             });
             return loaded ? sessionFields(loaded) : null;
         }
+        const IMPLICIT_AUTH_FAILURES = new Set([
+            "EXPIRED",
+            "DECRYPT_FAILED",
+            "NOT_JWT",
+            "NO_ACCOUNT",
+            "NO_SECRETS_FILE",
+            "UNSUPPORTED_VERSION",
+            "SCOPE_MISMATCH",
+            "UNUSABLE_SESSION",
+            "MISSING_ENCRYPTED_PAYLOAD",
+            "INCOMPLETE_DESCRIPTOR",
+            "UNREADABLE_ENTRIES",
+            "EMPTY_ENTRIES",
+            "MISSING_SAFE_STORAGE_KEY"
+        ]);
+        function implicitAuthFallback(error) {
+            if (!accessTokenFromEnv()) return false;
+            if (error instanceof GatewayError && (error.status || error.method === "EnsureSandBox")) return false;
+            if (/Rejected /.test(String(error?.message ?? ""))) return false;
+            if (typeof error?.code === "string" && IMPLICIT_AUTH_FAILURES.has(error.code)) return true;
+            return /could not decrypt|Safe Storage|bad decrypt/i.test(String(error?.message ?? ""));
+        }
+        function scrubOutbound(error, secrets) {
+            const message = (0, _url_policy_js__rspack_import_8.Ok)(error instanceof Error ? error.message : String(error), secrets);
+            if (error instanceof GatewayError) {
+                if (message === error.message) return error;
+                const next = new GatewayError(message, {
+                    status: error.status,
+                    method: error.method,
+                    code: error.code,
+                    effect: error.effect,
+                    failureCode: error.failureCode,
+                    kind: error.kind,
+                    wake: error.wake,
+                    failureReason: error.failureReason,
+                    runState: error.runState
+                });
+                if (error.delivery) next.delivery = error.delivery;
+                if (error.reason) next.reason = error.reason;
+                return next;
+            }
+            if (error instanceof _app_auth_js__rspack_import_2.yc) return new _app_auth_js__rspack_import_2.yc(error.code, message);
+            return new GatewayError(message, error?.code ? {
+                code: error.code
+            } : {});
+        }
+        const sessionsByScope = new Map();
+        function sessionCacheKey(scope) {
+            return [
+                scope,
+                process.env.HOME || "",
+                process.env.USERPROFILE || "",
+                process.env.GBOT_CONFIG || "",
+                process.env.CURSOR_API_BASE_URL || ""
+            ].join("\0");
+        }
+        function rememberSession(session) {
+            if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+                sessionsByScope.set(sessionCacheKey(session.accountScope), session);
+            }
+            return session;
+        }
+        function cachedSession(scope) {
+            if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
+            return sessionsByScope.get(sessionCacheKey(scope)) ?? null;
+        }
         async function sessionFromSavedLogin(scope, signal) {
+            const cached = cachedSession(scope);
+            if (cached) return cached;
             let loaded;
             try {
                 loaded = (0, _app_auth_js__rspack_import_2.zM)({
@@ -28396,7 +28495,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     ...(0, _secret_store_js__rspack_import_10.Ih)()
                 });
             } catch (error) {
-                throw toGatewayError(error);
+                throw scrubOutbound(toGatewayError(error), []);
             }
             let described;
             try {
@@ -28405,19 +28504,40 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     appLogin: true
                 });
             } catch (error) {
-                throw toGatewayError(error);
+                throw scrubOutbound(error, [
+                    loaded.token
+                ]);
             }
             const running = described?.runState === "RUNNING" && described.gatewayUrl && described.gatewayToken;
-            const sandbox = running ? described : await wakeSandbox(loaded.token, {
-                signal,
-                appLogin: true
-            });
-            return {
+            let sandbox = described;
+            if (!running) {
+                if (!autoWakeEnabled()) {
+                    throw new GatewayError("The Grok Bot box for this login is asleep and GBOT_AUTO_WAKE=0.", {
+                        code: "BOX_ASLEEP",
+                        method: "EnsureSandBox",
+                        ...described?.runState ? {
+                            runState: described.runState
+                        } : {}
+                    });
+                }
+                try {
+                    sandbox = await wakeSandbox(loaded.token, {
+                        signal,
+                        appLogin: true
+                    });
+                } catch (error) {
+                    throw scrubOutbound(error, [
+                        loaded.token,
+                        described?.gatewayToken
+                    ]);
+                }
+            }
+            return rememberSession({
                 gatewayUrl: sandbox.gatewayUrl,
                 gatewayToken: sandbox.gatewayToken,
                 gatewayHeaders: sandbox.gatewayHeaders,
                 accountScope: scope
-            };
+            });
         }
         async function sessionFromApp(account, signal) {
             let choice;
@@ -28427,31 +28547,44 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     ...(0, _secret_store_js__rspack_import_10.Ih)()
                 });
             } catch (error) {
-                if (accessTokenFromEnv()) return null;
-                throw toGatewayError(error);
+                throw scrubOutbound(toGatewayError(error), []);
+            }
+            if (choice?.scope) {
+                const cached = cachedSession(choice.scope);
+                if (cached) return cached;
             }
             if (!choice) {
                 try {
-                    return descriptorSession(account);
+                    return rememberSession(descriptorSession(account));
                 } catch (error) {
-                    if (accessTokenFromEnv()) return null;
-                    throw toGatewayError(error);
+                    if (implicitAuthFallback(error)) return null;
+                    throw scrubOutbound(toGatewayError(error), []);
                 }
             }
-            if (choice.hasDescriptorEntry) {
-                try {
-                    return descriptorSession(choice.id);
-                } catch (error) {
-                    if (accessTokenFromEnv()) return null;
-                    throw toGatewayError(error);
+            try {
+                if (choice.hasDescriptorEntry) {
+                    let session = descriptorSession(choice.id);
+                    if (!session) {
+                        throw new GatewayError("The selected Grok Bot login could not be read.", {
+                            code: "UNUSABLE_SESSION"
+                        });
+                    }
+                    if (choice.scope && !session.accountScope) session = {
+                        ...session,
+                        accountScope: choice.scope
+                    };
+                    return rememberSession(session);
                 }
+                return await sessionFromSavedLogin(choice.scope, signal);
+            } catch (error) {
+                if (choice.selectedBy !== "selector" && implicitAuthFallback(error)) return null;
+                throw scrubOutbound(error, []);
             }
-            return sessionFromSavedLogin(choice.scope, signal);
         }
         function hasGatewayAuth() {
             if (gatewayOverride() || accessTokenFromEnv() || hasGrokBotGatewaySession()) return true;
             try {
-                return listSavedLogins().some((row)=>row.hasToken);
+                return hasSavedAccessToken();
             } catch  {
                 return false;
             }
@@ -28592,9 +28725,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 body = await readJson(res);
             } catch (error) {
                 assertGatewayActive(signal);
-                throw error;
+                const secrets = collectSandboxSecrets(accessToken, null);
+                if (isDeadlineError(error) || signal?.aborted) {
+                    if (error instanceof Error) {
+                        const redacted = (0, _url_policy_js__rspack_import_8.Ok)(error.message, secrets);
+                        if (redacted !== error.message) error.message = redacted;
+                    }
+                    throw error;
+                }
+                throw scrubOutbound(error, secrets);
             }
             assertGatewayActive(signal);
+            const secrets = collectSandboxSecrets(accessToken, body);
             if (!res.ok) {
                 let detail = body.message || body.error || body.raw || res.statusText;
                 if (res.status === 401 && /no longer supported/i.test(String(detail))) {
@@ -28602,16 +28744,36 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     detail = `${detail} (gbot sent x-cursor-client-version ${version}; set SAND_CLIENT_VERSION to override)`;
                     (0, _client_version_js__rspack_import_3.ZF)();
                 }
-                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_8.fp)(detail), {
+                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_8.Ok)(detail, secrets), {
                     status: res.status,
                     method: "EnsureSandBox"
                 });
             }
-            const fields = sandboxFields(body);
-            return {
-                ...fields,
-                runState: normalizeRunState(pick(body, "runState", "run_state"))
+            try {
+                const fields = sandboxFields(body);
+                return {
+                    ...fields,
+                    runState: normalizeRunState(pick(body, "runState", "run_state"))
+                };
+            } catch (error) {
+                throw scrubOutbound(error, secrets);
+            }
+        }
+        function collectSandboxSecrets(accessToken, body) {
+            const secrets = [];
+            const add = (value)=>{
+                if (typeof value === "string" && value.length >= 8 && !secrets.includes(value)) secrets.push(value);
             };
+            add(accessToken);
+            if (!body || typeof body !== "object") return secrets;
+            for (const [key, value] of Object.entries(body)){
+                if (typeof value === "string" && /token|authorization|cookie/i.test(key)) add(value);
+            }
+            const headers = body.headers || body.gatewayHeaders || body.gateway_headers;
+            if (headers && typeof headers === "object") {
+                for (const value of Object.values(headers))add(value);
+            }
+            return secrets;
         }
         function abortableSleep(ms, signal) {
             if (signal?.aborted) {
@@ -28719,7 +28881,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             assertGatewayActive(signal);
             const override = gatewayOverride();
             if (override) return override;
-            const fromApp = await sessionFromApp(account, signal);
+            const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
+            const selected = typeof account === "string" && account.trim() ? account.trim() : /^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined;
+            const fromApp = await sessionFromApp(selected, signal);
             if (fromApp) return fromApp;
             const token = accessTokenFromEnv();
             if (!token) {
@@ -29451,8 +29615,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_os__rspack_import_2 = __webpack_require__("node:os");
         var node_path__rspack_import_3 = __webpack_require__("node:path");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _url_policy_js__rspack_import_5 = __webpack_require__("./src/core/url-policy.js");
         const NAME = /^[A-Za-z0-9_-]{1,32}$/;
+        const writeIo = null && {
+            renameSync: (from, to)=>fs.renameSync(from, to)
+        };
         const SCOPE = /^[0-9a-f]{64}$/;
+        const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
         const ALLOWED = new Set([
             "version",
             "aliases",
@@ -29461,7 +29631,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         ]);
         function readPackageVersion() {
             try {
-                return JSON.parse((0, node_fs__rspack_import_1.readFileSync)(new URL("../../package.json", import.meta.url), "utf8")).version;
+                return JSON.parse(node_fs__rspack_import_1.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
             } catch  {
                 return "0.11.2";
             }
@@ -29475,10 +29645,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 this.code = code;
             }
         }
+        function isReservedAliasName1(name) {
+            return name === "__proto__" || name === "constructor" || name === "prototype" || Object.hasOwn(Object.prototype, name);
+        }
         function emptyGbotConfig() {
             return {
                 version: 1,
-                aliases: {},
+                aliases: Object.create(null),
                 default: null
             };
         }
@@ -29495,6 +29668,20 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function invalid(message) {
             return new GbotConfigError1(message);
         }
+        function copyAliases(source) {
+            const aliases = Object.create(null);
+            if (!source || typeof source !== "object") return aliases;
+            for (const name of Object.keys(source)){
+                aliases[name] = source[name];
+            }
+            return aliases;
+        }
+        function storedEmail(name, email) {
+            if (typeof email !== "string" || !email.trim() || email.length > 120 || CONTROL.test(email) || !EMAIL.test(email.trim())) {
+                throw invalid(`Alias "${name}" has an unusable email.`);
+            }
+            return email.trim();
+        }
         function validateGbotConfig(value) {
             if (!value || typeof value !== "object" || Array.isArray(value)) {
                 throw invalid("Config must be a JSON object.");
@@ -29503,15 +29690,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (!ALLOWED.has(key)) throw invalid(`Config has an unknown field "${key}".`);
             }
             if (value.version !== undefined && value.version !== 1) throw invalid("Config version must be 1.");
+            if (value.gbotVersion !== undefined && (typeof value.gbotVersion !== "string" || CONTROL.test(value.gbotVersion))) {
+                throw invalid("Config gbotVersion must be a string.");
+            }
             if (!value.aliases || typeof value.aliases !== "object" || Array.isArray(value.aliases)) {
                 throw invalid("Config aliases must be an object.");
             }
             if (!(value.default === null || typeof value.default === "string")) {
                 throw invalid("Config default must be an alias name or null.");
             }
-            const aliases = {};
-            for (const [name, alias] of Object.entries(value.aliases)){
-                if (!NAME.test(name)) throw invalid(`Alias name "${name}" must match ${NAME}.`);
+            const aliases = Object.create(null);
+            for (const name of Object.keys(value.aliases)){
+                const alias = value.aliases[name];
+                if (isReservedAliasName1(name) || !NAME.test(name)) {
+                    throw invalid(`Alias name "${name}" must match ${NAME} and must not be a prototype key.`);
+                }
                 if (!alias || typeof alias !== "object" || Array.isArray(alias)) {
                     throw invalid(`Alias "${name}" must be an object.`);
                 }
@@ -29524,15 +29717,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 const stored = {
                     scope: alias.scope
                 };
-                if (alias.email !== undefined) {
-                    if (typeof alias.email !== "string" || !alias.email.trim() || alias.email.length > 120) {
-                        throw invalid(`Alias "${name}" has an unusable email.`);
-                    }
-                    stored.email = alias.email.trim();
-                }
+                if (alias.email !== undefined) stored.email = storedEmail(name, alias.email);
                 aliases[name] = stored;
             }
-            if (value.default !== null && !aliases[value.default]) {
+            if (value.default !== null && (isReservedAliasName1(value.default) || !Object.hasOwn(aliases, value.default))) {
                 throw invalid(`Config default "${value.default}" is not an alias.`);
             }
             return {
@@ -29545,7 +29733,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const path = gbotConfigPath(options);
             let text;
             try {
-                text = (0, node_fs__rspack_import_1.readFileSync)(path, "utf8");
+                text = node_fs__rspack_import_1.readFileSync(path, "utf8");
             } catch (error) {
                 if (error && error.code === "ENOENT") return emptyGbotConfig();
                 throw invalid("Could not read the gbot config file.");
@@ -29557,43 +29745,53 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 throw invalid("Config file is not valid JSON.");
             }
         }
-        function writeGbotConfig1(document, options = {}) {
-            const stored = validateGbotConfig(document);
-            const path = gbotConfigPath(options);
-            mkdirSync(dirname(path), {
+        function writeAtomicFile(path, contents) {
+            fs.mkdirSync(dirname(path), {
                 recursive: true,
                 mode: 448
             });
             const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-            writeFileSync(tmp, `${JSON.stringify(stored, null, 2)}\n`, {
-                mode: 384
-            });
+            const fd = fs.openSync(tmp, "wx", 384);
             try {
-                renameSync(tmp, path);
+                const data = Buffer.from(contents);
+                let offset = 0;
+                while(offset < data.length)offset += fs.writeSync(fd, data, offset);
+                fs.fsyncSync(fd);
+            } catch (error) {
+                fs.closeSync(fd);
+                try {
+                    fs.unlinkSync(tmp);
+                } catch  {}
+                throw error;
+            }
+            fs.closeSync(fd);
+            try {
+                writeIo.renameSync(tmp, path);
             } catch (error) {
                 try {
-                    writeFileSync(path, readFileSync(tmp));
+                    fs.unlinkSync(tmp);
                 } catch  {}
                 throw error;
             }
             try {
-                chmodSync(path, 384);
+                fs.chmodSync(path, 384);
             } catch  {}
+            try {
+                const dirfd = fs.openSync(dirname(path), "r");
+                try {
+                    fs.fsyncSync(dirfd);
+                } catch  {}
+                fs.closeSync(dirfd);
+            } catch  {}
+        }
+        function writeGbotConfig1(document, options = {}) {
+            const stored = validateGbotConfig(document);
+            const path = gbotConfigPath(options);
+            writeAtomicFile(path, `${JSON.stringify(stored, null, 2)}\n`);
             return stored;
         }
         function writePrivateJson(path, value) {
-            mkdirSync(dirname(path), {
-                recursive: true,
-                mode: 448
-            });
-            const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-            writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, {
-                mode: 384
-            });
-            renameSync(tmp, path);
-            try {
-                chmodSync(path, 384);
-            } catch  {}
+            writeAtomicFile(path, `${JSON.stringify(value, null, 2)}\n`);
         }
         function exportAccountConfig(options = {}) {
             const current = readGbotConfig1(options);
@@ -29609,7 +29807,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function signedInScopes(options) {
             try {
                 const path = join(dirname(grokBotGatewayDescriptorPath(options.home ?? homedir(), options.platform ?? process.platform, options.env ?? process.env)), "sand-secrets.json");
-                const secrets = JSON.parse(readFileSync(path, "utf8"));
+                const secrets = JSON.parse(fs.readFileSync(path, "utf8"));
                 const accounts = JSON.parse(secrets["cursor-accounts"]);
                 return new Set(Object.keys(accounts?.accounts ?? {}).filter((key)=>SCOPE.test(key)));
             } catch  {
@@ -29627,7 +29825,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             let parsed;
             try {
-                parsed = JSON.parse(readFileSync(file, "utf8"));
+                parsed = JSON.parse(fs.readFileSync(file, "utf8"));
             } catch (error) {
                 const missing = error && error.code === "ENOENT";
                 return {
@@ -29645,26 +29843,51 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 return {
                     exitCode: 2,
                     messages: [
-                        message
+                        printableText(message)
                     ]
                 };
             }
-            const current = replace ? emptyGbotConfig() : readGbotConfig1(options);
-            const aliases = replace ? incoming.aliases : {
-                ...current.aliases,
-                ...incoming.aliases
-            };
-            const stored = validateGbotConfig({
-                version: 1,
-                aliases,
-                default: incoming.default
-            });
-            writeGbotConfig1(stored, options);
+            let current;
+            try {
+                current = replace ? emptyGbotConfig() : readGbotConfig1(options);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Could not read the gbot config file.";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        printableText(message)
+                    ]
+                };
+            }
+            const aliases = copyAliases(replace ? incoming.aliases : undefined);
+            if (!replace) {
+                for (const name of Object.keys(current.aliases))aliases[name] = current.aliases[name];
+                for (const name of Object.keys(incoming.aliases))aliases[name] = incoming.aliases[name];
+            }
+            const defaultName = replace || incoming.default !== null ? incoming.default : current.default;
+            let stored;
+            try {
+                stored = validateGbotConfig({
+                    version: 1,
+                    aliases,
+                    default: defaultName
+                });
+                writeGbotConfig1(stored, options);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Config import file is invalid.";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        printableText(message)
+                    ]
+                };
+            }
             const signedIn = signedInScopes(options);
             const messages = [];
-            for (const [name, alias] of Object.entries(stored.aliases)){
+            for (const name of Object.keys(stored.aliases)){
+                const alias = stored.aliases[name];
                 if (signedIn.has(alias.scope)) continue;
-                const who = alias.email || name;
+                const who = printableText(alias.email || name);
                 messages.push(`sign in to ${who} in the Grok Bot app`);
             }
             return {
@@ -29673,7 +29896,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
-            XL: ()=>readGbotConfig1
+            C5: ()=>emptyGbotConfig,
+            XL: ()=>readGbotConfig1,
+            kV: ()=>isReservedAliasName1
         });
     },
     "./src/core/grok-approvals.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -29803,10 +30028,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _app_auth_js__rspack_import_3 = __webpack_require__("./src/core/app-auth.js");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
         var _gbot_config_js__rspack_import_5 = __webpack_require__("./src/core/gbot-config.js");
-        var _secret_store_js__rspack_import_6 = __webpack_require__("./src/core/secret-store.js");
+        var _url_policy_js__rspack_import_6 = __webpack_require__("./src/core/url-policy.js");
+        var _secret_store_js__rspack_import_7 = __webpack_require__("./src/core/secret-store.js");
         const SCOPE = /^[0-9a-f]{64}$/;
         const PREFIX = /^[0-9a-f]{8,}$/i;
         const NAME = /^[A-Za-z0-9_-]{1,32}$/;
+        const SCOPE_FIELDS = [
+            "scope",
+            "accountScope",
+            "accountId",
+            "userId",
+            "sub"
+        ];
         function selectionError(code, message) {
             const error = new Error(message);
             error.name = "GrokBotGatewaySessionError";
@@ -29814,7 +30047,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return error;
         }
         function loginLines(rows) {
-            return rows.map((row)=>"  " + row.label + (row.lastSaved ? " (last saved)" : "")).join("\n");
+            return rows.map((row)=>"  " + (0, _url_policy_js__rspack_import_6.XU)(row.label) + (row.lastSaved ? " (last saved)" : "")).join("\n");
         }
         function listed(rows) {
             return "Saved logins:\n" + loginLines(rows);
@@ -29822,11 +30055,28 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function shortScope(scope) {
             return String(scope).slice(0, 8);
         }
+        function once(fn) {
+            let done = false;
+            let value;
+            let failure;
+            return (...args)=>{
+                if (!done) {
+                    done = true;
+                    try {
+                        value = fn(...args);
+                    } catch (error) {
+                        failure = error;
+                    }
+                }
+                if (failure) throw failure;
+                return value;
+            };
+        }
         function baseOptions(options = {}) {
             const env = options.env ?? process.env;
             const platform = options.platform ?? process.platform;
             const home = options.home ?? (0, node_os__rspack_import_1.homedir)();
-            const secret = options.getKeychainPassword || options.unprotectData ? {} : (0, _secret_store_js__rspack_import_6.Ih)(env);
+            const secret = options.getKeychainPassword || options.unprotectData ? {} : (0, _secret_store_js__rspack_import_7.Ih)(env);
             return {
                 ...options,
                 env,
@@ -29834,6 +30084,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 home,
                 ...secret
             };
+        }
+        function shareReaders(options) {
+            const next = {
+                ...options
+            };
+            if (typeof options.getKeychainPassword === "function") {
+                next.getKeychainPassword = once(options.getKeychainPassword);
+            }
+            if (typeof options.unprotectData === "function") next.unprotectData = once(options.unprotectData);
+            return next;
         }
         function revealText(value, options) {
             if (typeof value !== "string" || !value) return null;
@@ -29874,7 +30134,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 return null;
             }
         }
-        function listSavedLogins1(options = {}) {
+        function listSavedLogins(options = {}) {
             const opts = baseOptions(options);
             const accounts = readSecrets(opts);
             if (!accounts || !accounts.accounts || typeof accounts.accounts !== "object") return [];
@@ -29895,13 +30155,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return rows;
         }
-        function descriptorRows(options) {
-            if (!(0, _app_session_js__rspack_import_4.ZN)(options)) return [];
-            return (0, _app_session_js__rspack_import_4.Nn)(options);
+        function hasSavedAccessToken1(options = {}) {
+            const opts = baseOptions(options);
+            const accounts = readSecrets(opts);
+            if (!accounts?.accounts || typeof accounts.accounts !== "object") return false;
+            return Object.keys(accounts.accounts).some((scope)=>{
+                if (!SCOPE.test(scope)) return false;
+                const token = accounts.accounts[scope]?.["cursor-access-token"];
+                return typeof token === "string" && token.length > 0;
+            });
         }
         function aliasByScope(config) {
             const names = new Map();
-            for (const [name, alias] of Object.entries(config.aliases ?? {})){
+            for (const name of Object.keys(config.aliases ?? {})){
+                const alias = config.aliases[name];
+                if (!alias || typeof alias.scope !== "string") continue;
                 const list = names.get(alias.scope) ?? [];
                 list.push(name);
                 names.set(alias.scope, list);
@@ -29914,26 +30182,60 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...names
             ].sort().join(", ");
         }
+        function descriptorScope(row) {
+            if (SCOPE.test(row.id)) return row.id;
+            const descriptor = row.descriptor;
+            if (!descriptor || typeof descriptor !== "object") return null;
+            for (const key of SCOPE_FIELDS){
+                const value = descriptor[key];
+                if (typeof value === "string" && SCOPE.test(value)) return value;
+            }
+            return null;
+        }
+        function descriptorEmail(row) {
+            const value = row.descriptor?.email;
+            if (typeof value !== "string") return null;
+            const email = value.trim();
+            if (!email || email.length > 120 || !email.includes("@") || /^https?:\/\//i.test(email)) return null;
+            return email;
+        }
+        function savedForDescriptor(row, describedCount, saved, savedByScope) {
+            const scope = descriptorScope(row);
+            if (scope && savedByScope.has(scope)) return savedByScope.get(scope);
+            const email = descriptorEmail(row);
+            if (email) {
+                const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
+                if (found.length === 1) return found[0];
+            }
+            if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            return null;
+        }
+        function readConfigForCatalog(options) {
+            if (options.config) return options.config;
+            return (0, _gbot_config_js__rspack_import_5.XL)(options);
+        }
         function listLoginCatalog(options = {}) {
-            const opts = baseOptions(options);
-            const config = (0, _gbot_config_js__rspack_import_5.XL)(opts);
+            const opts = shareReaders(baseOptions(options));
+            const config = readConfigForCatalog(opts);
             const aliases = aliasByScope(config);
-            const described = descriptorRows(opts);
-            const saved = listSavedLogins1(opts);
+            const described = (0, _app_session_js__rspack_import_4.ZN)(opts) ? (0, _app_session_js__rspack_import_4.If)(opts) : [];
+            const saved = listSavedLogins(opts);
             const savedByScope = new Map(saved.map((row)=>[
                     row.scope,
                     row
                 ]));
-            const rows = [];
-            const seen = new Set();
+            const drafts = [];
+            const consumed = new Set();
             for (const row of described){
-                const login = SCOPE.test(row.id) ? savedByScope.get(row.id) : undefined;
-                seen.add(row.id);
-                const email = login?.email ?? null;
-                rows.push({
+                const login = savedForDescriptor(row, described.length, saved, savedByScope);
+                const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
+                if (scope) consumed.add(scope);
+                const email = login?.email ?? descriptorEmail(row);
+                drafts.push({
                     id: row.id,
-                    scope: SCOPE.test(row.id) ? row.id : null,
-                    label: email || row.label,
+                    scope,
+                    label: row.label,
+                    descriptorLabel: row.label,
                     email,
                     appActive: Boolean(login?.appActive),
                     hasDescriptorEntry: true,
@@ -29942,24 +30244,42 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         savedAtMs: row.savedAtMs
                     } : {},
                     usable: row.usable,
-                    alias: aliasLabel(SCOPE.test(row.id) ? aliases.get(row.id) : undefined)
+                    alias: aliasLabel(scope ? aliases.get(scope) : undefined),
+                    descriptor: row.descriptor
                 });
             }
             for (const login of saved){
-                if (seen.has(login.scope)) continue;
-                rows.push({
+                if (consumed.has(login.scope)) continue;
+                drafts.push({
                     id: login.scope,
                     scope: login.scope,
                     label: login.label,
+                    descriptorLabel: null,
                     email: login.email,
                     appActive: login.appActive,
                     hasDescriptorEntry: false,
                     lastSaved: false,
                     usable: login.hasToken,
-                    alias: aliasLabel(aliases.get(login.scope))
+                    alias: aliasLabel(aliases.get(login.scope)),
+                    descriptor: null
                 });
             }
-            return rows;
+            return (0, _app_session_js__rspack_import_4.bI)(drafts).map((row)=>({
+                    id: row.id,
+                    scope: row.scope,
+                    label: (0, _url_policy_js__rspack_import_6.XU)(row.shownLabel || row.label),
+                    descriptorLabel: row.descriptorLabel ? (0, _url_policy_js__rspack_import_6.XU)(row.descriptorLabel) : null,
+                    shownId: row.shownId || row.id,
+                    email: row.email ? (0, _url_policy_js__rspack_import_6.XU)(row.email) : null,
+                    appActive: row.appActive,
+                    hasDescriptorEntry: row.hasDescriptorEntry,
+                    lastSaved: row.lastSaved,
+                    ...row.savedAtMs !== undefined ? {
+                        savedAtMs: row.savedAtMs
+                    } : {},
+                    usable: row.usable,
+                    alias: row.alias
+                }));
         }
         function formatLoginCatalog(rows) {
             if (!rows.length) return "No saved Grok Bot logins. Open the Grok Bot app and sign in once.";
@@ -29971,58 +30291,113 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     row.usable ? "" : "(unusable)"
                 ].filter(Boolean);
                 const suffix = notes.length ? ` ${notes.join(" ")}` : "";
-                const head = row.label === row.id ? `${row.label}${suffix}` : `${row.label}${suffix}\n  id ${row.id}`;
-                return row.alias ? `${head}\n  alias ${row.alias}` : head;
+                const label = printableText(row.label);
+                const visibleId = printableText(row.shownId || row.id);
+                const head = label === visibleId ? `${label}${suffix}` : `${label}${suffix}\n  id ${visibleId}`;
+                const email = row.email && printableText(row.email) !== label ? `\n  email ${printableText(row.email)}` : "";
+                return row.alias ? `${head}${email}\n  alias ${printableText(row.alias)}` : `${head}${email}`;
             }).join("\n");
         }
+        function ownAlias(aliases, selector) {
+            if (!aliases || typeof selector !== "string" || (0, _gbot_config_js__rspack_import_5.kV)(selector) || !Object.hasOwn(aliases, selector)) {
+                return null;
+            }
+            const alias = aliases[selector];
+            if (!alias || typeof alias !== "object" || typeof alias.scope !== "string") return null;
+            return alias;
+        }
         function matches(row, selector, aliases) {
-            if (row.label === selector || row.id === selector) return true;
+            if (row.label === selector || row.id === selector || row.shownId === selector || row.descriptorLabel === selector) {
+                return true;
+            }
             if (row.scope && row.scope.toLowerCase() === selector.toLowerCase()) return true;
             if (row.email && row.email.toLowerCase() === selector.toLowerCase()) return true;
             if (typeof row.label === "string" && row.label.includes("@") && row.label.toLowerCase() === selector.toLowerCase()) {
                 return true;
             }
-            const alias = aliases?.[selector];
+            if (typeof row.descriptorLabel === "string" && row.descriptorLabel.includes("@") && row.descriptorLabel.toLowerCase() === selector.toLowerCase()) {
+                return true;
+            }
+            const alias = ownAlias(aliases, selector);
             if (alias && row.scope && alias.scope.toLowerCase() === row.scope.toLowerCase()) return true;
             if (PREFIX.test(selector)) {
                 const needle = selector.toLowerCase();
                 const id = String(row.id).toLowerCase();
                 if (id.startsWith(needle) && id.length > needle.length) return true;
+                const shown = String(row.shownId || "").toLowerCase();
+                if (shown.startsWith(needle) && shown.length > needle.length && shown !== id) return true;
                 if (row.scope && row.scope.toLowerCase().startsWith(needle) && row.scope.length > needle.length) return true;
             }
             return false;
         }
-        function selectorFrom(options, config) {
-            if (typeof options.account === "string" && options.account.trim()) return options.account.trim();
-            const fromEnv = String(options.env?.GBOT_ACCOUNT ?? "").trim();
-            if (fromEnv) return fromEnv;
-            return typeof config.default === "string" ? config.default : "";
+        function flagSelector(options) {
+            return typeof options.account === "string" ? options.account.trim() : "";
+        }
+        function envSelector(options) {
+            return String(options.env?.GBOT_ACCOUNT ?? "").trim();
+        }
+        function tag(row, selectedBy) {
+            return row ? {
+                ...row,
+                selectedBy
+            } : null;
+        }
+        function implicitRow(rows) {
+            if (rows.length === 0) return null;
+            const described = rows.filter((row)=>row.hasDescriptorEntry);
+            if (described.length === 1) return described[0];
+            const active = described.filter((row)=>row.appActive);
+            if (described.length > 1 && active.length === 1) return active[0];
+            if (described.length === 0 && rows.length === 1) return rows[0];
+            throw selectionError("AMBIGUOUS_ENTRIES", [
+                "Grok Bot gateway descriptor has multiple saved gateway entries and no active entry selection.",
+                "Choose one with --account <label> or GBOT_ACCOUNT=<label>.",
+                "Saved logins:",
+                loginLines(rows)
+            ].join("\n"));
         }
         function resolveGrokBotLogin(options = {}) {
             const opts = baseOptions(options);
-            const config = (0, _gbot_config_js__rspack_import_5.XL)(opts);
-            const selector = selectorFrom(opts, config);
-            const rows = listLoginCatalog(opts);
-            if (!selector) {
-                if (rows.length === 1) return rows[0];
-                if (rows.length === 0) return null;
-                throw selectionError("AMBIGUOUS_ENTRIES", [
-                    "Grok Bot gateway descriptor has multiple saved gateway entries and no active entry selection.",
-                    "Choose one with --account <label> or GBOT_ACCOUNT=<label>.",
-                    "Saved logins:",
-                    loginLines(rows)
-                ].join("\n"));
+            let config;
+            let configError = null;
+            try {
+                config = (0, _gbot_config_js__rspack_import_5.XL)(opts);
+            } catch (error) {
+                configError = error;
+                config = (0, _gbot_config_js__rspack_import_5.C5)();
             }
+            const rows = listLoginCatalog({
+                ...opts,
+                config
+            });
+            const flagged = flagSelector(opts);
+            const fromEnv = flagged ? "" : envSelector(opts);
+            const explicit = flagged || fromEnv;
+            if (configError && !explicit) throw configError;
+            let selector = explicit;
+            let selectedBy = explicit ? "selector" : "implicit";
+            if (!selector && typeof config.default === "string" && config.default) {
+                selector = config.default;
+                selectedBy = "selector";
+            }
+            if (!selector) return tag(implicitRow(rows), "implicit");
             const found = rows.filter((row)=>matches(row, selector, config.aliases));
-            if (found.length === 1) return found[0];
+            if (found.length === 1) return tag(found[0], selectedBy);
+            if (configError) throw configError;
             if (found.length === 0) {
-                throw selectionError("UNKNOWN_ACCOUNT", `No saved Grok Bot login matches "${selector}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
+                throw selectionError("UNKNOWN_ACCOUNT", `No saved Grok Bot login matches "${(0, _url_policy_js__rspack_import_6.XU)(selector)}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
             }
-            throw selectionError("AMBIGUOUS_ENTRIES", `More than one saved Grok Bot login matches "${selector}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
+            throw selectionError("AMBIGUOUS_ENTRIES", `More than one saved Grok Bot login matches "${(0, _url_policy_js__rspack_import_6.XU)(selector)}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
+        }
+        function copyAliasMap(aliases, name, alias) {
+            const next = Object.create(null);
+            for (const key of Object.keys(aliases ?? {}))next[key] = aliases[key];
+            if (name) next[name] = alias;
+            return next;
         }
         function defineAlias({ name, selector, ...options }) {
-            if (typeof name !== "string" || !NAME.test(name)) {
-                throw new GbotConfigError("Alias names must match ^[A-Za-z0-9_-]{1,32}$.");
+            if (typeof name !== "string" || isReservedAliasName(name) || !NAME.test(name)) {
+                throw new GbotConfigError("Alias names must match ^[A-Za-z0-9_-]{1,32}$ and must not be a prototype key.");
             }
             if (typeof selector !== "string" || !selector.trim()) {
                 throw new GbotConfigError("alias needs a login selector.");
@@ -30041,10 +30416,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (chosen.email) alias.email = chosen.email;
             writeGbotConfig({
                 version: 1,
-                aliases: {
-                    ...current.aliases,
-                    [name]: alias
-                },
+                aliases: copyAliasMap(current.aliases, name, alias),
                 default: current.default
             }, options);
             return {
@@ -30053,14 +30425,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         function removeAlias({ name, ...options }) {
-            if (typeof name !== "string" || !NAME.test(name)) {
-                throw new GbotConfigError("Alias names must match ^[A-Za-z0-9_-]{1,32}$.");
+            if (typeof name !== "string" || isReservedAliasName(name) || !NAME.test(name)) {
+                throw new GbotConfigError("Alias names must match ^[A-Za-z0-9_-]{1,32}$ and must not be a prototype key.");
             }
             const current = readGbotConfig(options);
-            if (!current.aliases[name]) throw new GbotConfigError(`No alias named "${name}".`);
-            const aliases = {
-                ...current.aliases
-            };
+            if (!Object.hasOwn(current.aliases, name)) throw new GbotConfigError(`No alias named "${name}".`);
+            const aliases = copyAliasMap(current.aliases);
             delete aliases[name];
             writeGbotConfig({
                 version: 1,
@@ -30078,7 +30448,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 }, options);
                 return;
             }
-            if (typeof name !== "string" || !current.aliases[name]) {
+            if (typeof name !== "string" || isReservedAliasName(name) || !Object.hasOwn(current.aliases, name)) {
                 throw new GbotConfigError(`No alias named "${name ?? ""}".`);
             }
             writeGbotConfig({
@@ -30213,7 +30583,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 stdio: "ignore",
                 env: {
                     ...location.env,
-                    GROK_BOT_RELAY_DIR: location.stateDir
+                    GROK_BOT_RELAY_DIR: location.stateDir,
+                    ...location.accountScope ? {
+                        GBOT_ACCOUNT_SCOPE: location.accountScope
+                    } : {}
                 },
                 cwd: (0, node_path__rspack_import_2.dirname)(workerPath)
             });
@@ -30273,8 +30646,29 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_path__rspack_import_2 = __webpack_require__("node:path");
         var _codex_bridge_js__rspack_import_3 = __webpack_require__("./src/core/codex-bridge.js");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _logins_js__rspack_import_5 = __webpack_require__("./src/core/logins.js");
         const digest = (value)=>(0, node_crypto__rspack_import_0.createHash)("sha256").update(value).digest("hex");
-        function relayProfile(env = process.env) {
+        const SCOPE = /^[0-9a-f]{64}$/;
+        function resolveRelayAccountScope(env = process.env) {
+            const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
+            if (SCOPE.test(pinned)) return pinned;
+            const home = env.HOME || env.USERPROFILE;
+            if (!home) return "";
+            try {
+                const choice = (0, _logins_js__rspack_import_5.cq)({
+                    env,
+                    home,
+                    platform: process.platform
+                });
+                return choice?.scope || "";
+            } catch (error) {
+                if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
+                    throw error;
+                }
+                return "";
+            }
+        }
+        function relayProfile(env = process.env, accountScope = "") {
             const keys = [
                 "GROK_BOT_GATEWAY_URL",
                 "SAND_HOST_GATEWAY_URL",
@@ -30298,25 +30692,38 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "GROK_BOT_TEST",
                 "NODE_ENV",
                 "DBUS_SESSION_BUS_ADDRESS",
-                "DISPLAY"
+                "DISPLAY",
+                "GBOT_CONFIG",
+                "GBOT_ACCOUNT",
+                "GBOT_ACCOUNT_SCOPE"
             ];
+            const scope = typeof accountScope === "string" ? accountScope : "";
             return digest(JSON.stringify([
                 (0, node_path__rspack_import_2.resolve)((0, _codex_bridge_js__rspack_import_3.ql)(env)),
                 (0, _app_session_js__rspack_import_4.dQ)((0, node_os__rspack_import_1.homedir)(), process.platform, env),
+                scope,
                 ...keys.map((key)=>[
                         key,
                         env[key] ?? ""
                     ])
             ]));
         }
-        function relayLocation({ env = process.env, stateDir, profile = relayProfile(env) } = {}) {
+        function relayLocation({ env = process.env, stateDir, profile, accountScope } = {}) {
+            const scope = accountScope !== undefined ? accountScope : resolveRelayAccountScope(env);
+            const pinned = typeof scope === "string" && SCOPE.test(scope) ? scope : "";
+            const effectiveEnv = {
+                ...env
+            };
+            if (pinned) effectiveEnv.GBOT_ACCOUNT_SCOPE = pinned;
+            const resolvedProfile = profile ?? relayProfile(effectiveEnv, pinned);
             if (process.platform === "win32") throw Error("Codex relay requires Unix-domain sockets; Windows is unsupported.");
-            const dir = (0, node_path__rspack_import_2.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), ".grok-bot-cli", "relay", profile.slice(0, 24)));
+            const dir = (0, node_path__rspack_import_2.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), ".grok-bot-cli", "relay", resolvedProfile.slice(0, 24)));
             const socketDir = Buffer.byteLength((0, node_path__rspack_import_2.join)(dir, "control.sock")) < 100 ? dir : (0, node_path__rspack_import_2.join)("/tmp", `gbot-relay-${process.getuid()}`, digest(dir).slice(0, 24));
             return {
                 stateDir: dir,
-                profile,
-                env,
+                profile: resolvedProfile,
+                accountScope: pinned,
+                env: effectiveEnv,
                 socketDir,
                 socketPath: (0, node_path__rspack_import_2.join)(socketDir, "control.sock")
             };
@@ -30966,10 +31373,29 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             s = s.replace(/Bearer\s+[A-Za-z0-9._+\/=-]+/gi, "Bearer <redacted>");
             s = s.replace(/(["']?(?:authorization|gatewayToken|gateway_token|access_token|accessToken|refresh_token|refreshToken|token|x-anyrun-network-token|cookie|set-cookie)["']?\s*[:=]\s*["']?)([^"',\s}]+)/gi, "$1<redacted>");
             s = s.replace(/(x-anyrun-network-token\s*[=:]\s*)(\S+)/gi, "$1<redacted>");
+            s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}/g, "<redacted>");
             return s;
         }
+        function redactKnownSecrets(text, secrets) {
+            let s = redactSecrets(text);
+            const list = Array.isArray(secrets) ? secrets : [];
+            const sorted = list.filter((item)=>typeof item === "string" && item.length >= 8).sort((a, b)=>b.length - a.length);
+            for (const secret of sorted){
+                if (s.includes(secret)) s = s.split(secret).join("<redacted>");
+            }
+            return s;
+        }
+        function printableText1(text) {
+            return Array.from(String(text ?? ""), (char)=>{
+                const c = char.codePointAt(0) ?? 0;
+                const hidden = c < 0x20 || c >= 0x7f && c <= 0x9f || c === 0x2028 || c === 0x2029 || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069;
+                return hidden ? "?" : char;
+            }).join("");
+        }
         __webpack_require__.d(__webpack_exports__, {
+            Ok: ()=>redactKnownSecrets,
             Re: ()=>assertAllowedCredentialUrl,
+            XU: ()=>printableText1,
             fp: ()=>redactSecrets
         });
     },

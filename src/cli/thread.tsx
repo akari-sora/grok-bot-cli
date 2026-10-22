@@ -20,7 +20,7 @@ export const config = {
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       full: { description: 'Show full entry text in human output', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
-      account: { description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT', type: 'string' },
+      account: { description: 'Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry', type: 'string' },
       historyDir: { description: 'Directory containing history.jsonl', type: 'string' },
       limit: { default: 40, description: 'How many trailing entries to return (1-200)', type: 'number' },
       noHistory: { description: 'Skip local history for this command', type: 'boolean' },

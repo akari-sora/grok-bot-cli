@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import { loadGrokBotGatewaySelection } from '../../core/app-session.js';
+import { resolveGrokBotLogin } from '../../core/logins.js';
 import { isTestMode, secretStoreOffMessage, secretStoreOptions } from '../../core/secret-store.js';
 import {
   OUTCOME_MESSAGES,
@@ -26,7 +27,7 @@ export const config = {
     properties: {
       target: { description: 'The watch address shown on its screen, <ip>:<port>', type: 'string' },
       account: {
-        description: 'Saved Grok Bot login to send when several are stored (label or id). GBOT_ACCOUNT is ignored here',
+        description: 'Saved Grok Bot login to send when several are stored (alias, email, label, or id). GBOT_ACCOUNT and the config default are ignored here',
         type: 'string',
       },
       code: {
@@ -242,12 +243,24 @@ const pair = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
   const checked = checkCode(code);
   if (checked.code === undefined) return failure(checked.error, PAIR_MESSAGES[checked.error]);
 
-  // GBOT_ACCOUNT is ignored for pairing; the rest of the environment locates the descriptor.
+  // GBOT_ACCOUNT and the config default are ignored for pairing; the rest of the environment locates the descriptor.
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.GBOT_ACCOUNT;
+  let accountForSelection = input.account;
+  if (input.account) {
+    try {
+      const choice = resolveGrokBotLogin({ account: input.account, env, ...secretStore() });
+      if (!choice?.hasDescriptorEntry) {
+        return failure('account', 'That login has no descriptor session to send to the watch.');
+      }
+      accountForSelection = choice.id;
+    } catch (error) {
+      return accountFailure(error, input.account);
+    }
+  }
   let selection: ReturnType<typeof loadGrokBotGatewaySelection>;
   try {
-    selection = loadGrokBotGatewaySelection({ account: input.account, env, ...secretStore() });
+    selection = loadGrokBotGatewaySelection({ account: accountForSelection, env, ...secretStore() });
   } catch (error) {
     return accountFailure(error, input.account);
   }

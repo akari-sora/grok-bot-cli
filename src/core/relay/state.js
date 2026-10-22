@@ -29,6 +29,7 @@ const bindingSchema = z.strictObject({
   createdAt: z.number(),
   createdCursor: relayId.nullable(),
   fingerprint: z.string(),
+  accountScope: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 const recordSchema = z.strictObject({
   id: relayId,

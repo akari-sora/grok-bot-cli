@@ -4,15 +4,15 @@ import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
 import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
 import { ensureSandboxHeaders, headersFromEnsureSandbox, headersFromEnv, mergeGatewayHeaders, normalizeHeaderMap, requestHeaders } from "./headers.js";
 import { hasGrokBotGatewaySession, loadGrokBotGatewaySession } from "./app-session.js";
-import { listSavedLogins, resolveGrokBotLogin } from "./logins.js";
+import { hasSavedAccessToken, resolveGrokBotLogin } from "./logins.js";
 import { secretStoreOptions } from "./secret-store.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
-import { assertAllowedCredentialUrl, redactSecrets } from "./url-policy.js";
+import { assertAllowedCredentialUrl, redactKnownSecrets, redactSecrets } from "./url-policy.js";
 import { grokApproval, grokApprovalResponseSchema } from "./grok-approvals.js";
 
 export class GatewayError extends Error {
   constructor(message, info = {}) {
-    super(message);
+    super(redactSecrets(message));
     this.name = "GatewayError";
     this.status = info.status;
     this.method = info.method;
@@ -124,62 +124,161 @@ function descriptorSession(account) {
   return loaded ? sessionFields(loaded) : null;
 }
 
+// Read, decrypt, or expiry of an implicit app login may fall back to CURSOR_ACCESS_TOKEN.
+// A named selector, a host-policy rejection, and any other backend error must not.
+const IMPLICIT_AUTH_FAILURES = new Set([
+  "EXPIRED",
+  "DECRYPT_FAILED",
+  "NOT_JWT",
+  "NO_ACCOUNT",
+  "NO_SECRETS_FILE",
+  "UNSUPPORTED_VERSION",
+  "SCOPE_MISMATCH",
+  "UNUSABLE_SESSION",
+  "MISSING_ENCRYPTED_PAYLOAD",
+  "INCOMPLETE_DESCRIPTOR",
+  "UNREADABLE_ENTRIES",
+  "EMPTY_ENTRIES",
+  "MISSING_SAFE_STORAGE_KEY",
+]);
+
+function implicitAuthFallback(error) {
+  if (!accessTokenFromEnv()) return false;
+  if (error instanceof GatewayError && (error.status || error.method === "EnsureSandBox")) return false;
+  if (/Rejected /.test(String(error?.message ?? ""))) return false;
+  if (typeof error?.code === "string" && IMPLICIT_AUTH_FAILURES.has(error.code)) return true;
+  return /could not decrypt|Safe Storage|bad decrypt/i.test(String(error?.message ?? ""));
+}
+
+function scrubOutbound(error, secrets) {
+  const message = redactKnownSecrets(error instanceof Error ? error.message : String(error), secrets);
+  if (error instanceof GatewayError) {
+    if (message === error.message) return error;
+    const next = new GatewayError(message, {
+      status: error.status,
+      method: error.method,
+      code: error.code,
+      effect: error.effect,
+      failureCode: error.failureCode,
+      kind: error.kind,
+      wake: error.wake,
+      failureReason: error.failureReason,
+      runState: error.runState,
+    });
+    if (error.delivery) next.delivery = error.delivery;
+    if (error.reason) next.reason = error.reason;
+    return next;
+  }
+  if (error instanceof AppAuthError) return new AppAuthError(error.code, message);
+  return new GatewayError(message, error?.code ? { code: error.code } : {});
+}
+
+const sessionsByScope = new Map();
+
+function sessionCacheKey(scope) {
+  return [
+    scope,
+    process.env.HOME || "",
+    process.env.USERPROFILE || "",
+    process.env.GBOT_CONFIG || "",
+    process.env.CURSOR_API_BASE_URL || "",
+  ].join("\0");
+}
+
+function rememberSession(session) {
+  if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+    sessionsByScope.set(sessionCacheKey(session.accountScope), session);
+  }
+  return session;
+}
+
+function cachedSession(scope) {
+  if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
+  return sessionsByScope.get(sessionCacheKey(scope)) ?? null;
+}
+
 async function sessionFromSavedLogin(scope, signal) {
+  const cached = cachedSession(scope);
+  if (cached) return cached;
   let loaded;
   try {
     loaded = loadAppAccessToken({ scope, home: homedir(), env: process.env, ...secretStoreOptions() });
   } catch (error) {
-    throw toGatewayError(error);
+    throw scrubOutbound(toGatewayError(error), []);
   }
   let described;
   try {
     described = await describeSandbox(loaded.token, { signal, appLogin: true });
   } catch (error) {
-    throw toGatewayError(error);
+    throw scrubOutbound(error, [loaded.token]);
   }
   const running = described?.runState === "RUNNING" && described.gatewayUrl && described.gatewayToken;
-  const sandbox = running ? described : await wakeSandbox(loaded.token, { signal, appLogin: true });
-  return {
+  let sandbox = described;
+  if (!running) {
+    if (!autoWakeEnabled()) {
+      throw new GatewayError(
+        "The Grok Bot box for this login is asleep and GBOT_AUTO_WAKE=0.",
+        { code: "BOX_ASLEEP", method: "EnsureSandBox", ...(described?.runState ? { runState: described.runState } : {}) },
+      );
+    }
+    try {
+      sandbox = await wakeSandbox(loaded.token, { signal, appLogin: true });
+    } catch (error) {
+      throw scrubOutbound(error, [loaded.token, described?.gatewayToken]);
+    }
+  }
+  return rememberSession({
     gatewayUrl: sandbox.gatewayUrl,
     gatewayToken: sandbox.gatewayToken,
     gatewayHeaders: sandbox.gatewayHeaders,
     accountScope: scope,
-  };
+  });
 }
 
-// A descriptor entry is used exactly as before. A saved login with no descriptor entry
-// is turned into a session in memory (describe, then wake) and never written back.
+// Precedence: gateway URL+token override, then --account, GBOT_ACCOUNT, the config default,
+// then the descriptor single entry or its active entry. A saved-only login is used only when
+// it is selected or it is the only login. CURSOR_ACCESS_TOKEN is only for no app login, or an
+// implicit login that cannot be read, decrypted, or is expired. A selector that misses, an
+// unusable selected login, a host-policy rejection, and any other backend error do not switch accounts.
 async function sessionFromApp(account, signal) {
   let choice;
   try {
     choice = resolveGrokBotLogin({ account, ...secretStoreOptions() });
   } catch (error) {
-    if (accessTokenFromEnv()) return null;
-    throw toGatewayError(error);
+    throw scrubOutbound(toGatewayError(error), []);
+  }
+  if (choice?.scope) {
+    const cached = cachedSession(choice.scope);
+    if (cached) return cached;
   }
   if (!choice) {
     try {
-      return descriptorSession(account);
+      return rememberSession(descriptorSession(account));
     } catch (error) {
-      if (accessTokenFromEnv()) return null;
-      throw toGatewayError(error);
+      if (implicitAuthFallback(error)) return null;
+      throw scrubOutbound(toGatewayError(error), []);
     }
   }
-  if (choice.hasDescriptorEntry) {
-    try {
-      return descriptorSession(choice.id);
-    } catch (error) {
-      if (accessTokenFromEnv()) return null;
-      throw toGatewayError(error);
+  try {
+    if (choice.hasDescriptorEntry) {
+      let session = descriptorSession(choice.id);
+      if (!session) {
+        throw new GatewayError("The selected Grok Bot login could not be read.", { code: "UNUSABLE_SESSION" });
+      }
+      if (choice.scope && !session.accountScope) session = { ...session, accountScope: choice.scope };
+      return rememberSession(session);
     }
+    return await sessionFromSavedLogin(choice.scope, signal);
+  } catch (error) {
+    if (choice.selectedBy !== "selector" && implicitAuthFallback(error)) return null;
+    throw scrubOutbound(error, []);
   }
-  return sessionFromSavedLogin(choice.scope, signal);
 }
 
 export function hasGatewayAuth() {
   if (gatewayOverride() || accessTokenFromEnv() || hasGrokBotGatewaySession()) return true;
   try {
-    return listSavedLogins().some((row) => row.hasToken);
+    return hasSavedAccessToken();
   } catch {
     return false;
   }
@@ -300,6 +399,7 @@ function sandboxFields(body) {
   };
 }
 
+/** @returns {result is NonNullable<Awaited<ReturnType<typeof ensureSandbox>>>} */
 function sandboxReady(result) {
   const hasGateway = Boolean(result?.gatewayUrl) && Boolean(result?.gatewayToken);
   if (!hasGateway) return false;
@@ -327,9 +427,18 @@ async function ensureSandbox(accessToken, { signal, wake = true, appLogin = fals
     body = await readJson(res);
   } catch (error) {
     assertGatewayActive(signal);
-    throw error;
+    const secrets = collectSandboxSecrets(accessToken, null);
+    if (isDeadlineError(error) || signal?.aborted) {
+      if (error instanceof Error) {
+        const redacted = redactKnownSecrets(error.message, secrets);
+        if (redacted !== error.message) error.message = redacted;
+      }
+      throw error;
+    }
+    throw scrubOutbound(error, secrets);
   }
   assertGatewayActive(signal);
+  const secrets = collectSandboxSecrets(accessToken, body);
   if (!res.ok) {
     let detail = body.message || body.error || body.raw || res.statusText;
     if (res.status === 401 && /no longer supported/i.test(String(detail))) {
@@ -339,10 +448,31 @@ async function ensureSandbox(accessToken, { signal, wake = true, appLogin = fals
       // Forget drops that cache only for an installed-app value, at most once per 10 minutes.
       forgetCachedAppVersion();
     }
-    throw new GatewayError("EnsureSandBox failed: " + res.status + " " + redactSecrets(detail), { status: res.status, method: "EnsureSandBox" });
+    throw new GatewayError("EnsureSandBox failed: " + res.status + " " + redactKnownSecrets(detail, secrets), { status: res.status, method: "EnsureSandBox" });
   }
-  const fields = sandboxFields(body);
-  return { ...fields, runState: normalizeRunState(pick(body, "runState", "run_state")) };
+  try {
+    const fields = sandboxFields(body);
+    return { ...fields, runState: normalizeRunState(pick(body, "runState", "run_state")) };
+  } catch (error) {
+    throw scrubOutbound(error, secrets);
+  }
+}
+
+function collectSandboxSecrets(accessToken, body) {
+  const secrets = [];
+  const add = (value) => {
+    if (typeof value === "string" && value.length >= 8 && !secrets.includes(value)) secrets.push(value);
+  };
+  add(accessToken);
+  if (!body || typeof body !== "object") return secrets;
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value === "string" && /token|authorization|cookie/i.test(key)) add(value);
+  }
+  const headers = body.headers || body.gatewayHeaders || body.gateway_headers;
+  if (headers && typeof headers === "object") {
+    for (const value of Object.values(headers)) add(value);
+  }
+  return secrets;
 }
 
 function abortableSleep(ms, signal) {
@@ -392,6 +522,9 @@ function shouldPollSandbox(result) {
   return false;
 }
 
+/** @param {string} accessToken
+ * @param {{ signal?: AbortSignal, timeoutMs?: number, intervalMs?: number, appLogin?: boolean, now?: () => number }} [options]
+ */
 export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false, now = Date.now } = {}) {
   const budget = sandboxWakeBudget();
   const timeout = timeoutMs ?? budget.timeoutMs;
@@ -457,7 +590,11 @@ export async function connectGateway({ signal, account } = {}) {
   assertGatewayActive(signal);
   const override = gatewayOverride();
   if (override) return override;
-  const fromApp = await sessionFromApp(account, signal);
+  const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
+  const selected = typeof account === "string" && account.trim()
+    ? account.trim()
+    : (/^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined);
+  const fromApp = await sessionFromApp(selected, signal);
   if (fromApp) return fromApp;
   const token = accessTokenFromEnv();
   if (!token) {

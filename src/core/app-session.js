@@ -275,7 +275,7 @@ function readWindowsSafeStorageKey(home, env, unprotectData) {
   return unprotectData(blob.subarray(5));
 }
 
-export function listGrokBotGatewayAccounts(options = {}) {
+function loadGatewayRows(options = {}) {
   if (!hasGrokBotGatewaySession(options)) return [];
   const {
     platform = process.platform,
@@ -285,6 +285,8 @@ export function listGrokBotGatewayAccounts(options = {}) {
     getKeychainPassword = readKeychainPassword,
     unprotectData = unprotectWithDpapi,
   } = options;
+  const password = once(getKeychainPassword);
+  const unprotect = once(unprotectData);
   const effectiveEnv = sessionEnv({ env, appData });
   const path = grokBotGatewayDescriptorPath(home, platform, effectiveEnv);
   const wrapped = JSON.parse(readFileSync(path, "utf8"));
@@ -292,19 +294,35 @@ export function listGrokBotGatewayAccounts(options = {}) {
     platform,
     home,
     env: effectiveEnv,
-    getKeychainPassword,
-    unprotectData,
+    getKeychainPassword: password,
+    unprotectData: unprotect,
   });
   const rows = decorateEntries(savedEntries(wrapped), decrypt).map((row) => ({
     ...row,
     usable: row.descriptor != null && !row.decryptError,
   }));
-  return markLastSaved(rows).map((row) => ({
+  return markLastSaved(rows);
+}
+
+export function listGrokBotGatewayAccounts(options = {}) {
+  return loadGatewayRows(options).map((row) => ({
     id: row.id,
     label: row.label,
     ...(row.savedAtMs !== undefined ? { savedAtMs: row.savedAtMs } : {}),
     lastSaved: row.lastSaved,
     usable: row.usable,
+  }));
+}
+
+/** Descriptor rows plus the decrypted payload, so account catalog code can mask secrets and match scope. */
+export function listGrokBotGatewayAccountSources(options = {}) {
+  return loadGatewayRows(options).map((row) => ({
+    id: row.id,
+    label: row.label,
+    ...(row.savedAtMs !== undefined ? { savedAtMs: row.savedAtMs } : {}),
+    lastSaved: row.lastSaved,
+    usable: row.usable,
+    descriptor: row.descriptor ?? null,
   }));
 }
 
@@ -458,6 +476,10 @@ function maskSecretAliases(rows) {
       masked: true,
     };
   });
+}
+
+export function maskLoginSecrets(rows) {
+  return maskSecretAliases(rows);
 }
 
 /**

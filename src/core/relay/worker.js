@@ -38,6 +38,7 @@ export async function runRelayWorker(options = {}) {
       stateDir: location.stateDir,
       profile: location.profile,
       env: location.env,
+      accountScope: location.accountScope || undefined,
     });
     const health = () => ({
       state: closing ? "stopped" : "running",

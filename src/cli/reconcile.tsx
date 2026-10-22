@@ -9,7 +9,7 @@ export const config = {
   inputJsonSchema: {
     additionalProperties: false,
     properties: {
-      account: { description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT', type: 'string' },
+      account: { description: 'Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry', type: 'string' },
       dir: { description: 'Agents directory for --files mode', type: 'string' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },

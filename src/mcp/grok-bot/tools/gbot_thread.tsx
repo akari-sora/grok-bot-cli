@@ -61,7 +61,11 @@ export default defineTool(
     title: 'Read a Grok Bot thread',
   },
   async ({ after, limit, target, full }) => {
-    const tail = await withRedactedErrors(async () => getTranscriptTail(await connectGateway(), target, limit));
+    const tail = await withRedactedErrors(async () => getTranscriptTail(
+      await connectGateway({ account: process.env.GBOT_ACCOUNT_SCOPE || undefined }),
+      target,
+      limit,
+    ));
     const delta = transcriptDelta(tail.transcript, { after, limit });
     const entries = transcriptEntries({ entries: delta.entries });
     const summary = delta.gapReset

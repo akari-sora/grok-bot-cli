@@ -143,7 +143,7 @@ export async function grokSendOperation(
       ? withEnvelopeHeader(input.message, buildEnvelope(input))
       : input.message;
   const sent = await withRedactedErrors(async () =>
-    sendPrompt(await connectGateway(), input.target, message),
+    sendPrompt(await connectGateway({ account: process.env.GBOT_ACCOUNT_SCOPE || undefined }), input.target, message),
   );
   return {
     result: sent.result,

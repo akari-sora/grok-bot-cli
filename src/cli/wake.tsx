@@ -106,9 +106,10 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
-    return code === 'AMBIGUOUS_ENTRIES' || code === 'UNKNOWN_ACCOUNT'
-      ? { error: safeError(message), exitCode: 2 }
-      : { error: safeError(message), exitCode: 3 };
+    const configExit = error && typeof error === 'object' && 'exitCode' in error && error.exitCode === 2;
+    return configExit || code === 'AMBIGUOUS_ENTRIES' || code === 'UNKNOWN_ACCOUNT' || code === 'INVALID'
+      ? { error: safeError(message), exitCode: 2 as const }
+      : { error: safeError(message), exitCode: 3 as const };
   }
   if (!choice) {
     return { error: 'No saved Grok Bot login. Open the Grok Bot app and sign in once.', exitCode: 3 };

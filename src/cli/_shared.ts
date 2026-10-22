@@ -6,7 +6,7 @@ import { withRedactedErrors } from '../gbot.js';
 
 /** Shared backend selection flags (were leading globals on the hand CLI). */
 export const backendFlagsSchema = z.object({
-  account: z.string().min(1).optional().describe('Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT'),
+  account: z.string().min(1).optional().describe('Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry'),
   dir: z.string().min(1).optional().describe('Agents directory for --files mode'),
   files: z.boolean().optional().describe('Force the on-disk agents store'),
   gateway: z.boolean().optional().describe('Force the live gateway'),

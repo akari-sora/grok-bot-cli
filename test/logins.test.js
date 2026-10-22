@@ -32,15 +32,16 @@ function scopeFor(sub) {
   return crypto.createHash("sha256").update(sub).digest("hex");
 }
 
-function encrypt(text, password = "demo-password") {
-  const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+function encrypt(text, password = "demo-password", platform = "darwin") {
+  const linux = platform === "linux";
+  const key = crypto.pbkdf2Sync(password, "saltysalt", linux ? 1 : 1003, 16, "sha1");
   const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
-  return Buffer.concat([Buffer.from("v10"), cipher.update(text, "utf8"), cipher.final()]).toString("base64");
+  return Buffer.concat([Buffer.from(linux ? "v11" : "v10"), cipher.update(text, "utf8"), cipher.final()]).toString("base64");
 }
 
-function homeWith({ secrets, descriptor } = {}) {
+function homeWith({ secrets, descriptor } = {}, platform = "darwin") {
   const home = mkdtempSync(join(tmpdir(), "gbot-logins-"));
-  const descriptorPath = grokBotGatewayDescriptorPath(home, "darwin", {});
+  const descriptorPath = grokBotGatewayDescriptorPath(home, platform, {});
   mkdirSync(dirname(descriptorPath), { recursive: true });
   if (secrets !== undefined) writeFileSync(join(dirname(descriptorPath), "sand-secrets.json"), JSON.stringify(secrets));
   if (descriptor !== undefined) writeFileSync(descriptorPath, JSON.stringify(descriptor));
@@ -195,8 +196,8 @@ test("a saved login with no descriptor entry becomes a gateway session and is no
     secrets: accountsDoc({
       [scope]: entry(`plaintext:v1:${jwt(sub)}`, profile("nodescriptor@example.com")),
     }, scope),
-  });
-  const secretsPath = join(dirname(grokBotGatewayDescriptorPath(home, "darwin", {})), "sand-secrets.json");
+  }, process.platform);
+  const secretsPath = join(dirname(grokBotGatewayDescriptorPath(home, process.platform, {})), "sand-secrets.json");
   const before = readFileSync(secretsPath);
   const calls = [];
   const previous = globalThis.fetch;
@@ -219,6 +220,8 @@ test("a saved login with no descriptor entry becomes a gateway session and is no
   try {
     const session = await withEnv({
       HOME: home,
+      APPDATA: null,
+      XDG_CONFIG_HOME: null,
       USERPROFILE: home,
       CURSOR_API_BASE_URL: "http://127.0.0.1:1340",
       CURSOR_ACCESS_TOKEN: null,
@@ -250,7 +253,7 @@ test("a saved login with no descriptor entry becomes a gateway session and is no
   }
 });
 
-test("a descriptor entry for the same scope is used as-is and does not call EnsureSandBox", async () => {
+test("a descriptor entry for the same scope is used as-is and does not call EnsureSandBox", { skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false }, async () => {
   const sub = "user_synthetic_hasdescriptor";
   const scope = scopeFor(sub);
   const home = homeWith({
@@ -266,12 +269,12 @@ test("a descriptor entry for the same scope is used as-is and does not call Ensu
             token: "gateway-token-kept",
             headers: { "x-anyrun-network-token": "route-kept" },
             email: "has@example.com",
-          })),
+          }), "demo-password", process.platform),
           savedAtMs: 4,
         },
       },
     },
-  });
+  }, process.platform);
   let calls = 0;
   const previous = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -281,6 +284,8 @@ test("a descriptor entry for the same scope is used as-is and does not call Ensu
   try {
     const session = await withEnv({
       HOME: home,
+      APPDATA: null,
+      XDG_CONFIG_HOME: null,
       USERPROFILE: home,
       CURSOR_ACCESS_TOKEN: null,
       GROK_BOT_GATEWAY_URL: null,
@@ -306,7 +311,7 @@ test("a describe that is already RUNNING is not followed by wake", async () => {
     secrets: accountsDoc({
       [scope]: entry(`plaintext:v1:${jwt(sub)}`, profile("running@example.com")),
     }, scope),
-  });
+  }, process.platform);
   const calls = [];
   const previous = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
@@ -320,6 +325,8 @@ test("a describe that is already RUNNING is not followed by wake", async () => {
   try {
     const session = await withEnv({
       HOME: home,
+      APPDATA: null,
+      XDG_CONFIG_HOME: null,
       USERPROFILE: home,
       CURSOR_API_BASE_URL: "http://127.0.0.1:1340",
       CURSOR_ACCESS_TOKEN: null,
@@ -369,9 +376,11 @@ test("app login token is not sent to a non-Cursor host even when ALLOW_ANY is se
     secrets: accountsDoc({
       [scope]: entry(`plaintext:v1:${jwt(sub)}`, profile("host@example.com")),
     }, scope),
-  });
+  }, process.platform);
   await withEnv({
     HOME: home,
+    APPDATA: null,
+    XDG_CONFIG_HOME: null,
     USERPROFILE: home,
     CURSOR_API_BASE_URL: "https://evil.example",
     GROK_BOT_ALLOW_ANY_GATEWAY: "1",

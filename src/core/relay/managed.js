@@ -68,7 +68,11 @@ export async function ensureRelayWorker(options = {}) {
   const child = spawn(process.execPath, [workerPath], {
     detached: true,
     stdio: "ignore",
-    env: { ...location.env, GROK_BOT_RELAY_DIR: location.stateDir },
+    env: {
+      ...location.env,
+      GROK_BOT_RELAY_DIR: location.stateDir,
+      ...(location.accountScope ? { GBOT_ACCOUNT_SCOPE: location.accountScope } : {}),
+    },
     cwd: dirname(workerPath),
   });
   let spawnError;

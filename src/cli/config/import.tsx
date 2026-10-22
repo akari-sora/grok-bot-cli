@@ -3,6 +3,7 @@ import type { CliRouteConfig, CliRouteProps } from 'agent-bundle';
 import { z } from 'zod';
 
 import { importAccountConfig } from '../../core/gbot-config.js';
+import { printableText } from '../../core/url-policy.js';
 
 export const config = {
   description: 'Import aliases from a JSON file. Merges unless --replace. Exit 2 is invalid input. Exit 3 means some logins are not signed in on this machine.',
@@ -33,7 +34,7 @@ export default async function configImport({ input }: CliRouteProps<typeof input
   const result = importAccountConfig({ file: input.file, replace: Boolean(input.replace) });
   const text = result.exitCode === 0
     ? 'Imported gbot config.'
-    : result.messages.join('\n');
+    : result.messages.map((message) => printableText(message)).join('\n');
   return (
     <Agent.Result value={result}>
       <Agent.Text>{text}</Agent.Text>

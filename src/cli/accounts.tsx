@@ -54,7 +54,7 @@ export const resultSchema = z.object({
 type AccountsResult = z.infer<typeof resultSchema>;
 
 const publicRow = (row: ReturnType<typeof listLoginCatalog>[number]): z.infer<typeof accountSchema> => ({
-  id: row.id,
+  id: row.shownId || row.id,
   label: row.label,
   lastSaved: row.lastSaved,
   ...(row.savedAtMs !== undefined ? { savedAtMs: row.savedAtMs } : {}),
@@ -84,8 +84,12 @@ function runAction(input: z.infer<typeof inputSchema>): AccountsResult {
     if (input.name || input.selector || input.clear) {
       return usage('gbot accounts lists logins. To change aliases, use alias, unalias, or default.');
     }
-    const rows = listLoginCatalog().map(publicRow);
-    return { exitCode: 0, accounts: rows };
+    try {
+      const rows = listLoginCatalog().map(publicRow);
+      return { exitCode: 0, accounts: rows };
+    } catch (error) {
+      return caught(error) ?? { exitCode: 2, error: error instanceof Error ? error.message : 'Could not read the gbot account config.' };
+    }
   }
   if (action === 'alias') {
     if (!input.name || !input.selector || input.clear) return usage('Usage: gbot accounts alias <name> <selector>');

@@ -42,7 +42,7 @@ npm run build
 npm link
 ```
 
-To install or restore this fork on another machine without a `git+https` spec, use `scripts/install-fork.sh` (macOS/Linux) or `scripts/install-fork.ps1` (Windows). Those scripts are described under [Switching logins and restoring gbot on another machine](#switching-logins-and-restoring-gbot-on-another-machine). The dry-run was tested; the scripts were not run against GitLab in this change.
+To install or restore this fork on another machine without a `git+https` spec, use `scripts/install-fork.sh` (macOS/Linux) or `scripts/install-fork.ps1` (Windows). Those scripts are described under [Switching logins and restoring gbot on another machine](#switching-logins-and-restoring-gbot-on-another-machine). The shell script was tested with fake `git`, `npm`, and `gbot` on `PATH`. The PowerShell script was checked by reading it. Neither script was run against GitLab.
 
 ### Verify, upgrade, uninstall
 
@@ -70,7 +70,7 @@ If you used `npm link`, run `npm unlink -g grok-bot-cli` in the clone.
 | Linux | `$XDG_CONFIG_HOME/Grok Bot` or `~/.config/Grok Bot` | `secret-tool` (`libsecret-tools`), except the basic-text v10 key |
 | Windows | `%APPDATA%\Grok Bot` | DPAPI via PowerShell (`Local State`) |
 
-One saved login is used automatically. Several logins and no choice is an error that lists labels, unless a config default alias is set (see below). `gbot doctor` and `gbot wear pair` do not use that default.
+With no `--account`, `GBOT_ACCOUNT`, or config default, gbot uses the descriptor's single entry, else its one app-active entry, else the only saved login. Several remaining logins and no choice is an error that lists labels. `gbot doctor` and `gbot wear pair` do not use that default. `gbot doctor` does resolve `--account` or `GBOT_ACCOUNT` as an alias, email, label, or id. `gbot wear pair --account` accepts those selectors and still ignores `GBOT_ACCOUNT` and the config default.
 
 ```sh
 gbot accounts
@@ -90,9 +90,9 @@ gbot doctor
 
 ### Switching logins and restoring gbot on another machine
 
-The desktop app keeps the login it is showing in `gateway-descriptor.json`. Every signed-in login stays in `sand-secrets.json` under `cursor-accounts`. After the app switches logins, the other login can disappear from the descriptor. gbot still lists it. If that login has no descriptor entry, gbot builds a gateway session from the saved access token: EnsureSandBox `{ "wake": false }` first, then `{ "wake": true }` unless the box is already `RUNNING` and the answer has gateway fields. The session is not written to disk. The refresh token is never read. The app token is sent only to https Cursor API hosts.
+The desktop app keeps the login it is showing in `gateway-descriptor.json`. Every signed-in login stays in `sand-secrets.json` under `cursor-accounts`. After the app switches logins, the other login can disappear from the descriptor. gbot still lists it. If that login has no descriptor entry, gbot builds a gateway session from the saved access token: EnsureSandBox `{ "wake": false }` first, then `{ "wake": true }` unless the box is already `RUNNING` and the answer has gateway fields. The session is not written to disk. `GBOT_AUTO_WAKE=0` describes the box and fails closed when it is not already running. The refresh token is never decrypted. The app token is sent only to https Cursor API hosts. EnsureSandBox errors redact the app access token, the gateway token, and the network token. A label or id that aliases a secret is printed as `login <n>`. `--json` `label` stays the descriptor label when there is one; `email` is a separate field. A single v1 descriptor and one saved login for the same account are one row.
 
-`gbot accounts` marks the app's current login `(app active)` and a login with no descriptor entry `(no app session; gbot builds one from the saved login)`. The label is the email from the decrypted profile, or the first 8 hex characters of the scope when the profile cannot be decrypted. Alias names are printed on their own line.
+`gbot accounts` marks the app's current login `(app active)` and a login with no descriptor entry `(no app session; gbot builds one from the saved login)`. The label stays the descriptor label when there is one. Otherwise it is the email from the decrypted profile, or the first 8 hex characters of the scope when the profile cannot be decrypted. The email is printed on its own line when it differs from the label. Alias names are printed on their own line. A label or id that aliases a secret is `login <n>`.
 
 Give a login a name and, if you want, make it the default. These are arguments of `gbot accounts` (this bundler cannot also make `accounts` a command group):
 
@@ -103,11 +103,11 @@ gbot accounts unalias work
 gbot accounts default --clear
 ```
 
-An alias name matches `^[A-Za-z0-9_-]{1,32}$`. A selector is that alias, an email (case-insensitive), a descriptor label, or an id or scope prefix of at least 8 hex characters. More than one match is the same error as before.
+An alias name matches `^[A-Za-z0-9_-]{1,32}$` and must not be an Object prototype key such as `__proto__`, `constructor`, or `prototype`. A selector is that alias, an email (case-insensitive), a descriptor label, or an id or scope prefix of at least 8 hex characters. More than one match is the same error as before. An explicit selector that does not resolve, or whose login cannot be used, fails and does not switch to `CURSOR_ACCESS_TOKEN` or another login.
 
-Gateway commands (`gbot send`, `gbot wake`, and the rest that take `--account`) resolve in this order: `--account`, then `GBOT_ACCOUNT`, then the config `default`, then the single saved login. Several logins and none of those is an error. `gbot doctor` still inspects the descriptor and does not apply the config default. `gbot wear pair` still sends a descriptor session only, and still ignores `GBOT_ACCOUNT` and the config default. A login that exists only in `sand-secrets.json` is not offered to the watch.
+Gateway commands (`gbot send`, `gbot wake`, and the rest that take `--account`) resolve in this order: `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN` when both are set; otherwise `--account`, then `GBOT_ACCOUNT`, then the config `default`. With no selector, gbot uses the descriptor's single entry, else its one app-active entry, else the only saved login. Several remaining logins and none of those is an error. A saved-only login is used when it is explicitly selected or when it is the only login. `CURSOR_ACCESS_TOKEN` is used only when there is no app login, or when that implicit login cannot be decrypted or is expired. Host-policy and other backend errors stay failures. `gbot doctor` resolves `--account` or `GBOT_ACCOUNT` and does not apply the config default. `gbot wear pair` still sends a descriptor session only. Its `--account` accepts an alias, email, label, or id, and it still ignores `GBOT_ACCOUNT` and the config default. A login that exists only in `sand-secrets.json` is not offered to the watch. Relay and MCP keep a separate worker and session for each resolved account scope.
 
-The config file holds aliases and the default. It has no tokens. On macOS and Linux it is `$XDG_CONFIG_HOME/grok-bot-cli/config.json`, or `~/.config/grok-bot-cli/config.json` when `XDG_CONFIG_HOME` is unset. On Windows it is `%APPDATA%\grok-bot-cli\config.json`. `GBOT_CONFIG` overrides the path. `gbot config path` prints it. The file is mode 0600 and is created only when alias, default, or import writes it.
+The config file holds aliases and the default. It has no tokens. On macOS and Linux it is `$XDG_CONFIG_HOME/grok-bot-cli/config.json`, or `~/.config/grok-bot-cli/config.json` when `XDG_CONFIG_HOME` is unset. On Windows it is `%APPDATA%\grok-bot-cli\config.json`. `GBOT_CONFIG` overrides the path. `gbot config path` prints it. The file is mode 0600 and is created only when alias, default, or import writes it. The write uses a temp file in the same directory (mode 0600), fsync, and rename. If the rename fails, the old file stays and the error is reported. A merge import keeps the local default when the incoming `default` is null. A named default in the file still becomes the default. `--replace` replaces the alias map and the default. An unreadable existing config makes `gbot accounts` and `gbot accounts default --clear` exit 2. An explicit `--account` or `GBOT_ACCOUNT` that matches a label, email, or id still works when the config cannot be read. Import of a broken existing config exits 2 unless `--replace`.
 
 Export and import move the names to another machine. The export includes emails, because a restore should name the same logins. It never includes tokens. Keep the file in a password manager (or another place you already trust with account names). Do not commit it.
 
@@ -127,9 +127,9 @@ scripts/install-fork.sh --config gbot-accounts.json
 scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.4
 ```
 
-The script clones `https://gitlab.com/aa22396584/grok-bot-cli.git` into `$XDG_CACHE_HOME/grok-bot-cli/src` (default `~/.cache/grok-bot-cli/src`), checks out the ref (`main` if you omit it), runs `npm ci` and `npm pack`, and installs that tarball globally. `npm ci` is required because `npm pack` runs `agent-bundle prepack`, which fills `dist/` from the committed `artifact/`. It then runs `gbot --version`, `gbot accounts`, `gbot config import` when `--config` was given, and `gbot wake --check --account <alias>` for each alias, and prints a summary. It refuses to run as root or Administrator unless `--allow-root` (PowerShell `-AllowRoot`) is given. `--dry-run` prints the steps and does not run git or npm. The script does not store or print tokens.
+The script clones `https://gitlab.com/aa22396584/grok-bot-cli.git` into `$XDG_CACHE_HOME/grok-bot-cli/src` (default `~/.cache/grok-bot-cli/src`; on Windows, `%LOCALAPPDATA%\grok-bot-cli\src`). `--config` is made absolute before any directory change. The ref may contain only `[A-Za-z0-9._/-]`, must not start with `-`, and is passed to git after `--`. A ref after `--` is that ref (`-- v1.2` does not install `main`). The script fetches the ref and checks out that commit, prints it, and refuses a dirty cache. `npm pack` writes to an installer-owned temporary directory outside the checkout; that directory is removed after the run. The installer never deletes unknown cache files. A cache containing a `.tgz` left by an older installer is refused unchanged; preserve or move that cache and use a clean cache location rather than asking this installer to migrate it. It then runs `gbot --version` and `gbot accounts` (an accounts failure does not skip import), `gbot config import` when `--config` was given, and `gbot wake --check --account <alias>` for each alias. A failed import or wake exits non-zero, or 3 when import reports logins missing. It refuses to run as root or Administrator unless `--allow-root` (PowerShell `-AllowRoot`) is given. `--dry-run` and PowerShell `-DryRun` print the steps and do not run git or npm. The script does not store or print tokens. `scripts/install-fork.sh` is executable.
 
-What was tested: the shell script's `--dry-run` with fake `git` and `npm` on `PATH`, and a static check that the PowerShell script names the same steps. The scripts were not executed against GitLab, and a live switch between two Grok accounts was not run in this change.
+What was tested: on a POSIX host, the shell script with fake `git`, `npm`, and `gbot` on `PATH`, including a relative `--config`, two consecutive clean-cache runs, rejection and byte-for-byte preservation of a legacy tarball, a rejected ref, and a failing step. The PowerShell script has a static source check that it names the same steps, checks `$LASTEXITCODE` after each native call, avoids fixed output files, and uses a private pack directory; it was not executed because PowerShell was unavailable on the test host. The scripts were not executed against GitLab. Two accounts in one process were checked with synthetic fixtures, not with a live account switch.
 
 ### Wake an asleep box (`gbot wake`)
 
@@ -354,7 +354,7 @@ npm run build
 npm link
 ```
 
-要在另一台機器安裝或還原這個 fork，又不要用 `git+https`，用 `scripts/install-fork.sh`（macOS／Linux）或 `scripts/install-fork.ps1`（Windows）。說明在[切換登入，以及在另一台機器還原 gbot](#切換登入以及在另一台機器還原-gbot)。這次只測了 dry-run，沒有對 GitLab 實際執行腳本。
+要在另一台機器安裝或還原這個 fork，又不要用 `git+https`，用 `scripts/install-fork.sh`（macOS／Linux）或 `scripts/install-fork.ps1`（Windows）。說明在[切換登入，以及在另一台機器還原 gbot](#切換登入以及在另一台機器還原-gbot)。shell 腳本用 PATH 上的假 `git`、`npm` 與 `gbot` 測過。PowerShell 腳本是讀過內容檢查的。兩邊都沒有對 GitLab 實際執行。
 
 ### 確認、升級、移除
 
@@ -402,7 +402,7 @@ gbot doctor
 
 ### 切換登入，以及在另一台機器還原 gbot
 
-桌面版把目前顯示的登入放在 `gateway-descriptor.json`。每一個已登入的帳號都留在 `sand-secrets.json` 的 `cursor-accounts`。App 切換登入之後，另一個登入可能從 descriptor 消失。gbot 仍會列出它。若那個登入沒有 descriptor 項目，gbot 用已存的 access token 在記憶體裡建立 gateway 工作階段：先送 EnsureSandBox `{ "wake": false }`，除非雲端電腦已經是 `RUNNING` 而且回答帶有 gateway 欄位，否則再送 `{ "wake": true }`。這個工作階段不會寫回磁碟。refresh token 不會被讀。App token 只送到 https 的 Cursor API 主機。
+桌面版把目前顯示的登入放在 `gateway-descriptor.json`。每一個已登入的帳號都留在 `sand-secrets.json` 的 `cursor-accounts`。App 切換登入之後，另一個登入可能從 descriptor 消失。gbot 仍會列出它。若那個登入沒有 descriptor 項目，gbot 用已存的 access token 在記憶體裡建立 gateway 工作階段：先送 EnsureSandBox `{ "wake": false }`，除非雲端電腦已經是 `RUNNING` 而且回答帶有 gateway 欄位，否則再送 `{ "wake": true }`。這個工作階段不會寫回磁碟。refresh token 不會被解密。App token 只送到 https 的 Cursor API 主機。
 
 `gbot accounts` 把 App 目前的登入標成 `(app active)`。沒有 descriptor 項目的登入標成 `(no app session; gbot builds one from the saved login)`。標籤是解密後個人資料裡的 email；解不開時用 scope 的前 8 個十六進位字元。別名另起一行。
 
@@ -439,9 +439,9 @@ scripts/install-fork.sh --config gbot-accounts.json
 scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.4
 ```
 
-腳本把 `https://gitlab.com/aa22396584/grok-bot-cli.git` clone 到 `$XDG_CACHE_HOME/grok-bot-cli/src`（預設 `~/.cache/grok-bot-cli/src`），檢出指定的 ref（省略時是 `main`），執行 `npm ci` 與 `npm pack`，再全域安裝那個 tarball。需要 `npm ci` 是因為 `npm pack` 會跑 `agent-bundle prepack`，用已提交的 `artifact/` 填 `dist/`。接著執行 `gbot --version`、`gbot accounts`；有 `--config` 時執行 `gbot config import`；每個別名再跑 `gbot wake --check --account <別名>`，然後印摘要。以 root 或 Administrator 執行會拒絕，除非加上 `--allow-root`（PowerShell 是 `-AllowRoot`）。`--dry-run` 只印步驟，不跑 git 或 npm。腳本不儲存、也不印 token。
+腳本把 `https://gitlab.com/aa22396584/grok-bot-cli.git` clone 到 `$XDG_CACHE_HOME/grok-bot-cli/src`（預設 `~/.cache/grok-bot-cli/src`；Windows 是 `%LOCALAPPDATA%\grok-bot-cli\src`）。`--config` 會先變成絕對路徑，再換目錄。ref 只能含 `[A-Za-z0-9._/-]`，不能以 `-` 開頭，並在 `--` 之後傳給 git。`-- v1.2` 不會改裝 `main`。腳本從遠端取出該 ref、檢出那個 commit、印出它，並拒絕髒的 cache。`npm pack` 只會寫入 checkout 外由安裝程式建立的私有暫存目錄，並在結束時清除該目錄；安裝程式不會刪除未知的 cache 檔案。若 cache 含舊安裝程式留下的 `.tgz`，腳本會原樣保留並拒絕該 cache；請保留或移開舊 cache，使用乾淨的 cache 位置。它只安裝這次 `npm pack` 剛印出的檔案。需要 `npm ci` 是因為 `npm pack` 會跑 `agent-bundle prepack`，用已提交的 `artifact/` 填 `dist/`。接著執行 `gbot --version` 與 `gbot accounts`（accounts 失敗不會跳過 import）；有 `--config` 時執行 `gbot config import`；每個別名再跑 `gbot wake --check --account <別名>`。import 或 wake 失敗會以非 0 結束，import 回報尚未登入時是 3。以 root 或 Administrator 執行會拒絕，除非加上 `--allow-root`（PowerShell 是 `-AllowRoot`）。`--dry-run` 與 PowerShell `-DryRun` 只印步驟，不跑 git 或 npm。腳本不儲存、也不印 token。`scripts/install-fork.sh` 可執行。
 
-這次測了什麼：shell 腳本的 `--dry-run`（PATH 上是假的 `git` 與 `npm`），以及靜態檢查 PowerShell 腳本有寫出同樣的步驟。腳本沒有對 GitLab 實際執行，這次也沒有用兩個真實的 Grok 帳號切換。
+這次測了什麼：在 POSIX 主機以 PATH 上的假 `git`、`npm` 與 `gbot` 執行 shell 腳本，包含相對的 `--config`、連續兩次乾淨 cache 安裝、拒絕舊 tarball 並逐位元組保留內容、被拒絕的 ref，以及失敗的步驟。PowerShell 腳本只做靜態檢查：步驟一致、每個原生呼叫後檢查 `$LASTEXITCODE`、不寫固定輸出檔，並使用私有打包目錄；測試主機沒有 PowerShell，因此未執行其 runtime 測試。腳本沒有對 GitLab 實際執行。同一個行程裡的兩個帳號是用合成 fixture 檢查的，不是實機切換。
 
 ### 喚醒睡眠中的雲端電腦（`gbot wake`）
 

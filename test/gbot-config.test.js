@@ -91,11 +91,10 @@ test("config path follows XDG, APPDATA, and GBOT_CONFIG, and reading does not cr
     override,
   );
   assert.equal(existsSync(join(home, ".config", "grok-bot-cli", "config.json")), false);
-  assert.deepEqual(readGbotConfig({ platform: "darwin", home, env: {} }), {
-    version: 1,
-    aliases: {},
-    default: null,
-  });
+  const empty = readGbotConfig({ platform: "darwin", home, env: {} });
+  assert.equal(empty.version, 1);
+  assert.equal(empty.default, null);
+  assert.deepEqual(Object.keys(empty.aliases), []);
   assert.equal(existsSync(join(home, ".config", "grok-bot-cli", "config.json")), false);
 });
 
