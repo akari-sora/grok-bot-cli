@@ -49,6 +49,7 @@ function fixture() {
   }));
   const env = { ...process.env, HOME: home, USERPROFILE: home, GROK_BOT_TEST: "1" };
   delete env.GBOT_ACCOUNT;
+  delete env.GBOT_CONFIG;
   for (const key of Object.keys(env)) {
     if (/^(GROK_BOT_|CURSOR_|SAND_)/.test(key) && key !== "GROK_BOT_TEST") delete env[key];
   }
@@ -115,6 +116,7 @@ function fixtureV3() {
   }));
   const env = { ...process.env, HOME: home, USERPROFILE: home, GROK_BOT_TEST: "1" };
   delete env.GBOT_ACCOUNT;
+  delete env.GBOT_CONFIG;
   for (const key of Object.keys(env)) {
     if (/^(GROK_BOT_|CURSOR_|SAND_)/.test(key) && key !== "GROK_BOT_TEST") delete env[key];
   }

@@ -4,13 +4,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { decryptGrokBotSafeStorage, grokBotGatewayDescriptorPath } from "./app-session.js";
+import { redactSecrets } from "./url-policy.js";
 
 // Property lookup so a caller can count reads. Node's ESM `fs` bindings cannot be replaced.
 export const secretFiles = { readFileSync };
 
 export class AppAuthError extends Error {
   constructor(code, message) {
-    super(message);
+    super(redactSecrets(message));
     this.name = "AppAuthError";
     this.code = code;
   }

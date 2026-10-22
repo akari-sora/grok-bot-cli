@@ -202,6 +202,31 @@ test("Windows registry queries share one 3s budget", () => {
   assert.deepEqual(timeouts, [3000, 500]);
 });
 
+test("Windows /f search keeps a key path that contains spaces when DisplayName has no version", () => {
+  const key = "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Grok Bot_is1";
+  const search = [
+    key,
+    "    DisplayName    REG_SZ    Grok Bot",
+    "",
+  ].join("\r\n");
+  let queried = "";
+  const version = cursorClientVersion({
+    env: {},
+    platform: "win32",
+    execFile: (_cmd, args) => {
+      if (args.includes("/f")) return search;
+      if (args.includes("/v")) {
+        queried = args[1];
+        if (args[1] !== key) throw new Error("wrong key");
+        return [key, "    DisplayVersion    REG_SZ    1.2.3", ""].join("\r\n");
+      }
+      throw new Error("missing key");
+    },
+  });
+  assert.equal(queried, key);
+  assert.equal(version, "1.2.3");
+});
+
 test("a DisplayName that does not start with Grok Bot is ignored", () => {
   const output = [
     `HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${REG_APP_ID}`,

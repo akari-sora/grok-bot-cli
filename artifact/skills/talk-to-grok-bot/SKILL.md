@@ -12,7 +12,7 @@ Reply in the user's language.
 
 Fork CLI (this install is ImL1s's fork; details in `FORK.md`):
 
-1. If several Grok Bot logins are saved, pass `--account <label>` after the subcommand, or set `GBOT_ACCOUNT`. `gbot accounts` lists labels only. `gbot --account` before the subcommand is an unknown option.
+1. If several Grok Bot logins are saved, pass `--account <alias-email-or-label>` after the subcommand, or set `GBOT_ACCOUNT`. `gbot accounts` lists each login's label, email, and alias. `gbot --account` before the subcommand is an unknown option.
 2. Send exact text with `gbot send <bot> --stdin` (default off). Do not combine it with a positional message.
 3. Read with `gbot --json thread <bot> --normalized` (default off; requires `--json`) or `gbot thread <bot> --after <cursor> --json`. `--after` JSON includes `cursor`, `entryCount`, and `gapReset`.
 4. A send that returns `delivery: "unknown"` may have landed. Read the thread. Do not send again.
@@ -74,8 +74,10 @@ List targets with `gbot bots list` / `gbot groups list` when the name is ambiguo
 Same order as `gbot`: `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`,
 else the Grok Bot app session, else `CURSOR_ACCESS_TOKEN`. An asleep app-login
 box (`BOX_ASLEEP`) is woken once with the app's saved access token and the call
-is retried; `GBOT_AUTO_WAKE=0` turns that off. `gbot doctor` shows
-which source is present.
+is retried; `GBOT_AUTO_WAKE=0` turns that off. A bare 417 wakes only these read
+calls: `listAgents`, `getAgentThread`, `getAgentTranscriptTail`, and
+`getAgentWorkflows`. `sendPrompt` and every other call wake only when the 417
+has sleep evidence. `gbot doctor` shows which source is present.
 
 ## Claude Code channel
 

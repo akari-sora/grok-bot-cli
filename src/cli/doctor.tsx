@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { inspectGrokBotGatewaySession } from '../core/app-session.js';
 import { hasGatewayAuth } from '../core/gateway.js';
+import { resolveGrokBotLogin } from '../core/logins.js';
 import {
   defaultCandidateRoots,
   looksLikeAgentsRoot,
@@ -20,7 +21,7 @@ export const config = {
       dir: { description: 'Agents directory for --files mode', type: 'string' },
       files: { description: 'Force the on-disk agents store', type: 'boolean' },
       gateway: { description: 'Force the live gateway', type: 'boolean' },
-      account: { description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT', type: 'string' },
+      account: { description: 'Saved Grok Bot login (alias, email, label, or id). Overrides GBOT_ACCOUNT. Does not use the config default', type: 'string' },
     },
     type: 'object',
   },
@@ -36,6 +37,28 @@ export const resultSchema = z.object({
   resolved: z.string().nullable(),
 }).strict();
 
+function inspectDoctorSession(account: string | undefined) {
+  const selector = (account ?? '').trim() || String(process.env.GBOT_ACCOUNT ?? '').trim();
+  if (!selector) return inspectGrokBotGatewaySession({});
+  try {
+    const choice = resolveGrokBotLogin({ account: selector });
+    if (!choice) return { present: false, usable: false };
+    if (!choice.hasDescriptorEntry) {
+      return choice.usable
+        ? { present: true, usable: true }
+        : { present: true, usable: false, code: 'UNUSABLE_SESSION', error: 'This saved login has no usable descriptor entry.' };
+    }
+    return inspectGrokBotGatewaySession({ account: choice.id });
+  } catch (error) {
+    return {
+      present: true,
+      usable: false,
+      code: error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : 'UNUSABLE_SESSION',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export default async function doctor({ input }: CliRouteProps<typeof inputSchema>) {
   const candidates = defaultCandidateRoots().filter((c): c is string => typeof c === 'string');
   const found = candidates.filter(looksLikeAgentsRoot);
@@ -47,7 +70,7 @@ export default async function doctor({ input }: CliRouteProps<typeof inputSchema
   }
   const note = 'Live roster is on the box. Prefer CURSOR_ACCESS_TOKEN then EnsureSandBox then POST gateway /api/*.';
   const gatewayAuthPresent = hasGatewayAuth();
-  const grokBotAppSession = inspectGrokBotGatewaySession({ account: input.account });
+  const grokBotAppSession = inspectDoctorSession(input.account);
   const sessionJson = {
     present: grokBotAppSession.present,
     usable: grokBotAppSession.usable,

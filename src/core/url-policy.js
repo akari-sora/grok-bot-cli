@@ -179,5 +179,30 @@ export function redactSecrets(text) {
     "$1<redacted>",
   );
   s = s.replace(/(x-anyrun-network-token\s*[=:]\s*)(\S+)/gi, "$1<redacted>");
+  // A bare app JWT is not a named field. Error bodies sometimes echo it as the whole message.
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}/g, "<redacted>");
   return s;
+}
+
+/** Replace known secret values after the pattern redaction. Longer values first so a suffix cannot survive. */
+export function redactKnownSecrets(text, secrets) {
+  let s = redactSecrets(text);
+  const list = Array.isArray(secrets) ? secrets : [];
+  const sorted = list
+    .filter((item) => typeof item === "string" && item.length >= 8)
+    .sort((a, b) => b.length - a.length);
+  for (const secret of sorted) {
+    if (s.includes(secret)) s = s.split(secret).join("<redacted>");
+  }
+  return s;
+}
+
+/** Drop C0, DEL, C1, and bidi controls so imported text cannot steer a terminal. */
+export function printableText(text) {
+  return Array.from(String(text ?? ""), (char) => {
+    const c = char.codePointAt(0) ?? 0;
+    const hidden = c < 0x20 || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029
+      || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
+    return hidden ? "?" : char;
+  }).join("");
 }

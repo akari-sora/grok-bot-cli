@@ -529,6 +529,36 @@ function closeServers(servers) {
   })));
 }
 
+test("an encrypted login read increments the keychain counter", async () => {
+  const counted = await countSecretReads();
+  try {
+    assert.equal(counted.available, true);
+    const platform = process.platform === "linux" ? "linux" : "darwin";
+    const sub = "user_synthetic_keychain_positive";
+    const scope = scopeFor(sub);
+    const home = mkdtempSync(join(tmpdir(), "gbot-keychain-positive-"));
+    const secretsPath = join(dirname(grokBotGatewayDescriptorPath(home, platform, {})), "sand-secrets.json");
+    mkdirSync(dirname(secretsPath), { recursive: true });
+    const token = jwt(Math.floor(Date.now() / 1000) + 3600, sub);
+    writeFileSync(secretsPath, JSON.stringify({
+      version: 1,
+      "cursor-accounts": JSON.stringify({
+        active: scope,
+        accounts: {
+          [scope]: { "cursor-access-token": encryptAccessToken(token, ABORT_KEYCHAIN_PASSWORD) },
+        },
+      }),
+    }));
+    const { loadAppAccessToken } = await import("../src/core/app-auth.js");
+    const loaded = loadAppAccessToken({ scope, home, platform, env: {}, now: () => Date.now() });
+    assert.equal(loaded.scope, scope);
+    assert.equal(loaded.token, token);
+    assert.ok(counted.counts.keychain >= 1, `keychain reads ${counted.counts.keychain}`);
+  } finally {
+    counted.restore();
+  }
+});
+
 test("an already-aborted sendPrompt does not read the login or reject unhandled", async (t) => {
   const rejections = [];
   const onRejection = (reason) => { rejections.push(reason); };
@@ -1057,6 +1087,44 @@ test("a wake EnsureSandBox call stays inside the remaining budget", async (t) =>
   assert.equal(error.code, "BOX_ASLEEP");
   assert.equal(error.wake.attempted, true);
   assert.equal(error.wake.error, "WAKE_TIMEOUT");
+});
+
+test("a second HIBERNATED reply at the end of the budget is WAKE_TIMEOUT", async () => {
+  let clock = 5_000;
+  const now = () => clock;
+  let calls = 0;
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 2) clock = 5_000 + 10_000;
+    return new Response(JSON.stringify({ runState: "SAND_BOX_RUN_STATE_HIBERNATED" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    await withEnv({
+      CURSOR_API_BASE_URL: "http://127.0.0.1:9",
+      GROK_BOT_TEST: "1",
+      SAND_CLIENT_VERSION: "9.9.9",
+      GROK_BOT_ALLOW_ANY_GATEWAY: null,
+      GROK_BOT_GATEWAY_URL: null,
+      GROK_BOT_GATEWAY_TOKEN: null,
+    }, () => wakeSandbox("synthetic-access-token", {
+      timeoutMs: 1000,
+      intervalMs: 1,
+      appLogin: true,
+      now,
+    }));
+    assert.fail("expected WAKE_TIMEOUT");
+  } catch (error) {
+    assert.equal(error.name, "GatewayError");
+    assert.equal(error.code, "WAKE_TIMEOUT");
+    assert.equal(calls, 2);
+    assert.equal(String(error.message).includes("synthetic-access-token"), false);
+  } finally {
+    globalThis.fetch = previous;
+  }
 });
 
 test("HIBERNATED after wake true waits one poll interval, sends wake true once more, then fails", async (t) => {

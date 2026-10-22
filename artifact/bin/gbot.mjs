@@ -6500,7 +6500,7 @@ var __webpack_modules__ = {
         var _core_store_js__rspack_import_1 = __webpack_require__("./src/core/store.js");
         var _gbot_js__rspack_import_2 = __webpack_require__("./src/gbot.ts");
         const backendFlagsSchema = zod__rspack_import_3.Ikc({
-            account: zod__rspack_import_3.YjP().min(1).optional().describe('Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT'),
+            account: zod__rspack_import_3.YjP().min(1).optional().describe("Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry"),
             dir: zod__rspack_import_3.YjP().min(1).optional().describe('Agents directory for --files mode'),
             files: zod__rspack_import_3.zMY().optional().describe('Force the on-disk agents store'),
             gateway: zod__rspack_import_3.zMY().optional().describe('Force the live gateway')
@@ -6617,41 +6617,178 @@ var __webpack_modules__ = {
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
         var _agent_bundle_runtime__rspack_import_3 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
         var zod__rspack_import_2 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
-        var _core_app_session_js__rspack_import_1 = __webpack_require__("./src/core/app-session.js");
+        var _core_logins_js__rspack_import_1 = __webpack_require__("./src/core/logins.js");
         const config = {
-            description: 'List saved Grok Bot logins without printing credentials.',
+            description: 'List saved Grok Bot logins, or manage aliases: gbot accounts alias <name> <selector>, unalias <name>, default <name>, default --clear.',
+            exitCode: 'result',
             inputJsonSchema: {
                 additionalProperties: false,
-                properties: {},
+                properties: {
+                    action: {
+                        description: 'alias, unalias, or default. Omit to list logins.',
+                        type: 'string'
+                    },
+                    name: {
+                        description: 'Alias name',
+                        type: 'string'
+                    },
+                    selector: {
+                        description: 'Email, label, id, or id prefix of at least 8 hex characters',
+                        type: 'string'
+                    },
+                    clear: {
+                        description: 'With default, clear the default alias',
+                        type: 'boolean'
+                    }
+                },
                 type: 'object'
-            }
+            },
+            positionals: [
+                'action',
+                'name',
+                'selector'
+            ]
         };
         const accountSchema = zod__rspack_import_2.Ikc({
             id: zod__rspack_import_2.YjP(),
             label: zod__rspack_import_2.YjP(),
             lastSaved: zod__rspack_import_2.zMY(),
             savedAtMs: zod__rspack_import_2.aig().optional(),
-            usable: zod__rspack_import_2.zMY()
+            usable: zod__rspack_import_2.zMY(),
+            email: zod__rspack_import_2.YjP().nullable(),
+            alias: zod__rspack_import_2.YjP().nullable(),
+            appActive: zod__rspack_import_2.zMY(),
+            hasDescriptorEntry: zod__rspack_import_2.zMY()
         }).strict();
-        const inputSchema = zod__rspack_import_2.Ikc({}).strict();
+        const inputSchema = zod__rspack_import_2.Ikc({
+            action: zod__rspack_import_2.YjP().min(1).optional(),
+            name: zod__rspack_import_2.YjP().min(1).optional(),
+            selector: zod__rspack_import_2.YjP().min(1).optional(),
+            clear: zod__rspack_import_2.zMY().optional()
+        }).strict();
         const resultSchema = zod__rspack_import_2.Ikc({
-            accounts: zod__rspack_import_2.YOg(accountSchema)
+            exitCode: zod__rspack_import_2.KCZ([
+                zod__rspack_import_2.euz(0),
+                zod__rspack_import_2.euz(2)
+            ]),
+            accounts: zod__rspack_import_2.YOg(accountSchema).optional(),
+            name: zod__rspack_import_2.YjP().optional(),
+            scope: zod__rspack_import_2.YjP().optional(),
+            default: zod__rspack_import_2.YjP().nullable().optional(),
+            error: zod__rspack_import_2.YjP().optional()
         }).strict();
-        const formatAccount = (row)=>{
-            const notes = [
-                row.lastSaved ? 'last saved' : '',
-                row.usable ? '' : 'unusable'
-            ].filter(Boolean);
-            const suffix = notes.length ? ` (${notes.join(', ')})` : '';
-            return row.label === row.id ? `${row.label}${suffix}` : `${row.label}${suffix}\n  id ${row.id}`;
-        };
-        async function accounts(_props) {
-            const rows = (0, _core_app_session_js__rspack_import_1.Nn)();
-            const text = rows.length === 0 ? 'No saved Grok Bot logins. Open the Grok Bot app and sign in once.' : rows.map(formatAccount).join('\n');
+        const publicRow = (row)=>({
+                id: row.shownId || row.id,
+                label: row.label,
+                lastSaved: row.lastSaved,
+                ...row.savedAtMs !== undefined ? {
+                    savedAtMs: row.savedAtMs
+                } : {},
+                usable: row.usable,
+                email: row.email,
+                alias: row.alias,
+                appActive: row.appActive,
+                hasDescriptorEntry: row.hasDescriptorEntry
+            });
+        function usage(error) {
+            return {
+                exitCode: 2,
+                error
+            };
+        }
+        function caught(error) {
+            if (!error || typeof error !== 'object') return null;
+            const code = 'code' in error ? String(error.code) : '';
+            const exitCode = 'exitCode' in error && typeof error.exitCode === 'number' ? error.exitCode : undefined;
+            if (exitCode !== 2 && code !== 'AMBIGUOUS_ENTRIES' && code !== 'UNKNOWN_ACCOUNT' && code !== 'INVALID') return null;
+            const message = error instanceof Error ? error.message : 'Could not update the gbot account config.';
+            return {
+                exitCode: 2,
+                error: message
+            };
+        }
+        function runAction(input) {
+            const action = input.action;
+            if (!action) {
+                if (input.name || input.selector || input.clear) {
+                    return usage('gbot accounts lists logins. To change aliases, use alias, unalias, or default.');
+                }
+                try {
+                    const rows = (0, _core_logins_js__rspack_import_1.fR)().map(publicRow);
+                    return {
+                        exitCode: 0,
+                        accounts: rows
+                    };
+                } catch (error) {
+                    return caught(error) ?? {
+                        exitCode: 2,
+                        error: error instanceof Error ? error.message : 'Could not read the gbot account config.'
+                    };
+                }
+            }
+            if (action === 'alias') {
+                if (!input.name || !input.selector || input.clear) return usage('Usage: gbot accounts alias <name> <selector>');
+                try {
+                    const saved = (0, _core_logins_js__rspack_import_1.Es)({
+                        name: input.name,
+                        selector: input.selector
+                    });
+                    return {
+                        exitCode: 0,
+                        name: saved.name,
+                        scope: saved.scope
+                    };
+                } catch (error) {
+                    return caught(error) ?? {
+                        exitCode: 2,
+                        error: error instanceof Error ? error.message : 'Could not save the alias.'
+                    };
+                }
+            }
+            if (action === 'unalias') {
+                if (!input.name || input.selector || input.clear) return usage('Usage: gbot accounts unalias <name>');
+                try {
+                    (0, _core_logins_js__rspack_import_1.d3)({
+                        name: input.name
+                    });
+                    return {
+                        exitCode: 0,
+                        name: input.name
+                    };
+                } catch (error) {
+                    return caught(error) ?? {
+                        exitCode: 2,
+                        error: error instanceof Error ? error.message : 'Could not remove the alias.'
+                    };
+                }
+            }
+            if (action === 'default') {
+                if (input.selector || input.clear && input.name || !input.clear && !input.name) {
+                    return usage('Usage: gbot accounts default <name> | gbot accounts default --clear');
+                }
+                try {
+                    (0, _core_logins_js__rspack_import_1.Rz)({
+                        name: input.name,
+                        clear: Boolean(input.clear)
+                    });
+                    return {
+                        exitCode: 0,
+                        default: input.clear ? null : input.name ?? null
+                    };
+                } catch (error) {
+                    return caught(error) ?? {
+                        exitCode: 2,
+                        error: error instanceof Error ? error.message : 'Could not set the default alias.'
+                    };
+                }
+            }
+            return usage('Usage: gbot accounts [alias <name> <selector> | unalias <name> | default <name> | default --clear]');
+        }
+        async function accounts({ input }) {
+            const value = runAction(input);
+            const text = value.accounts ? (0, _core_logins_js__rspack_import_1.u3)(value.accounts) : value.error ? value.error : value.name && value.scope ? `Alias ${value.name} saved.` : value.name ? `Alias ${value.name} removed.` : value.default ? `Default login is ${value.default}.` : 'Default login cleared.';
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Result, {
-                value: {
-                    accounts: rows
-                },
+                value: value,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Text, {
                     children: text
                 })
@@ -6782,7 +6919,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     avatarColor: {
@@ -6854,7 +6991,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     ref: {
@@ -6918,7 +7055,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     ref: {
@@ -6983,7 +7120,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     }
                 },
@@ -7038,7 +7175,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     avatarColor: {
@@ -8581,15 +8718,169 @@ var __webpack_modules__ = {
             config: config
         });
     },
+    "./src/cli/config/export.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
+        var _agent_bundle_runtime__rspack_import_3 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_2 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_gbot_config_js__rspack_import_1 = __webpack_require__("./src/core/gbot-config.js");
+        const config = {
+            description: 'Write aliases and the default login as JSON. Includes emails. Never includes tokens.',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    out: {
+                        description: 'File to write. Omit to print the JSON.',
+                        type: 'string'
+                    }
+                },
+                type: 'object'
+            }
+        };
+        const inputSchema = zod__rspack_import_2.Ikc({
+            out: zod__rspack_import_2.YjP().min(1).optional()
+        }).strict();
+        const aliasSchema = zod__rspack_import_2.Ikc({
+            scope: zod__rspack_import_2.YjP(),
+            email: zod__rspack_import_2.YjP().optional()
+        }).strict();
+        const resultSchema = zod__rspack_import_2.Ikc({
+            version: zod__rspack_import_2.euz(1),
+            aliases: zod__rspack_import_2.g1P(zod__rspack_import_2.YjP(), aliasSchema),
+            default: zod__rspack_import_2.YjP().nullable(),
+            gbotVersion: zod__rspack_import_2.YjP()
+        }).strict();
+        async function configExport({ input }) {
+            const doc = (0, _core_gbot_config_js__rspack_import_1.s1)({
+                out: input.out
+            });
+            const text = input.out ? `Wrote ${input.out}` : JSON.stringify(doc, null, 2);
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Result, {
+                value: doc,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Text, {
+                    children: text
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>configExport
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
+    "./src/cli/config/import.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
+        var _agent_bundle_runtime__rspack_import_4 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_gbot_config_js__rspack_import_1 = __webpack_require__("./src/core/gbot-config.js");
+        var _core_url_policy_js__rspack_import_2 = __webpack_require__("./src/core/url-policy.js");
+        const config = {
+            description: 'Import aliases from a JSON file. Merges unless --replace. Exit 2 is invalid input. Exit 3 means some logins are not signed in on this machine.',
+            exitCode: 'result',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    file: {
+                        description: 'JSON file from gbot config export',
+                        type: 'string'
+                    },
+                    replace: {
+                        description: 'Replace aliases and the default instead of merging',
+                        type: 'boolean'
+                    }
+                },
+                required: [
+                    'file'
+                ],
+                type: 'object'
+            },
+            positionals: [
+                'file'
+            ]
+        };
+        const inputSchema = zod__rspack_import_3.Ikc({
+            file: zod__rspack_import_3.YjP().min(1),
+            replace: zod__rspack_import_3.zMY().optional()
+        }).strict();
+        const resultSchema = zod__rspack_import_3.Ikc({
+            exitCode: zod__rspack_import_3.KCZ([
+                zod__rspack_import_3.euz(0),
+                zod__rspack_import_3.euz(2),
+                zod__rspack_import_3.euz(3)
+            ]),
+            messages: zod__rspack_import_3.YOg(zod__rspack_import_3.YjP())
+        }).strict();
+        async function configImport({ input }) {
+            const result = (0, _core_gbot_config_js__rspack_import_1.ly)({
+                file: input.file,
+                replace: Boolean(input.replace)
+            });
+            const text = result.exitCode === 0 ? 'Imported gbot config.' : result.messages.map((message)=>(0, _core_url_policy_js__rspack_import_2.XU)(message)).join('\n');
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
+                value: result,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
+                    children: text
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>configImport
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
+    "./src/cli/config/path.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
+        var _agent_bundle_runtime__rspack_import_3 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_2 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_gbot_config_js__rspack_import_1 = __webpack_require__("./src/core/gbot-config.js");
+        const config = {
+            description: 'Print the gbot config file path. The file is created only when a command writes it.',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {},
+                type: 'object'
+            }
+        };
+        const inputSchema = zod__rspack_import_2.Ikc({}).strict();
+        const resultSchema = zod__rspack_import_2.Ikc({
+            path: zod__rspack_import_2.YjP()
+        }).strict();
+        async function configPath(_props) {
+            const path = (0, _core_gbot_config_js__rspack_import_1.Gd)();
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Result, {
+                value: {
+                    path
+                },
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Text, {
+                    children: path
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>configPath
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/cli/doctor.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
-        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
-        var zod__rspack_import_5 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_7 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_6 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_app_session_js__rspack_import_1 = __webpack_require__("./src/core/app-session.js");
         var _core_gateway_js__rspack_import_2 = __webpack_require__("./src/core/gateway.js");
-        var _core_store_js__rspack_import_3 = __webpack_require__("./src/core/store.js");
-        var _shared_js__rspack_import_4 = __webpack_require__("./src/cli/_shared.ts");
+        var _core_logins_js__rspack_import_3 = __webpack_require__("./src/core/logins.js");
+        var _core_store_js__rspack_import_4 = __webpack_require__("./src/core/store.js");
+        var _shared_js__rspack_import_5 = __webpack_require__("./src/cli/_shared.ts");
         const config = {
             description: 'Show which agents root and auth sources gbot can see.',
             inputJsonSchema: {
@@ -8608,36 +8899,68 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: 'Saved Grok Bot login (alias, email, label, or id). Overrides GBOT_ACCOUNT. Does not use the config default',
                         type: 'string'
                     }
                 },
                 type: 'object'
             }
         };
-        const inputSchema = _shared_js__rspack_import_4.lK;
-        const resultSchema = zod__rspack_import_5.Ikc({
-            candidates: zod__rspack_import_5.YOg(zod__rspack_import_5.YjP()),
-            found: zod__rspack_import_5.YOg(zod__rspack_import_5.YjP()),
-            gatewayAuthPresent: zod__rspack_import_5.zMY(),
-            grokBotAppSession: zod__rspack_import_5.g1P(zod__rspack_import_5.YjP(), zod__rspack_import_5.Pq9()),
-            note: zod__rspack_import_5.YjP(),
-            resolved: zod__rspack_import_5.YjP().nullable()
+        const inputSchema = _shared_js__rspack_import_5.lK;
+        const resultSchema = zod__rspack_import_6.Ikc({
+            candidates: zod__rspack_import_6.YOg(zod__rspack_import_6.YjP()),
+            found: zod__rspack_import_6.YOg(zod__rspack_import_6.YjP()),
+            gatewayAuthPresent: zod__rspack_import_6.zMY(),
+            grokBotAppSession: zod__rspack_import_6.g1P(zod__rspack_import_6.YjP(), zod__rspack_import_6.Pq9()),
+            note: zod__rspack_import_6.YjP(),
+            resolved: zod__rspack_import_6.YjP().nullable()
         }).strict();
+        function inspectDoctorSession(account) {
+            const selector = (account ?? '').trim() || String(process.env.GBOT_ACCOUNT ?? '').trim();
+            if (!selector) return (0, _core_app_session_js__rspack_import_1.hd)({});
+            try {
+                const choice = (0, _core_logins_js__rspack_import_3.cq)({
+                    account: selector
+                });
+                if (!choice) return {
+                    present: false,
+                    usable: false
+                };
+                if (!choice.hasDescriptorEntry) {
+                    return choice.usable ? {
+                        present: true,
+                        usable: true
+                    } : {
+                        present: true,
+                        usable: false,
+                        code: 'UNUSABLE_SESSION',
+                        error: "This saved login has no usable descriptor entry."
+                    };
+                }
+                return (0, _core_app_session_js__rspack_import_1.hd)({
+                    account: choice.id
+                });
+            } catch (error) {
+                return {
+                    present: true,
+                    usable: false,
+                    code: error && typeof error === 'object' && 'code' in error ? String(error.code) : 'UNUSABLE_SESSION',
+                    error: error instanceof Error ? error.message : String(error)
+                };
+            }
+        }
         async function doctor({ input }) {
-            const candidates = (0, _core_store_js__rspack_import_3.ye)().filter((c)=>typeof c === 'string');
-            const found = candidates.filter(_core_store_js__rspack_import_3.A8);
+            const candidates = (0, _core_store_js__rspack_import_4.ye)().filter((c)=>typeof c === 'string');
+            const found = candidates.filter(_core_store_js__rspack_import_4.A8);
             let resolved = null;
             try {
-                resolved = (0, _core_store_js__rspack_import_3.v1)(input.dir);
+                resolved = (0, _core_store_js__rspack_import_4.v1)(input.dir);
             } catch (err) {
-                if (!(err instanceof _core_store_js__rspack_import_3.AD)) throw err;
+                if (!(err instanceof _core_store_js__rspack_import_4.AD)) throw err;
             }
             const note = 'Live roster is on the box. Prefer CURSOR_ACCESS_TOKEN then EnsureSandBox then POST gateway /api/*.';
             const gatewayAuthPresent = (0, _core_gateway_js__rspack_import_2.nF)();
-            const grokBotAppSession = (0, _core_app_session_js__rspack_import_1.hd)({
-                account: input.account
-            });
+            const grokBotAppSession = inspectDoctorSession(input.account);
             const sessionJson = {
                 present: grokBotAppSession.present,
                 usable: grokBotAppSession.usable,
@@ -8667,9 +8990,9 @@ var __webpack_modules__ = {
                 ...candidates.map((c)=>`  ${c}`),
                 note
             ].join('\n');
-            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Result, {
                 value: value,
-                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Text, {
                     children: text
                 })
             });
@@ -8707,7 +9030,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     bot: {
@@ -8776,7 +9099,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     avatarColor: {
@@ -8860,7 +9183,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     ref: {
@@ -8926,7 +9249,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     ref: {
@@ -8992,7 +9315,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     }
                 },
@@ -9047,7 +9370,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     ref: {
@@ -9113,7 +9436,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     bot: {
@@ -9182,7 +9505,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     group: {
@@ -9254,7 +9577,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     avatarColor: {
@@ -9415,7 +9738,7 @@ var __webpack_modules__ = {
                 additionalProperties: false,
                 properties: {
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     dir: {
@@ -9566,7 +9889,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     historyDir: {
@@ -9775,7 +10098,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     path: {
@@ -9843,7 +10166,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     }
                 },
@@ -9895,7 +10218,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     skill: {
@@ -9969,7 +10292,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT',
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                         type: 'string'
                     },
                     historyDir: {
@@ -10109,12 +10432,14 @@ var __webpack_modules__ = {
     "./src/cli/wake.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
-        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
-        var zod__rspack_import_5 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_8 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_6 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_app_auth_js__rspack_import_1 = __webpack_require__("./src/core/app-auth.js");
         var _core_app_session_js__rspack_import_2 = __webpack_require__("./src/core/app-session.js");
         var _core_gateway_js__rspack_import_3 = __webpack_require__("./src/core/gateway.js");
-        var _gbot_js__rspack_import_4 = __webpack_require__("./src/gbot.ts");
+        var _core_logins_js__rspack_import_4 = __webpack_require__("./src/core/logins.js");
+        var _core_secret_store_js__rspack_import_7 = __webpack_require__("./src/core/secret-store.js");
+        var _gbot_js__rspack_import_5 = __webpack_require__("./src/gbot.ts");
         const config = {
             description: 'Wake the Grok Bot box for a saved login, or report its run state.',
             exitCode: 'result',
@@ -10133,9 +10458,9 @@ var __webpack_modules__ = {
                 type: 'object'
             }
         };
-        const inputSchema = zod__rspack_import_5.Ikc({
-            account: zod__rspack_import_5.YjP().min(1).optional(),
-            check: zod__rspack_import_5.zMY().optional()
+        const inputSchema = zod__rspack_import_6.Ikc({
+            account: zod__rspack_import_6.YjP().min(1).optional(),
+            check: zod__rspack_import_6.zMY().optional()
         }).strict();
         const runStates = [
             'RUNNING',
@@ -10143,48 +10468,30 @@ var __webpack_modules__ = {
             'STARTING',
             'unknown'
         ];
-        const okSchema = zod__rspack_import_5.Ikc({
-            account: zod__rspack_import_5.YjP(),
-            after: zod__rspack_import_5.k5n(runStates),
-            before: zod__rspack_import_5.k5n(runStates),
-            exitCode: zod__rspack_import_5.euz(0),
-            seconds: zod__rspack_import_5.aig()
+        const okSchema = zod__rspack_import_6.Ikc({
+            account: zod__rspack_import_6.YjP(),
+            after: zod__rspack_import_6.k5n(runStates),
+            before: zod__rspack_import_6.k5n(runStates),
+            exitCode: zod__rspack_import_6.euz(0),
+            seconds: zod__rspack_import_6.aig()
         }).strict();
-        const failSchema = zod__rspack_import_5.Ikc({
-            account: zod__rspack_import_5.YjP().optional(),
-            after: zod__rspack_import_5.k5n(runStates).optional(),
-            before: zod__rspack_import_5.k5n(runStates).optional(),
-            error: zod__rspack_import_5.YjP(),
-            exitCode: zod__rspack_import_5.KCZ([
-                zod__rspack_import_5.euz(2),
-                zod__rspack_import_5.euz(3),
-                zod__rspack_import_5.euz(4)
+        const failSchema = zod__rspack_import_6.Ikc({
+            account: zod__rspack_import_6.YjP().optional(),
+            after: zod__rspack_import_6.k5n(runStates).optional(),
+            before: zod__rspack_import_6.k5n(runStates).optional(),
+            error: zod__rspack_import_6.YjP(),
+            exitCode: zod__rspack_import_6.KCZ([
+                zod__rspack_import_6.euz(2),
+                zod__rspack_import_6.euz(3),
+                zod__rspack_import_6.euz(4)
             ]),
-            seconds: zod__rspack_import_5.aig().optional()
+            seconds: zod__rspack_import_6.aig().optional()
         }).strict();
-        const resultSchema = zod__rspack_import_5.KCZ([
+        const resultSchema = zod__rspack_import_6.KCZ([
             okSchema,
             failSchema
         ]);
-        const truthy = (value)=>[
-                '1',
-                'true',
-                'yes'
-            ].includes((value ?? '').trim().toLowerCase());
-        const testMode = ()=>truthy(process.env.GROK_BOT_TEST) || process.env.NODE_ENV === 'test';
-        const secretStore = ()=>{
-            if (!testMode()) return {};
-            const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
-            return {
-                getKeychainPassword: ()=>{
-                    if (typeof fixture === 'string' && fixture) return fixture;
-                    throw new Error('The OS secret store is disabled in test mode.');
-                },
-                unprotectData: ()=>{
-                    throw new Error('The OS secret store is disabled in test mode.');
-                }
-            };
-        };
+        const secretStore = ()=>(0, _core_secret_store_js__rspack_import_7.Ih)();
         const printable = (text)=>Array.from(text, (char)=>{
                 const c = char.codePointAt(0) ?? 0;
                 const hidden = c < 0x20 || c >= 0x7f && c <= 0x9f || c === 0x2028 || c === 0x2029 || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069;
@@ -10217,17 +10524,17 @@ var __webpack_modules__ = {
                     exitCode: 2
                 };
             }
-            const account = input.account || process.env.GBOT_ACCOUNT?.trim() || undefined;
-            let selection;
+            let choice;
             try {
-                selection = (0, _core_app_session_js__rspack_import_2.Dm)({
-                    account,
+                choice = (0, _core_logins_js__rspack_import_4.cq)({
+                    account: input.account,
                     ...secretStore()
                 });
             } catch (error) {
                 const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
                 const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
-                return code === 'AMBIGUOUS_ENTRIES' || code === 'UNKNOWN_ACCOUNT' ? {
+                const configExit = error && typeof error === 'object' && 'exitCode' in error && error.exitCode === 2;
+                return configExit || code === 'AMBIGUOUS_ENTRIES' || code === 'UNKNOWN_ACCOUNT' || code === 'INVALID' ? {
                     error: safeError(message),
                     exitCode: 2
                 } : {
@@ -10235,14 +10542,34 @@ var __webpack_modules__ = {
                     exitCode: 3
                 };
             }
-            if (!selection) {
+            if (!choice) {
                 return {
                     error: 'No saved Grok Bot login. Open the Grok Bot app and sign in once.',
                     exitCode: 3
                 };
             }
-            const label = printable(String(selection.label));
-            const scope = selection.session.accountScope;
+            let label = printable(String(choice.label));
+            let scope = choice.scope ?? undefined;
+            if (choice.hasDescriptorEntry) {
+                try {
+                    const selection = (0, _core_app_session_js__rspack_import_2.Dm)({
+                        account: choice.id,
+                        ...secretStore()
+                    });
+                    if (selection) {
+                        label = printable(String(selection.label));
+                        scope = selection.session.accountScope;
+                    }
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
+                    return {
+                        account: label,
+                        error: safeError(message),
+                        exitCode: 3,
+                        seconds: secondsOf(started)
+                    };
+                }
+            }
             if (!scope) {
                 return {
                     account: label,
@@ -10336,7 +10663,7 @@ var __webpack_modules__ = {
             };
         }
         async function wakeCommand({ input, signal }) {
-            const value = await (0, _gbot_js__rspack_import_4.yF)(async ()=>{
+            const value = await (0, _gbot_js__rspack_import_5.yF)(async ()=>{
                 try {
                     return await wake(input, signal);
                 } catch (error) {
@@ -10347,9 +10674,9 @@ var __webpack_modules__ = {
                     };
                 }
             });
-            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_8.g.Result, {
                 value: value,
-                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_8.g.Text, {
                     children: textOf(value)
                 })
             });
@@ -10365,13 +10692,15 @@ var __webpack_modules__ = {
     "./src/cli/wear/pair.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
-        var _agent_bundle_runtime__rspack_import_7 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var _agent_bundle_runtime__rspack_import_9 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
         var node_fs__rspack_import_1 = __webpack_require__("node:fs");
         var node_path__rspack_import_2 = __webpack_require__("node:path");
-        var zod__rspack_import_6 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var zod__rspack_import_7 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_app_session_js__rspack_import_3 = __webpack_require__("./src/core/app-session.js");
-        var _core_wear_pair_js__rspack_import_4 = __webpack_require__("./src/core/wear-pair.js");
-        var _gbot_js__rspack_import_5 = __webpack_require__("./src/gbot.ts");
+        var _core_logins_js__rspack_import_4 = __webpack_require__("./src/core/logins.js");
+        var _core_secret_store_js__rspack_import_8 = __webpack_require__("./src/core/secret-store.js");
+        var _core_wear_pair_js__rspack_import_5 = __webpack_require__("./src/core/wear-pair.js");
+        var _gbot_js__rspack_import_6 = __webpack_require__("./src/gbot.ts");
         const config = {
             description: 'Send the selected Grok Bot login to a Wear OS watch on this network (GBWP/1). Type the code the watch shows at the hidden prompt.',
             exitCode: 'result',
@@ -10383,7 +10712,7 @@ var __webpack_modules__ = {
                         type: 'string'
                     },
                     account: {
-                        description: 'Saved Grok Bot login to send when several are stored (label or id). GBOT_ACCOUNT is ignored here',
+                        description: 'Saved Grok Bot login to send when several are stored (alias, email, label, or id). GBOT_ACCOUNT and the config default are ignored here',
                         type: 'string'
                     },
                     code: {
@@ -10400,10 +10729,10 @@ var __webpack_modules__ = {
                 'target'
             ]
         };
-        const inputSchema = zod__rspack_import_6.Ikc({
-            account: zod__rspack_import_6.YjP().min(1).optional(),
-            code: zod__rspack_import_6.YjP().optional(),
-            target: zod__rspack_import_6.YjP()
+        const inputSchema = zod__rspack_import_7.Ikc({
+            account: zod__rspack_import_7.YjP().min(1).optional(),
+            code: zod__rspack_import_7.YjP().optional(),
+            target: zod__rspack_import_7.YjP()
         }).strict();
         const outcomes = [
             'paired',
@@ -10411,16 +10740,16 @@ var __webpack_modules__ = {
             'storage-failed',
             'unknown'
         ];
-        const receiptSchema = zod__rspack_import_6.Ikc({
-            account: zod__rspack_import_6.YjP(),
-            exitCode: zod__rspack_import_6.KCZ([
-                zod__rspack_import_6.euz(0),
-                zod__rspack_import_6.euz(5),
-                zod__rspack_import_6.euz(6)
+        const receiptSchema = zod__rspack_import_7.Ikc({
+            account: zod__rspack_import_7.YjP(),
+            exitCode: zod__rspack_import_7.KCZ([
+                zod__rspack_import_7.euz(0),
+                zod__rspack_import_7.euz(5),
+                zod__rspack_import_7.euz(6)
             ]),
-            id: zod__rspack_import_6.YjP(),
-            outcome: zod__rspack_import_6.k5n(outcomes),
-            target: zod__rspack_import_6.YjP()
+            id: zod__rspack_import_7.YjP(),
+            outcome: zod__rspack_import_7.k5n(outcomes),
+            target: zod__rspack_import_7.YjP()
         }).strict();
         const categories = [
             'usage',
@@ -10435,18 +10764,18 @@ var __webpack_modules__ = {
             'record-failed',
             'internal'
         ];
-        const failureSchema = zod__rspack_import_6.Ikc({
-            category: zod__rspack_import_6.k5n(categories),
-            error: zod__rspack_import_6.YjP(),
-            exitCode: zod__rspack_import_6.KCZ([
-                zod__rspack_import_6.euz(1),
-                zod__rspack_import_6.euz(2),
-                zod__rspack_import_6.euz(3),
-                zod__rspack_import_6.euz(4),
-                zod__rspack_import_6.euz(130)
+        const failureSchema = zod__rspack_import_7.Ikc({
+            category: zod__rspack_import_7.k5n(categories),
+            error: zod__rspack_import_7.YjP(),
+            exitCode: zod__rspack_import_7.KCZ([
+                zod__rspack_import_7.euz(1),
+                zod__rspack_import_7.euz(2),
+                zod__rspack_import_7.euz(3),
+                zod__rspack_import_7.euz(4),
+                zod__rspack_import_7.euz(130)
             ])
         }).strict();
-        const resultSchema = zod__rspack_import_6.KCZ([
+        const resultSchema = zod__rspack_import_7.KCZ([
             receiptSchema,
             failureSchema
         ]);
@@ -10488,12 +10817,7 @@ var __webpack_modules__ = {
                 size: `The selected login's session is too large for the watch. ${KEEP_CODE}`
             }
         };
-        const truthy = (value)=>[
-                '1',
-                'true',
-                'yes'
-            ].includes((value ?? '').trim().toLowerCase());
-        const testMode = ()=>truthy(process.env.GROK_BOT_TEST) || process.env.NODE_ENV === 'test';
+        const testMode = ()=>(0, _core_secret_store_js__rspack_import_8.Wj)();
         const printable = (text)=>Array.from(text, (char)=>{
                 const c = char.codePointAt(0) ?? 0;
                 const hidden = c < 0x20 || c >= 0x7f && c <= 0x9f || c === 0x2028 || c === 0x2029 || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069;
@@ -10504,24 +10828,8 @@ var __webpack_modules__ = {
                 error,
                 exitCode: EXIT[category]
             });
-        const secretStoreOff = ()=>{
-            if (!testMode()) return '';
-            if (process.env.GROK_BOT_TEST === '1' && process.env.GBOT_TEST_KEYCHAIN_PASSWORD) return '';
-            return truthy(process.env.GROK_BOT_TEST) ? ' GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode).' : ' NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.';
-        };
-        const secretStore = ()=>{
-            if (!testMode()) return {};
-            const fixture = process.env.GROK_BOT_TEST === '1' ? process.env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
-            return {
-                getKeychainPassword: ()=>{
-                    if (typeof fixture === 'string' && fixture) return fixture;
-                    throw new Error('The OS secret store is disabled in test mode.');
-                },
-                unprotectData: ()=>{
-                    throw new Error('The OS secret store is disabled in test mode.');
-                }
-            };
-        };
+        const secretStoreOff = ()=>(0, _core_secret_store_js__rspack_import_8.M6)();
+        const secretStore = ()=>(0, _core_secret_store_js__rspack_import_8.Ih)();
         const takeCodeFile = (path)=>{
             try {
                 if ((0, node_path__rspack_import_2.basename)(path) !== 'code' || !(0, node_path__rspack_import_2.basename)((0, node_path__rspack_import_2.dirname)(path)).startsWith('gbot-pair-')) return failure('usage', MESSAGES.codeFile);
@@ -10580,22 +10888,38 @@ var __webpack_modules__ = {
         const pair = async (input, signal)=>{
             const file = process.env.GBOT_PAIR_CODE_FILE;
             const fromFile = typeof file === 'string' && file ? takeCodeFile(file) : undefined;
-            const target = (0, _core_wear_pair_js__rspack_import_4.hu)(input.target, {
+            const target = (0, _core_wear_pair_js__rspack_import_5.hu)(input.target, {
                 allowLoopback: testMode()
             });
             if (!target) return failure('usage', MESSAGES.target);
             const code = takeCode(input, fromFile);
             if (typeof code !== 'string') return code;
-            const checked = (0, _core_wear_pair_js__rspack_import_4.q7)(code);
-            if (checked.code === undefined) return failure(checked.error, _core_wear_pair_js__rspack_import_4.EM[checked.error]);
+            const checked = (0, _core_wear_pair_js__rspack_import_5.q7)(code);
+            if (checked.code === undefined) return failure(checked.error, _core_wear_pair_js__rspack_import_5.EM[checked.error]);
             const env = {
                 ...process.env
             };
             delete env.GBOT_ACCOUNT;
+            let accountForSelection = input.account;
+            if (input.account) {
+                try {
+                    const choice = (0, _core_logins_js__rspack_import_4.cq)({
+                        account: input.account,
+                        env,
+                        ...secretStore()
+                    });
+                    if (!choice?.hasDescriptorEntry) {
+                        return failure('account', "That login has no descriptor session to send to the watch.");
+                    }
+                    accountForSelection = choice.id;
+                } catch (error) {
+                    return accountFailure(error, input.account);
+                }
+            }
             let selection;
             try {
                 selection = (0, _core_app_session_js__rspack_import_3.Dm)({
-                    account: input.account,
+                    account: accountForSelection,
                     env,
                     ...secretStore()
                 });
@@ -10605,7 +10929,7 @@ var __webpack_modules__ = {
             if (!selection) return failure('account', MESSAGES.noLogin);
             const label = String(selection.label);
             const id = String(selection.id);
-            const checkedSession = (0, _core_wear_pair_js__rspack_import_4.wF)({
+            const checkedSession = (0, _core_wear_pair_js__rspack_import_5.wF)({
                 ...selection.session,
                 label
             });
@@ -10628,7 +10952,7 @@ var __webpack_modules__ = {
                 });
             };
             try {
-                const { outcome } = await (0, _core_wear_pair_js__rspack_import_4.oN)({
+                const { outcome } = await (0, _core_wear_pair_js__rspack_import_5.oN)({
                     host: target.host,
                     port: target.port,
                     code: checked.code,
@@ -10645,9 +10969,9 @@ var __webpack_modules__ = {
                     target: target.target
                 };
             } catch (error) {
-                if (error instanceof _core_wear_pair_js__rspack_import_4.Eh) {
+                if (error instanceof _core_wear_pair_js__rspack_import_5.Eh) {
                     const category = categories.includes(error.category) ? error.category : 'internal';
-                    return failure(category, category === 'internal' ? MESSAGES.internal : _core_wear_pair_js__rspack_import_4.EM[category] ?? MESSAGES.internal);
+                    return failure(category, category === 'internal' ? MESSAGES.internal : _core_wear_pair_js__rspack_import_5.EM[category] ?? MESSAGES.internal);
                 }
                 return failure('internal', MESSAGES.internal);
             }
@@ -10655,19 +10979,19 @@ var __webpack_modules__ = {
         const textOf = (value)=>{
             if ('error' in value) return value.error;
             if (value.outcome === 'paired') return `Paired ${printable(value.account)} with the watch at ${value.target}.`;
-            return _core_wear_pair_js__rspack_import_4.cT[value.outcome];
+            return _core_wear_pair_js__rspack_import_5.cT[value.outcome];
         };
         async function wearPair({ input, signal }) {
-            const value = await (0, _gbot_js__rspack_import_5.yF)(async ()=>{
+            const value = await (0, _gbot_js__rspack_import_6.yF)(async ()=>{
                 try {
                     return await pair(input, signal);
                 } catch  {
                     return failure('internal', MESSAGES.internal);
                 }
             });
-            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Result, {
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_9.g.Result, {
                 value: value,
-                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_7.g.Text, {
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_9.g.Text, {
                     children: textOf(value)
                 })
             });
@@ -14801,10 +15125,15 @@ var __webpack_modules__ = {
         });
         const respondSchema = _grok_approvals_js__rspack_import_1.T5;
         const resultSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP(), zod__rspack_import_3.Pq9());
-        const listOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)(), listSchema.parse(input).target));
+        const accountScope = ()=>process.env.GBOT_ACCOUNT_SCOPE || undefined;
+        const listOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)({
+                    account: accountScope()
+                }), listSchema.parse(input).target));
         const respondOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>{
                 const { target, ...response } = respondSchema.parse(input);
-                return (0, _gateway_js__rspack_import_0.OR)(await (0, _gateway_js__rspack_import_0.Vq)(), target, response);
+                return (0, _gateway_js__rspack_import_0.OR)(await (0, _gateway_js__rspack_import_0.Vq)({
+                    account: accountScope()
+                }), target, response);
             });
         __webpack_require__.d(__webpack_exports__, {}, {
             FD: resultSchema,
@@ -14910,7 +15239,9 @@ var __webpack_modules__ = {
                 }, options(context)));
             if (input.replyMode === "auto") throw Error("Automatic reply delivery requires a native Codex source, codexThreadId or bindingId");
             const message = input.hop !== undefined || input.correlationId !== undefined ? (0, _codex_bridge_js__rspack_import_2.Mr)(input.message, (0, _codex_bridge_js__rspack_import_2.nq)(input)) : input.message;
-            const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)(), input.target, message));
+            const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)({
+                    account: process.env.GBOT_ACCOUNT_SCOPE || undefined
+                }), input.target, message));
             return {
                 result: sent.result,
                 target: (0, _gbot_js__rspack_import_1.rW)(sent.target),
@@ -42165,9 +42496,9 @@ var __webpack_modules__ = {
             try {
                 var agent_bundle_launch_env_layer__rspack_import_0 = __webpack_require__("./.agent-bundle-virtual/bin-gbot-0.mjs");
                 var agent_bundle_cli_entry__rspack_import_1 = __webpack_require__("./node_modules/agent-bundle/dist/cli-entry.js");
-                var _agent_bundle_runtime__rspack_import_51 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-                var _agent_bundle_runtime__rspack_import_52 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
-                var _agent_bundle_runtime__rspack_import_53 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
+                var _agent_bundle_runtime__rspack_import_54 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+                var _agent_bundle_runtime__rspack_import_55 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+                var _agent_bundle_runtime__rspack_import_56 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
                 var node_url__rspack_import_2 = __webpack_require__("node:url");
                 var node_worker_threads__rspack_import_3 = __webpack_require__("node:worker_threads");
                 var _src_cli_accounts_tsx__rspack_import_4 = __webpack_require__("./src/cli/accounts.tsx");
@@ -42198,25 +42529,28 @@ var __webpack_modules__ = {
                 var _src_cli_codex_status_tsx__rspack_import_29 = __webpack_require__("./src/cli/codex/status.tsx");
                 var _src_cli_codex_wait_tsx__rspack_import_30 = __webpack_require__("./src/cli/codex/wait.tsx");
                 var _src_cli_codex_watch_tsx__rspack_import_31 = __webpack_require__("./src/cli/codex/watch.tsx");
-                var _src_cli_doctor_tsx__rspack_import_32 = __webpack_require__("./src/cli/doctor.tsx");
-                var _src_cli_groups_add_tsx__rspack_import_33 = __webpack_require__("./src/cli/groups/add.tsx");
-                var _src_cli_groups_create_tsx__rspack_import_34 = __webpack_require__("./src/cli/groups/create.tsx");
-                var _src_cli_groups_delete_tsx__rspack_import_35 = __webpack_require__("./src/cli/groups/delete.tsx");
-                var _src_cli_groups_get_tsx__rspack_import_36 = __webpack_require__("./src/cli/groups/get.tsx");
-                var _src_cli_groups_list_tsx__rspack_import_37 = __webpack_require__("./src/cli/groups/list.tsx");
-                var _src_cli_groups_members_tsx__rspack_import_38 = __webpack_require__("./src/cli/groups/members.tsx");
-                var _src_cli_groups_remove_tsx__rspack_import_39 = __webpack_require__("./src/cli/groups/remove.tsx");
-                var _src_cli_groups_set_tsx__rspack_import_40 = __webpack_require__("./src/cli/groups/set.tsx");
-                var _src_cli_groups_update_tsx__rspack_import_41 = __webpack_require__("./src/cli/groups/update.tsx");
-                var _src_cli_history_tsx__rspack_import_42 = __webpack_require__("./src/cli/history.tsx");
-                var _src_cli_reconcile_tsx__rspack_import_43 = __webpack_require__("./src/cli/reconcile.tsx");
-                var _src_cli_send_tsx__rspack_import_44 = __webpack_require__("./src/cli/send.tsx");
-                var _src_cli_skills_add_tsx__rspack_import_45 = __webpack_require__("./src/cli/skills/add.tsx");
-                var _src_cli_skills_list_tsx__rspack_import_46 = __webpack_require__("./src/cli/skills/list.tsx");
-                var _src_cli_skills_remove_tsx__rspack_import_47 = __webpack_require__("./src/cli/skills/remove.tsx");
-                var _src_cli_thread_tsx__rspack_import_48 = __webpack_require__("./src/cli/thread.tsx");
-                var _src_cli_wake_tsx__rspack_import_49 = __webpack_require__("./src/cli/wake.tsx");
-                var _src_cli_wear_pair_tsx__rspack_import_50 = __webpack_require__("./src/cli/wear/pair.tsx");
+                var _src_cli_config_export_tsx__rspack_import_32 = __webpack_require__("./src/cli/config/export.tsx");
+                var _src_cli_config_import_tsx__rspack_import_33 = __webpack_require__("./src/cli/config/import.tsx");
+                var _src_cli_config_path_tsx__rspack_import_34 = __webpack_require__("./src/cli/config/path.tsx");
+                var _src_cli_doctor_tsx__rspack_import_35 = __webpack_require__("./src/cli/doctor.tsx");
+                var _src_cli_groups_add_tsx__rspack_import_36 = __webpack_require__("./src/cli/groups/add.tsx");
+                var _src_cli_groups_create_tsx__rspack_import_37 = __webpack_require__("./src/cli/groups/create.tsx");
+                var _src_cli_groups_delete_tsx__rspack_import_38 = __webpack_require__("./src/cli/groups/delete.tsx");
+                var _src_cli_groups_get_tsx__rspack_import_39 = __webpack_require__("./src/cli/groups/get.tsx");
+                var _src_cli_groups_list_tsx__rspack_import_40 = __webpack_require__("./src/cli/groups/list.tsx");
+                var _src_cli_groups_members_tsx__rspack_import_41 = __webpack_require__("./src/cli/groups/members.tsx");
+                var _src_cli_groups_remove_tsx__rspack_import_42 = __webpack_require__("./src/cli/groups/remove.tsx");
+                var _src_cli_groups_set_tsx__rspack_import_43 = __webpack_require__("./src/cli/groups/set.tsx");
+                var _src_cli_groups_update_tsx__rspack_import_44 = __webpack_require__("./src/cli/groups/update.tsx");
+                var _src_cli_history_tsx__rspack_import_45 = __webpack_require__("./src/cli/history.tsx");
+                var _src_cli_reconcile_tsx__rspack_import_46 = __webpack_require__("./src/cli/reconcile.tsx");
+                var _src_cli_send_tsx__rspack_import_47 = __webpack_require__("./src/cli/send.tsx");
+                var _src_cli_skills_add_tsx__rspack_import_48 = __webpack_require__("./src/cli/skills/add.tsx");
+                var _src_cli_skills_list_tsx__rspack_import_49 = __webpack_require__("./src/cli/skills/list.tsx");
+                var _src_cli_skills_remove_tsx__rspack_import_50 = __webpack_require__("./src/cli/skills/remove.tsx");
+                var _src_cli_thread_tsx__rspack_import_51 = __webpack_require__("./src/cli/thread.tsx");
+                var _src_cli_wake_tsx__rspack_import_52 = __webpack_require__("./src/cli/wake.tsx");
+                var _src_cli_wear_pair_tsx__rspack_import_53 = __webpack_require__("./src/cli/wear/pair.tsx");
                 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_4, 'default'), _src_cli_accounts_tsx__rspack_import_4);
                 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_5, 'default'), _src_cli_approvals_list_tsx__rspack_import_5);
                 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_6, 'default'), _src_cli_approvals_respond_tsx__rspack_import_6);
@@ -42245,26 +42579,29 @@ var __webpack_modules__ = {
                 const route25 = Object.assign({}, Reflect.get(_src_cli_codex_status_tsx__rspack_import_29, 'default'), _src_cli_codex_status_tsx__rspack_import_29);
                 const route26 = Object.assign({}, Reflect.get(_src_cli_codex_wait_tsx__rspack_import_30, 'default'), _src_cli_codex_wait_tsx__rspack_import_30);
                 const route27 = Object.assign({}, Reflect.get(_src_cli_codex_watch_tsx__rspack_import_31, 'default'), _src_cli_codex_watch_tsx__rspack_import_31);
-                const route28 = Object.assign({}, Reflect.get(_src_cli_doctor_tsx__rspack_import_32, 'default'), _src_cli_doctor_tsx__rspack_import_32);
-                const route29 = Object.assign({}, Reflect.get(_src_cli_groups_add_tsx__rspack_import_33, 'default'), _src_cli_groups_add_tsx__rspack_import_33);
-                const route30 = Object.assign({}, Reflect.get(_src_cli_groups_create_tsx__rspack_import_34, 'default'), _src_cli_groups_create_tsx__rspack_import_34);
-                const route31 = Object.assign({}, Reflect.get(_src_cli_groups_delete_tsx__rspack_import_35, 'default'), _src_cli_groups_delete_tsx__rspack_import_35);
-                const route32 = Object.assign({}, Reflect.get(_src_cli_groups_get_tsx__rspack_import_36, 'default'), _src_cli_groups_get_tsx__rspack_import_36);
-                const route33 = Object.assign({}, Reflect.get(_src_cli_groups_list_tsx__rspack_import_37, 'default'), _src_cli_groups_list_tsx__rspack_import_37);
-                const route34 = Object.assign({}, Reflect.get(_src_cli_groups_members_tsx__rspack_import_38, 'default'), _src_cli_groups_members_tsx__rspack_import_38);
-                const route35 = Object.assign({}, Reflect.get(_src_cli_groups_remove_tsx__rspack_import_39, 'default'), _src_cli_groups_remove_tsx__rspack_import_39);
-                const route36 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_40, 'default'), _src_cli_groups_set_tsx__rspack_import_40);
-                const route37 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_41, 'default'), _src_cli_groups_update_tsx__rspack_import_41);
-                const route38 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_42, 'default'), _src_cli_history_tsx__rspack_import_42);
-                const route39 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_43, 'default'), _src_cli_reconcile_tsx__rspack_import_43);
-                const route40 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_44, 'default'), _src_cli_send_tsx__rspack_import_44);
-                const route41 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_45, 'default'), _src_cli_skills_add_tsx__rspack_import_45);
-                const route42 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_46, 'default'), _src_cli_skills_list_tsx__rspack_import_46);
-                const route43 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_47, 'default'), _src_cli_skills_remove_tsx__rspack_import_47);
-                const route44 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_48, 'default'), _src_cli_thread_tsx__rspack_import_48);
-                const route45 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_49, 'default'), _src_cli_wake_tsx__rspack_import_49);
-                const route46 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_50, 'default'), _src_cli_wear_pair_tsx__rspack_import_50);
-                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_51.E7)({
+                const route28 = Object.assign({}, Reflect.get(_src_cli_config_export_tsx__rspack_import_32, 'default'), _src_cli_config_export_tsx__rspack_import_32);
+                const route29 = Object.assign({}, Reflect.get(_src_cli_config_import_tsx__rspack_import_33, 'default'), _src_cli_config_import_tsx__rspack_import_33);
+                const route30 = Object.assign({}, Reflect.get(_src_cli_config_path_tsx__rspack_import_34, 'default'), _src_cli_config_path_tsx__rspack_import_34);
+                const route31 = Object.assign({}, Reflect.get(_src_cli_doctor_tsx__rspack_import_35, 'default'), _src_cli_doctor_tsx__rspack_import_35);
+                const route32 = Object.assign({}, Reflect.get(_src_cli_groups_add_tsx__rspack_import_36, 'default'), _src_cli_groups_add_tsx__rspack_import_36);
+                const route33 = Object.assign({}, Reflect.get(_src_cli_groups_create_tsx__rspack_import_37, 'default'), _src_cli_groups_create_tsx__rspack_import_37);
+                const route34 = Object.assign({}, Reflect.get(_src_cli_groups_delete_tsx__rspack_import_38, 'default'), _src_cli_groups_delete_tsx__rspack_import_38);
+                const route35 = Object.assign({}, Reflect.get(_src_cli_groups_get_tsx__rspack_import_39, 'default'), _src_cli_groups_get_tsx__rspack_import_39);
+                const route36 = Object.assign({}, Reflect.get(_src_cli_groups_list_tsx__rspack_import_40, 'default'), _src_cli_groups_list_tsx__rspack_import_40);
+                const route37 = Object.assign({}, Reflect.get(_src_cli_groups_members_tsx__rspack_import_41, 'default'), _src_cli_groups_members_tsx__rspack_import_41);
+                const route38 = Object.assign({}, Reflect.get(_src_cli_groups_remove_tsx__rspack_import_42, 'default'), _src_cli_groups_remove_tsx__rspack_import_42);
+                const route39 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_43, 'default'), _src_cli_groups_set_tsx__rspack_import_43);
+                const route40 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_44, 'default'), _src_cli_groups_update_tsx__rspack_import_44);
+                const route41 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_45, 'default'), _src_cli_history_tsx__rspack_import_45);
+                const route42 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_46, 'default'), _src_cli_reconcile_tsx__rspack_import_46);
+                const route43 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_47, 'default'), _src_cli_send_tsx__rspack_import_47);
+                const route44 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_48, 'default'), _src_cli_skills_add_tsx__rspack_import_48);
+                const route45 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_49, 'default'), _src_cli_skills_list_tsx__rspack_import_49);
+                const route46 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_50, 'default'), _src_cli_skills_remove_tsx__rspack_import_50);
+                const route47 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_51, 'default'), _src_cli_thread_tsx__rspack_import_51);
+                const route48 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_52, 'default'), _src_cli_wake_tsx__rspack_import_52);
+                const route49 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_53, 'default'), _src_cli_wear_pair_tsx__rspack_import_53);
+                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_54.E7)({
                     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
                     stateAnchor: 'user-data'
                 });
@@ -42358,70 +42695,115 @@ var __webpack_modules__ = {
                     "cli:codex/watch": Object.freeze({
                         module: route27
                     }),
-                    "cli:doctor": Object.freeze({
+                    "cli:config/export": Object.freeze({
                         module: route28
                     }),
-                    "cli:groups/add": Object.freeze({
+                    "cli:config/import": Object.freeze({
                         module: route29
                     }),
-                    "cli:groups/create": Object.freeze({
+                    "cli:config/path": Object.freeze({
                         module: route30
                     }),
-                    "cli:groups/delete": Object.freeze({
+                    "cli:doctor": Object.freeze({
                         module: route31
                     }),
-                    "cli:groups/get": Object.freeze({
+                    "cli:groups/add": Object.freeze({
                         module: route32
                     }),
-                    "cli:groups/list": Object.freeze({
+                    "cli:groups/create": Object.freeze({
                         module: route33
                     }),
-                    "cli:groups/members": Object.freeze({
+                    "cli:groups/delete": Object.freeze({
                         module: route34
                     }),
-                    "cli:groups/remove": Object.freeze({
+                    "cli:groups/get": Object.freeze({
                         module: route35
                     }),
-                    "cli:groups/set": Object.freeze({
+                    "cli:groups/list": Object.freeze({
                         module: route36
                     }),
-                    "cli:groups/update": Object.freeze({
+                    "cli:groups/members": Object.freeze({
                         module: route37
                     }),
-                    "cli:history": Object.freeze({
+                    "cli:groups/remove": Object.freeze({
                         module: route38
                     }),
-                    "cli:reconcile": Object.freeze({
+                    "cli:groups/set": Object.freeze({
                         module: route39
                     }),
-                    "cli:send": Object.freeze({
+                    "cli:groups/update": Object.freeze({
                         module: route40
                     }),
-                    "cli:skills/add": Object.freeze({
+                    "cli:history": Object.freeze({
                         module: route41
                     }),
-                    "cli:skills/list": Object.freeze({
+                    "cli:reconcile": Object.freeze({
                         module: route42
                     }),
-                    "cli:skills/remove": Object.freeze({
+                    "cli:send": Object.freeze({
                         module: route43
                     }),
-                    "cli:thread": Object.freeze({
+                    "cli:skills/add": Object.freeze({
                         module: route44
                     }),
-                    "cli:wake": Object.freeze({
+                    "cli:skills/list": Object.freeze({
                         module: route45
                     }),
-                    "cli:wear/pair": Object.freeze({
+                    "cli:skills/remove": Object.freeze({
                         module: route46
+                    }),
+                    "cli:thread": Object.freeze({
+                        module: route47
+                    }),
+                    "cli:wake": Object.freeze({
+                        module: route48
+                    }),
+                    "cli:wear/pair": Object.freeze({
+                        module: route49
                     })
                 });
                 const commands = Object.freeze([
                     {
                         "aliases": [],
-                        "description": "List saved Grok Bot logins without printing credentials.",
-                        "exitCode": "zero",
-                        "options": [],
+                        "description": "List saved Grok Bot logins, or manage aliases: gbot accounts alias <name> <selector>, unalias <name>, default <name>, default --clear.",
+                        "exitCode": "result",
+                        "options": [
+                            {
+                                "description": "alias, unalias, or default. Omit to list logins.",
+                                "key": "action",
+                                "kind": "string",
+                                "option": "action",
+                                "positional": 0,
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "With default, clear the default alias",
+                                "key": "clear",
+                                "kind": "boolean",
+                                "option": "clear",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Alias name",
+                                "key": "name",
+                                "kind": "string",
+                                "option": "name",
+                                "positional": 1,
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Email, label, id, or id prefix of at least 8 hex characters",
+                                "key": "selector",
+                                "kind": "string",
+                                "option": "selector",
+                                "positional": 2,
+                                "repeated": false,
+                                "required": false
+                            }
+                        ],
                         "path": [
                             "accounts"
                         ],
@@ -42500,7 +42882,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -42580,7 +42962,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -42634,7 +43016,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -42688,7 +43070,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -42733,7 +43115,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43817,11 +44199,74 @@ var __webpack_modules__ = {
                     },
                     {
                         "aliases": [],
+                        "description": "Write aliases and the default login as JSON. Includes emails. Never includes tokens.",
+                        "exitCode": "zero",
+                        "options": [
+                            {
+                                "description": "File to write. Omit to print the JSON.",
+                                "key": "out",
+                                "kind": "string",
+                                "option": "out",
+                                "repeated": false,
+                                "required": false
+                            }
+                        ],
+                        "path": [
+                            "config",
+                            "export"
+                        ],
+                        "rendered": true,
+                        "routeId": "cli:config/export"
+                    },
+                    {
+                        "aliases": [],
+                        "description": "Import aliases from a JSON file. Merges unless --replace. Exit 2 is invalid input. Exit 3 means some logins are not signed in on this machine.",
+                        "exitCode": "result",
+                        "options": [
+                            {
+                                "description": "JSON file from gbot config export",
+                                "key": "file",
+                                "kind": "string",
+                                "option": "file",
+                                "positional": 0,
+                                "repeated": false,
+                                "required": true
+                            },
+                            {
+                                "description": "Replace aliases and the default instead of merging",
+                                "key": "replace",
+                                "kind": "boolean",
+                                "option": "replace",
+                                "repeated": false,
+                                "required": false
+                            }
+                        ],
+                        "path": [
+                            "config",
+                            "import"
+                        ],
+                        "rendered": true,
+                        "routeId": "cli:config/import"
+                    },
+                    {
+                        "aliases": [],
+                        "description": "Print the gbot config file path. The file is created only when a command writes it.",
+                        "exitCode": "zero",
+                        "options": [],
+                        "path": [
+                            "config",
+                            "path"
+                        ],
+                        "rendered": true,
+                        "routeId": "cli:config/path"
+                    },
+                    {
+                        "aliases": [],
                         "description": "Show which agents root and auth sources gbot can see.",
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login (alias, email, label, or id). Overrides GBOT_ACCOUNT. Does not use the config default",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43865,7 +44310,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -43926,7 +44371,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44014,7 +44459,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44068,7 +44513,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44122,7 +44567,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44167,7 +44612,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44221,7 +44666,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44282,7 +44727,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44343,7 +44788,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44500,7 +44945,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44561,7 +45006,7 @@ var __webpack_modules__ = {
                         "exitCode": "result",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44717,7 +45162,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44771,7 +45216,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44816,7 +45261,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -44870,7 +45315,7 @@ var __webpack_modules__ = {
                         "exitCode": "zero",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to use when several are stored. No default; overrides GBOT_ACCOUNT",
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -45008,7 +45453,7 @@ var __webpack_modules__ = {
                         "exitCode": "result",
                         "options": [
                             {
-                                "description": "Saved Grok Bot login to send when several are stored (label or id). GBOT_ACCOUNT is ignored here",
+                                "description": "Saved Grok Bot login to send when several are stored (alias, email, label, or id). GBOT_ACCOUNT and the config default are ignored here",
                                 "key": "account",
                                 "kind": "string",
                                 "option": "account",
@@ -45075,27 +45520,27 @@ var __webpack_modules__ = {
                         instanceId: processLifetime.instanceId,
                         pid: processLifetime.pid
                     };
-                    const result = await (0, _agent_bundle_runtime__rspack_import_52.iC)({
+                    const result = await (0, _agent_bundle_runtime__rspack_import_55.iC)({
                         capabilities: {
-                            command: (0, _agent_bundle_runtime__rspack_import_52.hU)(),
-                            filesystem: (0, _agent_bundle_runtime__rspack_import_52.hU)(),
-                            network: (0, _agent_bundle_runtime__rspack_import_52.hU)(),
-                            projectRoot: (0, _agent_bundle_runtime__rspack_import_52.qC)({
+                            command: (0, _agent_bundle_runtime__rspack_import_55.hU)(),
+                            filesystem: (0, _agent_bundle_runtime__rspack_import_55.hU)(),
+                            network: (0, _agent_bundle_runtime__rspack_import_55.hU)(),
+                            projectRoot: (0, _agent_bundle_runtime__rspack_import_55.qC)({
                                 root: cwd
                             }, 'derived')
                         },
-                        host: (0, _agent_bundle_runtime__rspack_import_52.hU)('unsupported-surface'),
+                        host: (0, _agent_bundle_runtime__rspack_import_55.hU)('unsupported-surface'),
                         invocation: {
                             kind: 'cli',
                             operationId: command.routeId,
                             surface: command.path.join(' ')
                         },
-                        lineage: (0, _agent_bundle_runtime__rspack_import_52.hU)('unsupported-surface'),
+                        lineage: (0, _agent_bundle_runtime__rspack_import_55.hU)('unsupported-surface'),
                         plugin: pluginRoot.identity,
                         process: processHit,
                         signal: context.signal,
-                        terminal: (0, _agent_bundle_runtime__rspack_import_52.qC)(context.terminal, 'native'),
-                        workspace: (0, _agent_bundle_runtime__rspack_import_52.qC)({
+                        terminal: (0, _agent_bundle_runtime__rspack_import_55.qC)(context.terminal, 'native'),
+                        workspace: (0, _agent_bundle_runtime__rspack_import_55.qC)({
                             root: cwd
                         }, 'derived')
                     }, async ()=>route.module.default({
@@ -45202,7 +45647,7 @@ var __webpack_modules__ = {
                             return stream;
                         }
                     });
-                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_53.jK)(host);
+                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_56.jK)(host);
                     return Object.freeze({
                         close: async ()=>{
                             await worker.terminate();
@@ -45269,12 +45714,13 @@ var __webpack_modules__ = {
         var node_os__rspack_import_2 = __webpack_require__("node:os");
         var node_path__rspack_import_3 = __webpack_require__("node:path");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _url_policy_js__rspack_import_5 = __webpack_require__("./src/core/url-policy.js");
         const secretFiles = {
             readFileSync: node_fs__rspack_import_1.readFileSync
         };
         class AppAuthError extends Error {
             constructor(code, message){
-                super(message);
+                super((0, _url_policy_js__rspack_import_5.fp)(message));
                 this.name = "AppAuthError";
                 this.code = code;
             }
@@ -45384,6 +45830,8 @@ var __webpack_modules__ = {
         __webpack_require__.d(__webpack_exports__, {
             yc: ()=>AppAuthError,
             zM: ()=>loadAppAccessToken
+        }, {
+            sd: secretFiles
         });
     },
     "./src/core/app-session.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -45624,9 +46072,11 @@ var __webpack_modules__ = {
             }
             return unprotectData(blob.subarray(5));
         }
-        function listGrokBotGatewayAccounts(options = {}) {
+        function loadGatewayRows(options = {}) {
             if (!hasGrokBotGatewaySession(options)) return [];
             const { platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, appData, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = options;
+            const password = once(getKeychainPassword);
+            const unprotect = once(unprotectData);
             const effectiveEnv = sessionEnv({
                 env,
                 appData
@@ -45637,14 +46087,17 @@ var __webpack_modules__ = {
                     platform,
                     home,
                     env: effectiveEnv,
-                    getKeychainPassword,
-                    unprotectData
+                    getKeychainPassword: password,
+                    unprotectData: unprotect
                 });
             const rows = decorateEntries(savedEntries(wrapped), decrypt).map((row)=>({
                     ...row,
                     usable: row.descriptor != null && !row.decryptError
                 }));
-            return markLastSaved(rows).map((row)=>({
+            return markLastSaved(rows);
+        }
+        function listGrokBotGatewayAccounts(options = {}) {
+            return loadGatewayRows(options).map((row)=>({
                     id: row.id,
                     label: row.label,
                     ...row.savedAtMs !== undefined ? {
@@ -45652,6 +46105,18 @@ var __webpack_modules__ = {
                     } : {},
                     lastSaved: row.lastSaved,
                     usable: row.usable
+                }));
+        }
+        function listGrokBotGatewayAccountSources(options = {}) {
+            return loadGatewayRows(options).map((row)=>({
+                    id: row.id,
+                    label: row.label,
+                    ...row.savedAtMs !== undefined ? {
+                        savedAtMs: row.savedAtMs
+                    } : {},
+                    lastSaved: row.lastSaved,
+                    usable: row.usable,
+                    descriptor: row.descriptor ?? null
                 }));
         }
         function decryptGrokBotSafeStorage(encrypted, { platform = process.platform, home = (0, node_os__rspack_import_3.homedir)(), env = process.env, getKeychainPassword = readKeychainPassword, unprotectData = unprotectWithDpapi } = {}) {
@@ -45785,6 +46250,9 @@ var __webpack_modules__ = {
                 };
             });
         }
+        function maskLoginSecrets(rows) {
+            return maskSecretAliases(rows);
+        }
         function chooseSavedEntryByFlag(rows, selector) {
             if (rows.length === 0) {
                 throw new GrokBotGatewaySessionError("EMPTY_ENTRIES", "Grok Bot gateway descriptor has no saved gateway entries.");
@@ -45872,10 +46340,11 @@ var __webpack_modules__ = {
         }
         __webpack_require__.d(__webpack_exports__, {
             Dm: ()=>loadGrokBotGatewaySelection,
+            If: ()=>listGrokBotGatewayAccountSources,
             KK: ()=>decryptGrokBotSafeStorage,
-            Nn: ()=>listGrokBotGatewayAccounts,
             Z2: ()=>loadGrokBotGatewaySession,
             ZN: ()=>hasGrokBotGatewaySession,
+            bI: ()=>maskLoginSecrets,
             dQ: ()=>grokBotGatewayDescriptorPath,
             hd: ()=>inspectGrokBotGatewaySession
         });
@@ -46124,10 +46593,10 @@ var __webpack_modules__ = {
                 "/Applications/Grok Bot.app/Contents/Info.plist",
                 node_path__rspack_import_3["default"].join(home, "Applications/Grok Bot.app/Contents/Info.plist")
             ];
-            for (const path of paths){
+            for (const file of paths){
                 let text = "";
                 try {
-                    text = readFile(path, "utf8");
+                    text = readFile(file, "utf8");
                 } catch  {
                     continue;
                 }
@@ -46164,10 +46633,10 @@ var __webpack_modules__ = {
             for (const block of regBlocks(output)){
                 const name = DISPLAY_NAME_LINE.exec(block);
                 if (!name || !GROK_BOT_DISPLAY_NAME.test(name[1].trim())) continue;
-                const key = /^(HKEY_\S+)/.exec(block);
+                const key = /^(HKEY_[^\r\n]+)/.exec(block);
                 if (!key) continue;
                 return {
-                    key: key[1],
+                    key: key[1].trim(),
                     displayName: name[1].trim()
                 };
             }
@@ -49336,12 +49805,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _client_version_js__rspack_import_3 = __webpack_require__("./src/core/client-version.js");
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
         var _app_session_js__rspack_import_5 = __webpack_require__("./src/core/app-session.js");
-        var _store_js__rspack_import_6 = __webpack_require__("./src/core/store.js");
-        var _url_policy_js__rspack_import_7 = __webpack_require__("./src/core/url-policy.js");
-        var _grok_approvals_js__rspack_import_8 = __webpack_require__("./src/core/grok-approvals.js");
+        var _logins_js__rspack_import_6 = __webpack_require__("./src/core/logins.js");
+        var _secret_store_js__rspack_import_10 = __webpack_require__("./src/core/secret-store.js");
+        var _store_js__rspack_import_7 = __webpack_require__("./src/core/store.js");
+        var _url_policy_js__rspack_import_8 = __webpack_require__("./src/core/url-policy.js");
+        var _grok_approvals_js__rspack_import_9 = __webpack_require__("./src/core/grok-approvals.js");
         class GatewayError extends Error {
             constructor(message, info = {}){
-                super(message);
+                super((0, _url_policy_js__rspack_import_8.fp)(message));
                 this.name = "GatewayError";
                 this.status = info.status;
                 this.method = info.method;
@@ -49408,7 +49879,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const url = (process.env.GROK_BOT_GATEWAY_URL || "").trim();
             if (url && token) {
                 return {
-                    gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(url.replace(/\/$/, ""), {
+                    gatewayUrl: (0, _url_policy_js__rspack_import_8.Re)(url.replace(/\/$/, ""), {
                         kind: "gateway"
                     }),
                     gatewayToken: token,
@@ -49417,31 +49888,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return null;
         }
-        function fixtureKeychainPassword() {
-            if (!/^(1|true|yes)$/i.test(String(process.env.GROK_BOT_TEST ?? "").trim())) return null;
-            const password = process.env.GBOT_TEST_KEYCHAIN_PASSWORD;
-            return typeof password === "string" && password.length > 0 ? password : null;
-        }
-        function fixtureSecretOptions() {
-            const password = fixtureKeychainPassword();
-            return password ? {
-                getKeychainPassword: ()=>password
-            } : {};
-        }
-        function sessionFromApp(account) {
-            let loaded;
-            try {
-                loaded = (0, _app_session_js__rspack_import_5.Z2)({
-                    account,
-                    ...fixtureSecretOptions()
-                });
-            } catch (error) {
-                if (accessTokenFromEnv()) return null;
-                throw error instanceof Error ? new GatewayError(error.message) : error;
+        function toGatewayError(error) {
+            if (error instanceof GatewayError) return error;
+            if (error instanceof Error) {
+                return new GatewayError(error.message, error.code ? {
+                    code: error.code
+                } : {});
             }
-            if (!loaded) return null;
+            return error;
+        }
+        function sessionFields(loaded) {
             return {
-                gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(loaded.gatewayUrl, {
+                gatewayUrl: (0, _url_policy_js__rspack_import_8.Re)(loaded.gatewayUrl, {
                     kind: "gateway"
                 }),
                 gatewayToken: loaded.gatewayToken,
@@ -49451,8 +49909,184 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             };
         }
+        function descriptorSession(account) {
+            const loaded = (0, _app_session_js__rspack_import_5.Z2)({
+                account,
+                ...(0, _secret_store_js__rspack_import_10.Ih)()
+            });
+            return loaded ? sessionFields(loaded) : null;
+        }
+        const IMPLICIT_AUTH_FAILURES = new Set([
+            "EXPIRED",
+            "DECRYPT_FAILED",
+            "NOT_JWT",
+            "NO_ACCOUNT",
+            "NO_SECRETS_FILE",
+            "UNSUPPORTED_VERSION",
+            "SCOPE_MISMATCH",
+            "UNUSABLE_SESSION",
+            "MISSING_ENCRYPTED_PAYLOAD",
+            "INCOMPLETE_DESCRIPTOR",
+            "UNREADABLE_ENTRIES",
+            "EMPTY_ENTRIES",
+            "MISSING_SAFE_STORAGE_KEY"
+        ]);
+        function implicitAuthFallback(error) {
+            if (!accessTokenFromEnv()) return false;
+            if (error instanceof GatewayError && (error.status || error.method === "EnsureSandBox")) return false;
+            if (/Rejected /.test(String(error?.message ?? ""))) return false;
+            if (typeof error?.code === "string" && IMPLICIT_AUTH_FAILURES.has(error.code)) return true;
+            return /could not decrypt|Safe Storage|bad decrypt/i.test(String(error?.message ?? ""));
+        }
+        function scrubOutbound(error, secrets) {
+            const message = (0, _url_policy_js__rspack_import_8.Ok)(error instanceof Error ? error.message : String(error), secrets);
+            if (error instanceof GatewayError) {
+                if (message === error.message) return error;
+                const next = new GatewayError(message, {
+                    status: error.status,
+                    method: error.method,
+                    code: error.code,
+                    effect: error.effect,
+                    failureCode: error.failureCode,
+                    kind: error.kind,
+                    wake: error.wake,
+                    failureReason: error.failureReason,
+                    runState: error.runState
+                });
+                if (error.delivery) next.delivery = error.delivery;
+                if (error.reason) next.reason = error.reason;
+                return next;
+            }
+            if (error instanceof _app_auth_js__rspack_import_2.yc) return new _app_auth_js__rspack_import_2.yc(error.code, message);
+            return new GatewayError(message, error?.code ? {
+                code: error.code
+            } : {});
+        }
+        const sessionsByScope = new Map();
+        function sessionCacheKey(scope) {
+            return [
+                scope,
+                process.env.HOME || "",
+                process.env.USERPROFILE || "",
+                process.env.GBOT_CONFIG || "",
+                process.env.CURSOR_API_BASE_URL || ""
+            ].join("\0");
+        }
+        function rememberSession(session) {
+            if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+                sessionsByScope.set(sessionCacheKey(session.accountScope), session);
+            }
+            return session;
+        }
+        function cachedSession(scope) {
+            if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
+            return sessionsByScope.get(sessionCacheKey(scope)) ?? null;
+        }
+        async function sessionFromSavedLogin(scope, signal) {
+            const cached = cachedSession(scope);
+            if (cached) return cached;
+            let loaded;
+            try {
+                loaded = (0, _app_auth_js__rspack_import_2.zM)({
+                    scope,
+                    home: (0, node_os__rspack_import_1.homedir)(),
+                    env: process.env,
+                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                });
+            } catch (error) {
+                throw scrubOutbound(toGatewayError(error), []);
+            }
+            let described;
+            try {
+                described = await describeSandbox(loaded.token, {
+                    signal,
+                    appLogin: true
+                });
+            } catch (error) {
+                throw scrubOutbound(error, [
+                    loaded.token
+                ]);
+            }
+            const running = described?.runState === "RUNNING" && described.gatewayUrl && described.gatewayToken;
+            let sandbox = described;
+            if (!running) {
+                if (!autoWakeEnabled()) {
+                    throw new GatewayError("The Grok Bot box for this login is asleep and GBOT_AUTO_WAKE=0.", {
+                        code: "BOX_ASLEEP",
+                        method: "EnsureSandBox",
+                        ...described?.runState ? {
+                            runState: described.runState
+                        } : {}
+                    });
+                }
+                try {
+                    sandbox = await wakeSandbox(loaded.token, {
+                        signal,
+                        appLogin: true
+                    });
+                } catch (error) {
+                    throw scrubOutbound(error, [
+                        loaded.token,
+                        described?.gatewayToken
+                    ]);
+                }
+            }
+            return rememberSession({
+                gatewayUrl: sandbox.gatewayUrl,
+                gatewayToken: sandbox.gatewayToken,
+                gatewayHeaders: sandbox.gatewayHeaders,
+                accountScope: scope
+            });
+        }
+        async function sessionFromApp(account, signal) {
+            let choice;
+            try {
+                choice = (0, _logins_js__rspack_import_6.cq)({
+                    account,
+                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                });
+            } catch (error) {
+                throw scrubOutbound(toGatewayError(error), []);
+            }
+            if (choice?.scope) {
+                const cached = cachedSession(choice.scope);
+                if (cached) return cached;
+            }
+            if (!choice) {
+                try {
+                    return rememberSession(descriptorSession(account));
+                } catch (error) {
+                    if (implicitAuthFallback(error)) return null;
+                    throw scrubOutbound(toGatewayError(error), []);
+                }
+            }
+            try {
+                if (choice.hasDescriptorEntry) {
+                    let session = descriptorSession(choice.id);
+                    if (!session) {
+                        throw new GatewayError("The selected Grok Bot login could not be read.", {
+                            code: "UNUSABLE_SESSION"
+                        });
+                    }
+                    if (choice.scope && !session.accountScope) session = {
+                        ...session,
+                        accountScope: choice.scope
+                    };
+                    return rememberSession(session);
+                }
+                return await sessionFromSavedLogin(choice.scope, signal);
+            } catch (error) {
+                if (choice.selectedBy !== "selector" && implicitAuthFallback(error)) return null;
+                throw scrubOutbound(error, []);
+            }
+        }
         function hasGatewayAuth() {
-            return Boolean(gatewayOverride() || accessTokenFromEnv() || (0, _app_session_js__rspack_import_5.ZN)());
+            if (gatewayOverride() || accessTokenFromEnv() || (0, _app_session_js__rspack_import_5.ZN)()) return true;
+            try {
+                return (0, _logins_js__rspack_import_6.Pf)();
+            } catch  {
+                return false;
+            }
         }
         function raceSignal(promise, signal, onAbort) {
             if (!signal) return promise;
@@ -49558,7 +50192,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const gatewayToken = pick(body, "gatewayToken", "gateway_token");
             if (!gatewayUrl || !gatewayToken) return {};
             return {
-                gatewayUrl: (0, _url_policy_js__rspack_import_7.Re)(String(gatewayUrl).replace(/\/$/, ""), {
+                gatewayUrl: (0, _url_policy_js__rspack_import_8.Re)(String(gatewayUrl).replace(/\/$/, ""), {
                     kind: "gateway"
                 }),
                 gatewayToken: String(gatewayToken),
@@ -49572,7 +50206,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function ensureSandbox(accessToken, { signal, wake = true, appLogin = false, timeoutMs } = {}) {
             assertGatewayActive(signal);
-            const url = (0, _url_policy_js__rspack_import_7.Re)(backendBase(), {
+            const url = (0, _url_policy_js__rspack_import_8.Re)(backendBase(), {
                 kind: "backend",
                 ignoreAllowAny: appLogin
             }) + "/aiserver.v1.GrokBotService/EnsureSandBox";
@@ -49590,9 +50224,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 body = await readJson(res);
             } catch (error) {
                 assertGatewayActive(signal);
-                throw error;
+                const secrets = collectSandboxSecrets(accessToken, null);
+                if (isDeadlineError(error) || signal?.aborted) {
+                    if (error instanceof Error) {
+                        const redacted = (0, _url_policy_js__rspack_import_8.Ok)(error.message, secrets);
+                        if (redacted !== error.message) error.message = redacted;
+                    }
+                    throw error;
+                }
+                throw scrubOutbound(error, secrets);
             }
             assertGatewayActive(signal);
+            const secrets = collectSandboxSecrets(accessToken, body);
             if (!res.ok) {
                 let detail = body.message || body.error || body.raw || res.statusText;
                 if (res.status === 401 && /no longer supported/i.test(String(detail))) {
@@ -49600,16 +50243,36 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     detail = `${detail} (gbot sent x-cursor-client-version ${version}; set SAND_CLIENT_VERSION to override)`;
                     (0, _client_version_js__rspack_import_3.ZF)();
                 }
-                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_7.fp)(detail), {
+                throw new GatewayError("EnsureSandBox failed: " + res.status + " " + (0, _url_policy_js__rspack_import_8.Ok)(detail, secrets), {
                     status: res.status,
                     method: "EnsureSandBox"
                 });
             }
-            const fields = sandboxFields(body);
-            return {
-                ...fields,
-                runState: normalizeRunState(pick(body, "runState", "run_state"))
+            try {
+                const fields = sandboxFields(body);
+                return {
+                    ...fields,
+                    runState: normalizeRunState(pick(body, "runState", "run_state"))
+                };
+            } catch (error) {
+                throw scrubOutbound(error, secrets);
+            }
+        }
+        function collectSandboxSecrets(accessToken, body) {
+            const secrets = [];
+            const add = (value)=>{
+                if (typeof value === "string" && value.length >= 8 && !secrets.includes(value)) secrets.push(value);
             };
+            add(accessToken);
+            if (!body || typeof body !== "object") return secrets;
+            for (const [key, value] of Object.entries(body)){
+                if (typeof value === "string" && /token|authorization|cookie/i.test(key)) add(value);
+            }
+            const headers = body.headers || body.gatewayHeaders || body.gateway_headers;
+            if (headers && typeof headers === "object") {
+                for (const value of Object.values(headers))add(value);
+            }
+            return secrets;
         }
         function abortableSleep(ms, signal) {
             if (signal?.aborted) {
@@ -49653,13 +50316,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (result?.runState === "RUNNING" && !hasGateway) return true;
             return false;
         }
-        async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false } = {}) {
+        async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, appLogin = false, now = Date.now } = {}) {
             const budget = sandboxWakeBudget();
             const timeout = timeoutMs ?? budget.timeoutMs;
             const interval = intervalMs ?? budget.intervalMs;
             const callCap = positiveTestMs(process.env, "GBOT_WAKE_CALL_CAP_MS") ?? ENSURE_CALL_CAP_MS;
-            const started = Date.now();
-            const left = ()=>timeout - (Date.now() - started);
+            const started = now();
+            const left = ()=>timeout - (now() - started);
             const call = async (wake)=>{
                 const remaining = left();
                 if (remaining <= 0) return null;
@@ -49685,9 +50348,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             let wakePosts = 1;
             while(!sandboxReady(result)){
                 if (result?.runState === "HIBERNATED") {
+                    if (left() <= 0) budgetExpired(result);
                     if (wakePosts >= 2) throw wakeFailureError(result);
                     const remaining = left();
-                    if (remaining <= 0) budgetExpired(result);
                     await abortableSleep(Math.min(interval, remaining), signal);
                     const again = await call(true);
                     wakePosts += 1;
@@ -49717,7 +50380,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             assertGatewayActive(signal);
             const override = gatewayOverride();
             if (override) return override;
-            const fromApp = sessionFromApp(account);
+            const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
+            const selected = typeof account === "string" && account.trim() ? account.trim() : /^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined;
+            const fromApp = await sessionFromApp(selected, signal);
             if (fromApp) return fromApp;
             const token = accessTokenFromEnv();
             if (!token) {
@@ -49741,7 +50406,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         function redactDetail(detail, session) {
-            let text = (0, _url_policy_js__rspack_import_7.fp)(String(detail ?? "").slice(0, 300));
+            let text = (0, _url_policy_js__rspack_import_8.fp)(String(detail ?? "").slice(0, 300));
             const secrets = [];
             if (typeof session?.gatewayToken === "string") secrets.push(session.gatewayToken);
             const headers = session?.gatewayHeaders;
@@ -49868,7 +50533,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             scope,
                             home: (0, node_os__rspack_import_1.homedir)(),
                             env: process.env,
-                            ...fixtureSecretOptions()
+                            ...(0, _secret_store_js__rspack_import_10.Ih)()
                         });
                         const result = await wakeSandbox(loaded.token, {
                             signal: controller.signal,
@@ -49954,7 +50619,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function performGatewayCall(session, method, body = {}, { signal } = {}) {
             assertGatewayActive(signal);
-            const base = (0, _url_policy_js__rspack_import_7.Re)(session.gatewayUrl, {
+            const base = (0, _url_policy_js__rspack_import_8.Re)(session.gatewayUrl, {
                 kind: "gateway"
             });
             const url = base + "/api/" + method;
@@ -50082,8 +50747,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 name: input.name,
                 description: input.description || "",
                 title: input.title || "",
-                avatarShape: assertAvatar("shape", input.avatarShape, _store_js__rspack_import_6.Jb),
-                avatarColor: assertAvatar("color", input.avatarColor, _store_js__rspack_import_6.T7),
+                avatarShape: assertAvatar("shape", input.avatarShape, _store_js__rspack_import_7.Jb),
+                avatarColor: assertAvatar("color", input.avatarColor, _store_js__rspack_import_7.T7),
                 origin: "user"
             });
             return unwrapOne(data);
@@ -50098,8 +50763,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 description: patch.description !== undefined ? String(patch.description) : rec.description
             };
             if (patch.title !== undefined) profile.title = String(patch.title);
-            if (patch.avatarShape !== undefined) profile.avatarShape = assertAvatar("shape", patch.avatarShape, _store_js__rspack_import_6.Jb);
-            if (patch.avatarColor !== undefined) profile.avatarColor = assertAvatar("color", patch.avatarColor, _store_js__rspack_import_6.T7);
+            if (patch.avatarShape !== undefined) profile.avatarShape = assertAvatar("shape", patch.avatarShape, _store_js__rspack_import_7.Jb);
+            if (patch.avatarColor !== undefined) profile.avatarColor = assertAvatar("color", patch.avatarColor, _store_js__rspack_import_7.T7);
             await gatewayCall(session, "updateAgent", {
                 id: rec.id,
                 profile
@@ -50406,12 +51071,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     id: target.id,
                     name: target.name
                 },
-                approvals: transcript.entries.map(_grok_approvals_js__rspack_import_8.Ny).filter(Boolean),
+                approvals: transcript.entries.map(_grok_approvals_js__rspack_import_9.Ny).filter(Boolean),
                 coverage: "Latest 200 transcript entries only; older requests require the owning Grok UI."
             };
         }
         async function respondGrokApproval(session, ref, input) {
-            const { entryId, requestId, decision } = _grok_approvals_js__rspack_import_8.T5.parse({
+            const { entryId, requestId, decision } = _grok_approvals_js__rspack_import_9.T5.parse({
                 ...input,
                 target: ref
             });
@@ -50459,6 +51124,303 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             x4: ()=>updateAgent,
             zk: ()=>reconcileDelivery,
             zr: ()=>addGroupMember
+        });
+    },
+    "./src/core/gbot-config.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
+        var node_fs__rspack_import_1 = __webpack_require__("node:fs");
+        var node_os__rspack_import_2 = __webpack_require__("node:os");
+        var node_path__rspack_import_3 = __webpack_require__("node:path");
+        var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _url_policy_js__rspack_import_5 = __webpack_require__("./src/core/url-policy.js");
+        const NAME = /^[A-Za-z0-9_-]{1,32}$/;
+        const writeIo = {
+            renameSync: (from, to)=>node_fs__rspack_import_1.renameSync(from, to)
+        };
+        const SCOPE = /^[0-9a-f]{64}$/;
+        const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+        const ALLOWED = new Set([
+            "version",
+            "aliases",
+            "default",
+            "gbotVersion"
+        ]);
+        function readPackageVersion() {
+            try {
+                return JSON.parse(node_fs__rspack_import_1.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
+            } catch  {
+                return "0.11.2";
+            }
+        }
+        const GBOT_PACKAGE_VERSION = readPackageVersion();
+        class GbotConfigError extends Error {
+            constructor(message, { exitCode = 2, code = "INVALID" } = {}){
+                super(message);
+                this.name = "GbotConfigError";
+                this.exitCode = exitCode;
+                this.code = code;
+            }
+        }
+        function isReservedAliasName(name) {
+            return name === "__proto__" || name === "constructor" || name === "prototype" || Object.hasOwn(Object.prototype, name);
+        }
+        function emptyGbotConfig() {
+            return {
+                version: 1,
+                aliases: Object.create(null),
+                default: null
+            };
+        }
+        function gbotConfigPath({ platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env } = {}) {
+            const override = typeof env.GBOT_CONFIG === "string" ? env.GBOT_CONFIG.trim() : "";
+            if (override) return override;
+            if (platform === "win32") {
+                const appData = env.APPDATA || (0, node_path__rspack_import_3.join)(home, "AppData", "Roaming");
+                return (0, node_path__rspack_import_3.join)(appData, "grok-bot-cli", "config.json");
+            }
+            const configHome = env.XDG_CONFIG_HOME || (0, node_path__rspack_import_3.join)(home, ".config");
+            return (0, node_path__rspack_import_3.join)(configHome, "grok-bot-cli", "config.json");
+        }
+        function invalid(message) {
+            return new GbotConfigError(message);
+        }
+        function copyAliases(source) {
+            const aliases = Object.create(null);
+            if (!source || typeof source !== "object") return aliases;
+            for (const name of Object.keys(source)){
+                aliases[name] = source[name];
+            }
+            return aliases;
+        }
+        function storedEmail(name, email) {
+            if (typeof email !== "string" || !email.trim() || email.length > 120 || CONTROL.test(email) || !EMAIL.test(email.trim())) {
+                throw invalid(`Alias "${name}" has an unusable email.`);
+            }
+            return email.trim();
+        }
+        function validateGbotConfig(value) {
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+                throw invalid("Config must be a JSON object.");
+            }
+            for (const key of Object.keys(value)){
+                if (!ALLOWED.has(key)) throw invalid(`Config has an unknown field "${key}".`);
+            }
+            if (value.version !== undefined && value.version !== 1) throw invalid("Config version must be 1.");
+            if (value.gbotVersion !== undefined && (typeof value.gbotVersion !== "string" || CONTROL.test(value.gbotVersion))) {
+                throw invalid("Config gbotVersion must be a string.");
+            }
+            if (!value.aliases || typeof value.aliases !== "object" || Array.isArray(value.aliases)) {
+                throw invalid("Config aliases must be an object.");
+            }
+            if (!(value.default === null || typeof value.default === "string")) {
+                throw invalid("Config default must be an alias name or null.");
+            }
+            const aliases = Object.create(null);
+            for (const name of Object.keys(value.aliases)){
+                const alias = value.aliases[name];
+                if (isReservedAliasName(name) || !NAME.test(name)) {
+                    throw invalid(`Alias name "${name}" must match ${NAME} and must not be a prototype key.`);
+                }
+                if (!alias || typeof alias !== "object" || Array.isArray(alias)) {
+                    throw invalid(`Alias "${name}" must be an object.`);
+                }
+                for (const key of Object.keys(alias)){
+                    if (key !== "scope" && key !== "email") throw invalid(`Alias "${name}" has an unknown field "${key}".`);
+                }
+                if (typeof alias.scope !== "string" || !SCOPE.test(alias.scope)) {
+                    throw invalid(`Alias "${name}" needs a 64-character hex scope.`);
+                }
+                const stored = {
+                    scope: alias.scope
+                };
+                if (alias.email !== undefined) stored.email = storedEmail(name, alias.email);
+                aliases[name] = stored;
+            }
+            if (value.default !== null && (isReservedAliasName(value.default) || !Object.hasOwn(aliases, value.default))) {
+                throw invalid(`Config default "${value.default}" is not an alias.`);
+            }
+            return {
+                version: 1,
+                aliases,
+                default: value.default
+            };
+        }
+        function readGbotConfig(options = {}) {
+            const path = gbotConfigPath(options);
+            let text;
+            try {
+                text = node_fs__rspack_import_1.readFileSync(path, "utf8");
+            } catch (error) {
+                if (error && error.code === "ENOENT") return emptyGbotConfig();
+                throw invalid("Could not read the gbot config file.");
+            }
+            try {
+                return validateGbotConfig(JSON.parse(text));
+            } catch (error) {
+                if (error instanceof GbotConfigError) throw error;
+                throw invalid("Config file is not valid JSON.");
+            }
+        }
+        function writeAtomicFile(path, contents) {
+            node_fs__rspack_import_1.mkdirSync((0, node_path__rspack_import_3.dirname)(path), {
+                recursive: true,
+                mode: 448
+            });
+            const tmp = `${path}.${process.pid}.${(0, node_crypto__rspack_import_0.randomBytes)(4).toString("hex")}.tmp`;
+            const fd = node_fs__rspack_import_1.openSync(tmp, "wx", 384);
+            try {
+                const data = Buffer.from(contents);
+                let offset = 0;
+                while(offset < data.length)offset += node_fs__rspack_import_1.writeSync(fd, data, offset);
+                node_fs__rspack_import_1.fsyncSync(fd);
+            } catch (error) {
+                node_fs__rspack_import_1.closeSync(fd);
+                try {
+                    node_fs__rspack_import_1.unlinkSync(tmp);
+                } catch  {}
+                throw error;
+            }
+            node_fs__rspack_import_1.closeSync(fd);
+            try {
+                writeIo.renameSync(tmp, path);
+            } catch (error) {
+                try {
+                    node_fs__rspack_import_1.unlinkSync(tmp);
+                } catch  {}
+                throw error;
+            }
+            try {
+                node_fs__rspack_import_1.chmodSync(path, 384);
+            } catch  {}
+            try {
+                const dirfd = node_fs__rspack_import_1.openSync((0, node_path__rspack_import_3.dirname)(path), "r");
+                try {
+                    node_fs__rspack_import_1.fsyncSync(dirfd);
+                } catch  {}
+                node_fs__rspack_import_1.closeSync(dirfd);
+            } catch  {}
+        }
+        function writeGbotConfig(document, options = {}) {
+            const stored = validateGbotConfig(document);
+            const path = gbotConfigPath(options);
+            writeAtomicFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+            return stored;
+        }
+        function writePrivateJson(path, value) {
+            writeAtomicFile(path, `${JSON.stringify(value, null, 2)}\n`);
+        }
+        function exportAccountConfig(options = {}) {
+            const current = readGbotConfig(options);
+            const doc = {
+                version: 1,
+                aliases: current.aliases,
+                default: current.default,
+                gbotVersion: GBOT_PACKAGE_VERSION
+            };
+            if (typeof options.out === "string" && options.out.trim()) writePrivateJson(options.out.trim(), doc);
+            return doc;
+        }
+        function signedInScopes(options) {
+            try {
+                const path = (0, node_path__rspack_import_3.join)((0, node_path__rspack_import_3.dirname)((0, _app_session_js__rspack_import_4.dQ)(options.home ?? (0, node_os__rspack_import_2.homedir)(), options.platform ?? process.platform, options.env ?? process.env)), "sand-secrets.json");
+                const secrets = JSON.parse(node_fs__rspack_import_1.readFileSync(path, "utf8"));
+                const accounts = JSON.parse(secrets["cursor-accounts"]);
+                return new Set(Object.keys(accounts?.accounts ?? {}).filter((key)=>SCOPE.test(key)));
+            } catch  {
+                return new Set();
+            }
+        }
+        function importAccountConfig({ file, replace = false, ...options } = {}) {
+            if (typeof file !== "string" || !file.trim()) {
+                return {
+                    exitCode: 2,
+                    messages: [
+                        "import needs a file."
+                    ]
+                };
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(node_fs__rspack_import_1.readFileSync(file, "utf8"));
+            } catch (error) {
+                const missing = error && error.code === "ENOENT";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        missing ? "Config import file was not found." : "Config import file is not valid JSON."
+                    ]
+                };
+            }
+            let incoming;
+            try {
+                incoming = validateGbotConfig(parsed);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Config import file is invalid.";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        (0, _url_policy_js__rspack_import_5.XU)(message)
+                    ]
+                };
+            }
+            let current;
+            try {
+                current = replace ? emptyGbotConfig() : readGbotConfig(options);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Could not read the gbot config file.";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        (0, _url_policy_js__rspack_import_5.XU)(message)
+                    ]
+                };
+            }
+            const aliases = copyAliases(replace ? incoming.aliases : undefined);
+            if (!replace) {
+                for (const name of Object.keys(current.aliases))aliases[name] = current.aliases[name];
+                for (const name of Object.keys(incoming.aliases))aliases[name] = incoming.aliases[name];
+            }
+            const defaultName = replace || incoming.default !== null ? incoming.default : current.default;
+            let stored;
+            try {
+                stored = validateGbotConfig({
+                    version: 1,
+                    aliases,
+                    default: defaultName
+                });
+                writeGbotConfig(stored, options);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Config import file is invalid.";
+                return {
+                    exitCode: 2,
+                    messages: [
+                        (0, _url_policy_js__rspack_import_5.XU)(message)
+                    ]
+                };
+            }
+            const signedIn = signedInScopes(options);
+            const messages = [];
+            for (const name of Object.keys(stored.aliases)){
+                const alias = stored.aliases[name];
+                if (signedIn.has(alias.scope)) continue;
+                const who = (0, _url_policy_js__rspack_import_5.XU)(alias.email || name);
+                messages.push(`sign in to ${who} in the Grok Bot app`);
+            }
+            return {
+                exitCode: messages.length ? 3 : 0,
+                messages
+            };
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            C5: ()=>emptyGbotConfig,
+            Gd: ()=>gbotConfigPath,
+            Ht: ()=>GbotConfigError,
+            XL: ()=>readGbotConfig,
+            gv: ()=>writeGbotConfig,
+            kV: ()=>isReservedAliasName,
+            ly: ()=>importAccountConfig,
+            s1: ()=>exportAccountConfig
         });
     },
     "./src/core/grok-approvals.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -50686,6 +51648,452 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             ae: ()=>historyPath
         });
     },
+    "./src/core/logins.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_fs__rspack_import_0 = __webpack_require__("node:fs");
+        var node_os__rspack_import_1 = __webpack_require__("node:os");
+        var node_path__rspack_import_2 = __webpack_require__("node:path");
+        var _app_auth_js__rspack_import_3 = __webpack_require__("./src/core/app-auth.js");
+        var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _gbot_config_js__rspack_import_5 = __webpack_require__("./src/core/gbot-config.js");
+        var _url_policy_js__rspack_import_6 = __webpack_require__("./src/core/url-policy.js");
+        var _secret_store_js__rspack_import_7 = __webpack_require__("./src/core/secret-store.js");
+        const SCOPE = /^[0-9a-f]{64}$/;
+        const PREFIX = /^[0-9a-f]{8,}$/i;
+        const NAME = /^[A-Za-z0-9_-]{1,32}$/;
+        const SCOPE_FIELDS = [
+            "scope",
+            "accountScope",
+            "accountId",
+            "userId",
+            "sub"
+        ];
+        function selectionError(code, message) {
+            const error = new Error(message);
+            error.name = "GrokBotGatewaySessionError";
+            error.code = code;
+            return error;
+        }
+        function loginLines(rows) {
+            return rows.map((row)=>"  " + (0, _url_policy_js__rspack_import_6.XU)(row.label) + (row.lastSaved ? " (last saved)" : "")).join("\n");
+        }
+        function listed(rows) {
+            return "Saved logins:\n" + loginLines(rows);
+        }
+        function shortScope(scope) {
+            return String(scope).slice(0, 8);
+        }
+        function once(fn) {
+            let done = false;
+            let value;
+            let failure;
+            return (...args)=>{
+                if (!done) {
+                    done = true;
+                    try {
+                        value = fn(...args);
+                    } catch (error) {
+                        failure = error;
+                    }
+                }
+                if (failure) throw failure;
+                return value;
+            };
+        }
+        function baseOptions(options = {}) {
+            const env = options.env ?? process.env;
+            const platform = options.platform ?? process.platform;
+            const home = options.home ?? (0, node_os__rspack_import_1.homedir)();
+            const secret = options.getKeychainPassword || options.unprotectData ? {} : (0, _secret_store_js__rspack_import_7.Ih)(env);
+            return {
+                ...options,
+                env,
+                platform,
+                home,
+                ...secret
+            };
+        }
+        function shareReaders(options) {
+            const next = {
+                ...options
+            };
+            if (typeof options.getKeychainPassword === "function") {
+                next.getKeychainPassword = once(options.getKeychainPassword);
+            }
+            if (typeof options.unprotectData === "function") next.unprotectData = once(options.unprotectData);
+            return next;
+        }
+        function revealText(value, options) {
+            if (typeof value !== "string" || !value) return null;
+            if (value.startsWith("plaintext:v1:")) return value.slice("plaintext:v1:".length);
+            try {
+                return (0, _app_session_js__rspack_import_4.KK)(value, options);
+            } catch  {
+                return null;
+            }
+        }
+        function profileEmail(stored, options) {
+            const text = revealText(stored, options);
+            if (!text) return null;
+            try {
+                const parsed = JSON.parse(text);
+                const email = typeof parsed?.email === "string" ? parsed.email.trim() : "";
+                if (!email || email.length > 120 || /^https?:\/\//i.test(email)) return null;
+                return email;
+            } catch  {
+                return null;
+            }
+        }
+        function readSecrets(options) {
+            const path = (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)((0, _app_session_js__rspack_import_4.dQ)(options.home, options.platform, options.env)), "sand-secrets.json");
+            let text;
+            try {
+                text = (options.readFile ?? _app_auth_js__rspack_import_3.sd.readFileSync)(path, "utf8");
+            } catch  {
+                return null;
+            }
+            try {
+                const secrets = JSON.parse(text);
+                if (!secrets || typeof secrets !== "object" || Array.isArray(secrets) || secrets.version !== 1) return null;
+                const accounts = JSON.parse(secrets["cursor-accounts"]);
+                if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)) return null;
+                return accounts;
+            } catch  {
+                return null;
+            }
+        }
+        function listSavedLogins(options = {}) {
+            const opts = baseOptions(options);
+            const accounts = readSecrets(opts);
+            if (!accounts || !accounts.accounts || typeof accounts.accounts !== "object") return [];
+            const rows = [];
+            for (const scope of Object.keys(accounts.accounts)){
+                if (!SCOPE.test(scope)) continue;
+                const record = accounts.accounts[scope];
+                const entry = record && typeof record === "object" ? record : {};
+                const email = profileEmail(entry["cursor-account-profile"], opts);
+                const token = entry["cursor-access-token"];
+                rows.push({
+                    scope,
+                    label: email || shortScope(scope),
+                    email,
+                    appActive: accounts.active === scope,
+                    hasToken: typeof token === "string" && token.length > 0
+                });
+            }
+            return rows;
+        }
+        function hasSavedAccessToken(options = {}) {
+            const opts = baseOptions(options);
+            const accounts = readSecrets(opts);
+            if (!accounts?.accounts || typeof accounts.accounts !== "object") return false;
+            return Object.keys(accounts.accounts).some((scope)=>{
+                if (!SCOPE.test(scope)) return false;
+                const token = accounts.accounts[scope]?.["cursor-access-token"];
+                return typeof token === "string" && token.length > 0;
+            });
+        }
+        function aliasByScope(config) {
+            const names = new Map();
+            for (const name of Object.keys(config.aliases ?? {})){
+                const alias = config.aliases[name];
+                if (!alias || typeof alias.scope !== "string") continue;
+                const list = names.get(alias.scope) ?? [];
+                list.push(name);
+                names.set(alias.scope, list);
+            }
+            return names;
+        }
+        function aliasLabel(names) {
+            if (!names || names.length === 0) return null;
+            return [
+                ...names
+            ].sort().join(", ");
+        }
+        function descriptorScope(row) {
+            if (SCOPE.test(row.id)) return row.id;
+            const descriptor = row.descriptor;
+            if (!descriptor || typeof descriptor !== "object") return null;
+            for (const key of SCOPE_FIELDS){
+                const value = descriptor[key];
+                if (typeof value === "string" && SCOPE.test(value)) return value;
+            }
+            return null;
+        }
+        function descriptorEmail(row) {
+            const value = row.descriptor?.email;
+            if (typeof value !== "string") return null;
+            const email = value.trim();
+            if (!email || email.length > 120 || !email.includes("@") || /^https?:\/\//i.test(email)) return null;
+            return email;
+        }
+        function savedForDescriptor(row, describedCount, saved, savedByScope) {
+            const scope = descriptorScope(row);
+            if (scope && savedByScope.has(scope)) return savedByScope.get(scope);
+            const email = descriptorEmail(row);
+            if (email) {
+                const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
+                if (found.length === 1) return found[0];
+            }
+            if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            return null;
+        }
+        function readConfigForCatalog(options) {
+            if (options.config) return options.config;
+            return (0, _gbot_config_js__rspack_import_5.XL)(options);
+        }
+        function listLoginCatalog(options = {}) {
+            const opts = shareReaders(baseOptions(options));
+            const config = readConfigForCatalog(opts);
+            const aliases = aliasByScope(config);
+            const described = (0, _app_session_js__rspack_import_4.ZN)(opts) ? (0, _app_session_js__rspack_import_4.If)(opts) : [];
+            const saved = listSavedLogins(opts);
+            const savedByScope = new Map(saved.map((row)=>[
+                    row.scope,
+                    row
+                ]));
+            const drafts = [];
+            const consumed = new Set();
+            for (const row of described){
+                const login = savedForDescriptor(row, described.length, saved, savedByScope);
+                const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
+                if (scope) consumed.add(scope);
+                const email = login?.email ?? descriptorEmail(row);
+                drafts.push({
+                    id: row.id,
+                    scope,
+                    label: row.label,
+                    descriptorLabel: row.label,
+                    email,
+                    appActive: Boolean(login?.appActive),
+                    hasDescriptorEntry: true,
+                    lastSaved: row.lastSaved,
+                    ...row.savedAtMs !== undefined ? {
+                        savedAtMs: row.savedAtMs
+                    } : {},
+                    usable: row.usable,
+                    alias: aliasLabel(scope ? aliases.get(scope) : undefined),
+                    descriptor: row.descriptor
+                });
+            }
+            for (const login of saved){
+                if (consumed.has(login.scope)) continue;
+                drafts.push({
+                    id: login.scope,
+                    scope: login.scope,
+                    label: login.label,
+                    descriptorLabel: null,
+                    email: login.email,
+                    appActive: login.appActive,
+                    hasDescriptorEntry: false,
+                    lastSaved: false,
+                    usable: login.hasToken,
+                    alias: aliasLabel(aliases.get(login.scope)),
+                    descriptor: null
+                });
+            }
+            return (0, _app_session_js__rspack_import_4.bI)(drafts).map((row)=>({
+                    id: row.id,
+                    scope: row.scope,
+                    label: (0, _url_policy_js__rspack_import_6.XU)(row.shownLabel || row.label),
+                    descriptorLabel: row.descriptorLabel ? (0, _url_policy_js__rspack_import_6.XU)(row.descriptorLabel) : null,
+                    shownId: row.shownId || row.id,
+                    email: row.email ? (0, _url_policy_js__rspack_import_6.XU)(row.email) : null,
+                    appActive: row.appActive,
+                    hasDescriptorEntry: row.hasDescriptorEntry,
+                    lastSaved: row.lastSaved,
+                    ...row.savedAtMs !== undefined ? {
+                        savedAtMs: row.savedAtMs
+                    } : {},
+                    usable: row.usable,
+                    alias: row.alias
+                }));
+        }
+        function formatLoginCatalog(rows) {
+            if (!rows.length) return "No saved Grok Bot logins. Open the Grok Bot app and sign in once.";
+            return rows.map((row)=>{
+                const notes = [
+                    row.appActive ? "(app active)" : "",
+                    row.lastSaved ? "(last saved)" : "",
+                    row.hasDescriptorEntry ? "" : "(no app session; gbot builds one from the saved login)",
+                    row.usable ? "" : "(unusable)"
+                ].filter(Boolean);
+                const suffix = notes.length ? ` ${notes.join(" ")}` : "";
+                const label = (0, _url_policy_js__rspack_import_6.XU)(row.label);
+                const visibleId = (0, _url_policy_js__rspack_import_6.XU)(row.shownId || row.id);
+                const head = label === visibleId ? `${label}${suffix}` : `${label}${suffix}\n  id ${visibleId}`;
+                const email = row.email && (0, _url_policy_js__rspack_import_6.XU)(row.email) !== label ? `\n  email ${(0, _url_policy_js__rspack_import_6.XU)(row.email)}` : "";
+                return row.alias ? `${head}${email}\n  alias ${(0, _url_policy_js__rspack_import_6.XU)(row.alias)}` : `${head}${email}`;
+            }).join("\n");
+        }
+        function ownAlias(aliases, selector) {
+            if (!aliases || typeof selector !== "string" || (0, _gbot_config_js__rspack_import_5.kV)(selector) || !Object.hasOwn(aliases, selector)) {
+                return null;
+            }
+            const alias = aliases[selector];
+            if (!alias || typeof alias !== "object" || typeof alias.scope !== "string") return null;
+            return alias;
+        }
+        function matches(row, selector, aliases) {
+            if (row.label === selector || row.id === selector || row.shownId === selector || row.descriptorLabel === selector) {
+                return true;
+            }
+            if (row.scope && row.scope.toLowerCase() === selector.toLowerCase()) return true;
+            if (row.email && row.email.toLowerCase() === selector.toLowerCase()) return true;
+            if (typeof row.label === "string" && row.label.includes("@") && row.label.toLowerCase() === selector.toLowerCase()) {
+                return true;
+            }
+            if (typeof row.descriptorLabel === "string" && row.descriptorLabel.includes("@") && row.descriptorLabel.toLowerCase() === selector.toLowerCase()) {
+                return true;
+            }
+            const alias = ownAlias(aliases, selector);
+            if (alias && row.scope && alias.scope.toLowerCase() === row.scope.toLowerCase()) return true;
+            if (PREFIX.test(selector)) {
+                const needle = selector.toLowerCase();
+                const id = String(row.id).toLowerCase();
+                if (id.startsWith(needle) && id.length > needle.length) return true;
+                const shown = String(row.shownId || "").toLowerCase();
+                if (shown.startsWith(needle) && shown.length > needle.length && shown !== id) return true;
+                if (row.scope && row.scope.toLowerCase().startsWith(needle) && row.scope.length > needle.length) return true;
+            }
+            return false;
+        }
+        function flagSelector(options) {
+            return typeof options.account === "string" ? options.account.trim() : "";
+        }
+        function envSelector(options) {
+            return String(options.env?.GBOT_ACCOUNT ?? "").trim();
+        }
+        function tag(row, selectedBy) {
+            return row ? {
+                ...row,
+                selectedBy
+            } : null;
+        }
+        function implicitRow(rows) {
+            if (rows.length === 0) return null;
+            const described = rows.filter((row)=>row.hasDescriptorEntry);
+            if (described.length === 1) return described[0];
+            const active = described.filter((row)=>row.appActive);
+            if (described.length > 1 && active.length === 1) return active[0];
+            if (described.length === 0 && rows.length === 1) return rows[0];
+            throw selectionError("AMBIGUOUS_ENTRIES", [
+                "Grok Bot gateway descriptor has multiple saved gateway entries and no active entry selection.",
+                "Choose one with --account <label> or GBOT_ACCOUNT=<label>.",
+                "Saved logins:",
+                loginLines(rows)
+            ].join("\n"));
+        }
+        function resolveGrokBotLogin(options = {}) {
+            const opts = baseOptions(options);
+            let config;
+            let configError = null;
+            try {
+                config = (0, _gbot_config_js__rspack_import_5.XL)(opts);
+            } catch (error) {
+                configError = error;
+                config = (0, _gbot_config_js__rspack_import_5.C5)();
+            }
+            const rows = listLoginCatalog({
+                ...opts,
+                config
+            });
+            const flagged = flagSelector(opts);
+            const fromEnv = flagged ? "" : envSelector(opts);
+            const explicit = flagged || fromEnv;
+            if (configError && !explicit) throw configError;
+            let selector = explicit;
+            let selectedBy = explicit ? "selector" : "implicit";
+            if (!selector && typeof config.default === "string" && config.default) {
+                selector = config.default;
+                selectedBy = "selector";
+            }
+            if (!selector) return tag(implicitRow(rows), "implicit");
+            const found = rows.filter((row)=>matches(row, selector, config.aliases));
+            if (found.length === 1) return tag(found[0], selectedBy);
+            if (configError) throw configError;
+            if (found.length === 0) {
+                throw selectionError("UNKNOWN_ACCOUNT", `No saved Grok Bot login matches "${(0, _url_policy_js__rspack_import_6.XU)(selector)}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
+            }
+            throw selectionError("AMBIGUOUS_ENTRIES", `More than one saved Grok Bot login matches "${(0, _url_policy_js__rspack_import_6.XU)(selector)}". Choose one with --account <label> or GBOT_ACCOUNT=<label>.\n${listed(rows)}`);
+        }
+        function copyAliasMap(aliases, name, alias) {
+            const next = Object.create(null);
+            for (const key of Object.keys(aliases ?? {}))next[key] = aliases[key];
+            if (name) next[name] = alias;
+            return next;
+        }
+        function defineAlias({ name, selector, ...options }) {
+            if (typeof name !== "string" || (0, _gbot_config_js__rspack_import_5.kV)(name) || !NAME.test(name)) {
+                throw new _gbot_config_js__rspack_import_5.Ht("Alias names must match ^[A-Za-z0-9_-]{1,32}$ and must not be a prototype key.");
+            }
+            if (typeof selector !== "string" || !selector.trim()) {
+                throw new _gbot_config_js__rspack_import_5.Ht("alias needs a login selector.");
+            }
+            const chosen = resolveGrokBotLogin({
+                ...options,
+                account: selector.trim()
+            });
+            if (!chosen?.scope) {
+                throw new _gbot_config_js__rspack_import_5.Ht("That login has no account scope gbot can store as an alias.");
+            }
+            const current = (0, _gbot_config_js__rspack_import_5.XL)(options);
+            const alias = {
+                scope: chosen.scope
+            };
+            if (chosen.email) alias.email = chosen.email;
+            (0, _gbot_config_js__rspack_import_5.gv)({
+                version: 1,
+                aliases: copyAliasMap(current.aliases, name, alias),
+                default: current.default
+            }, options);
+            return {
+                name,
+                scope: chosen.scope
+            };
+        }
+        function removeAlias({ name, ...options }) {
+            if (typeof name !== "string" || (0, _gbot_config_js__rspack_import_5.kV)(name) || !NAME.test(name)) {
+                throw new _gbot_config_js__rspack_import_5.Ht("Alias names must match ^[A-Za-z0-9_-]{1,32}$ and must not be a prototype key.");
+            }
+            const current = (0, _gbot_config_js__rspack_import_5.XL)(options);
+            if (!Object.hasOwn(current.aliases, name)) throw new _gbot_config_js__rspack_import_5.Ht(`No alias named "${name}".`);
+            const aliases = copyAliasMap(current.aliases);
+            delete aliases[name];
+            (0, _gbot_config_js__rspack_import_5.gv)({
+                version: 1,
+                aliases,
+                default: current.default === name ? null : current.default
+            }, options);
+        }
+        function setDefaultAccount({ name, clear = false, ...options }) {
+            const current = (0, _gbot_config_js__rspack_import_5.XL)(options);
+            if (clear) {
+                (0, _gbot_config_js__rspack_import_5.gv)({
+                    version: 1,
+                    aliases: current.aliases,
+                    default: null
+                }, options);
+                return;
+            }
+            if (typeof name !== "string" || (0, _gbot_config_js__rspack_import_5.kV)(name) || !Object.hasOwn(current.aliases, name)) {
+                throw new _gbot_config_js__rspack_import_5.Ht(`No alias named "${name ?? ""}".`);
+            }
+            (0, _gbot_config_js__rspack_import_5.gv)({
+                version: 1,
+                aliases: current.aliases,
+                default: name
+            }, options);
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Es: ()=>defineAlias,
+            Pf: ()=>hasSavedAccessToken,
+            Rz: ()=>setDefaultAccount,
+            cq: ()=>resolveGrokBotLogin,
+            d3: ()=>removeAlias,
+            fR: ()=>listLoginCatalog,
+            u3: ()=>formatLoginCatalog
+        });
+    },
     "./src/core/relay/control.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_string_decoder__rspack_import_0 = __webpack_require__("node:string_decoder");
         var node_net__rspack_import_1 = __webpack_require__("node:net");
@@ -50808,7 +52216,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 stdio: "ignore",
                 env: {
                     ...location.env,
-                    GROK_BOT_RELAY_DIR: location.stateDir
+                    GROK_BOT_RELAY_DIR: location.stateDir,
+                    ...location.accountScope ? {
+                        GBOT_ACCOUNT_SCOPE: location.accountScope
+                    } : {}
                 },
                 cwd: (0, node_path__rspack_import_2.dirname)(workerPath)
             });
@@ -50869,8 +52280,29 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_path__rspack_import_2 = __webpack_require__("node:path");
         var _codex_bridge_js__rspack_import_3 = __webpack_require__("./src/core/codex-bridge.js");
         var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
+        var _logins_js__rspack_import_5 = __webpack_require__("./src/core/logins.js");
         const digest = (value)=>(0, node_crypto__rspack_import_0.createHash)("sha256").update(value).digest("hex");
-        function relayProfile(env = process.env) {
+        const SCOPE = /^[0-9a-f]{64}$/;
+        function resolveRelayAccountScope(env = process.env) {
+            const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
+            if (SCOPE.test(pinned)) return pinned;
+            const home = env.HOME || env.USERPROFILE;
+            if (!home) return "";
+            try {
+                const choice = (0, _logins_js__rspack_import_5.cq)({
+                    env,
+                    home,
+                    platform: process.platform
+                });
+                return choice?.scope || "";
+            } catch (error) {
+                if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
+                    throw error;
+                }
+                return "";
+            }
+        }
+        function relayProfile(env = process.env, accountScope = "") {
             const keys = [
                 "GROK_BOT_GATEWAY_URL",
                 "SAND_HOST_GATEWAY_URL",
@@ -50894,25 +52326,38 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "GROK_BOT_TEST",
                 "NODE_ENV",
                 "DBUS_SESSION_BUS_ADDRESS",
-                "DISPLAY"
+                "DISPLAY",
+                "GBOT_CONFIG",
+                "GBOT_ACCOUNT",
+                "GBOT_ACCOUNT_SCOPE"
             ];
+            const scope = typeof accountScope === "string" ? accountScope : "";
             return digest(JSON.stringify([
                 (0, node_path__rspack_import_2.resolve)((0, _codex_bridge_js__rspack_import_3.ql)(env)),
                 (0, _app_session_js__rspack_import_4.dQ)((0, node_os__rspack_import_1.homedir)(), process.platform, env),
+                scope,
                 ...keys.map((key)=>[
                         key,
                         env[key] ?? ""
                     ])
             ]));
         }
-        function relayLocation({ env = process.env, stateDir, profile = relayProfile(env) } = {}) {
+        function relayLocation({ env = process.env, stateDir, profile, accountScope } = {}) {
+            const scope = accountScope !== undefined ? accountScope : resolveRelayAccountScope(env);
+            const pinned = typeof scope === "string" && SCOPE.test(scope) ? scope : "";
+            const effectiveEnv = {
+                ...env
+            };
+            if (pinned) effectiveEnv.GBOT_ACCOUNT_SCOPE = pinned;
+            const resolvedProfile = profile ?? relayProfile(effectiveEnv, pinned);
             if (process.platform === "win32") throw Error("Codex relay requires Unix-domain sockets; Windows is unsupported.");
-            const dir = (0, node_path__rspack_import_2.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), ".grok-bot-cli", "relay", profile.slice(0, 24)));
+            const dir = (0, node_path__rspack_import_2.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), ".grok-bot-cli", "relay", resolvedProfile.slice(0, 24)));
             const socketDir = Buffer.byteLength((0, node_path__rspack_import_2.join)(dir, "control.sock")) < 100 ? dir : (0, node_path__rspack_import_2.join)("/tmp", `gbot-relay-${process.getuid()}`, digest(dir).slice(0, 24));
             return {
                 stateDir: dir,
-                profile,
-                env,
+                profile: resolvedProfile,
+                accountScope: pinned,
+                env: effectiveEnv,
                 socketDir,
                 socketPath: (0, node_path__rspack_import_2.join)(socketDir, "control.sock")
             };
@@ -50921,6 +52366,37 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             hQ: ()=>relayLocation
         }, {
             br: digest
+        });
+    },
+    "./src/core/secret-store.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        function isTestMode(env = process.env) {
+            const raw = String(env.GROK_BOT_TEST ?? "").trim().toLowerCase();
+            return raw === "1" || raw === "true" || raw === "yes" || env.NODE_ENV === "test";
+        }
+        function secretStoreOffMessage(env = process.env) {
+            if (!isTestMode(env)) return "";
+            if (env.GROK_BOT_TEST === "1" && env.GBOT_TEST_KEYCHAIN_PASSWORD) return "";
+            const raw = String(env.GROK_BOT_TEST ?? "").trim().toLowerCase();
+            return raw === "1" || raw === "true" || raw === "yes" ? " GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode)." : " NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.";
+        }
+        function secretStoreOptions(env = process.env) {
+            if (!isTestMode(env)) return {};
+            const fixture = env.GROK_BOT_TEST === "1" ? env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
+            const password = typeof fixture === "string" && fixture ? fixture : "";
+            return {
+                getKeychainPassword () {
+                    if (password) return password;
+                    throw new Error("The OS secret store is disabled in test mode.");
+                },
+                unprotectData () {
+                    throw new Error("The OS secret store is disabled in test mode.");
+                }
+            };
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Ih: ()=>secretStoreOptions,
+            M6: ()=>secretStoreOffMessage,
+            Wj: ()=>isTestMode
         });
     },
     "./src/core/stdin-message.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -51615,10 +53091,29 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             s = s.replace(/Bearer\s+[A-Za-z0-9._+\/=-]+/gi, "Bearer <redacted>");
             s = s.replace(/(["']?(?:authorization|gatewayToken|gateway_token|access_token|accessToken|refresh_token|refreshToken|token|x-anyrun-network-token|cookie|set-cookie)["']?\s*[:=]\s*["']?)([^"',\s}]+)/gi, "$1<redacted>");
             s = s.replace(/(x-anyrun-network-token\s*[=:]\s*)(\S+)/gi, "$1<redacted>");
+            s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}/g, "<redacted>");
             return s;
         }
+        function redactKnownSecrets(text, secrets) {
+            let s = redactSecrets(text);
+            const list = Array.isArray(secrets) ? secrets : [];
+            const sorted = list.filter((item)=>typeof item === "string" && item.length >= 8).sort((a, b)=>b.length - a.length);
+            for (const secret of sorted){
+                if (s.includes(secret)) s = s.split(secret).join("<redacted>");
+            }
+            return s;
+        }
+        function printableText(text) {
+            return Array.from(String(text ?? ""), (char)=>{
+                const c = char.codePointAt(0) ?? 0;
+                const hidden = c < 0x20 || c >= 0x7f && c <= 0x9f || c === 0x2028 || c === 0x2029 || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069;
+                return hidden ? "?" : char;
+            }).join("");
+        }
         __webpack_require__.d(__webpack_exports__, {
+            Ok: ()=>redactKnownSecrets,
             Re: ()=>assertAllowedCredentialUrl,
+            XU: ()=>printableText,
             fp: ()=>redactSecrets
         });
     },

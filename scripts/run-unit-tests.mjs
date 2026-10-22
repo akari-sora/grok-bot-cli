@@ -16,7 +16,10 @@ const result = spawnSync(process.execPath, ["--test", ...files], {
   cwd: root,
   // Loopback-only credential URLs (src/core/url-policy.js testMode): a test can never reach a live gateway.
   // The gateway read cap must not come from the developer's shell.
-  env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "GBOT_MAX_RESPONSE_BYTES")), GROK_BOT_TEST: "1" },
+  env: {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !["GBOT_MAX_RESPONSE_BYTES", "GBOT_CONFIG", "GBOT_ACCOUNT"].includes(key))),
+    GROK_BOT_TEST: "1",
+  },
   stdio: "inherit",
 });
 process.exit(result.status === null ? 1 : result.status);
