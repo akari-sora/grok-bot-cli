@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { chmod, unlink, realpath } from "node:fs/promises";
 import { openRelayEngine } from "./engine.js";
 import { relayLocation, writeRelayProfileFile } from "./profile.js";
+import { relayProfileMismatchError } from "./stored-profile.js";
 import { claimRelayOwner } from "./ownership.js";
 import { CONTROL_BYTES, CONTROL_TIMEOUT, RELAY_PROTOCOL } from "./control.js";
 import { redactSecrets } from "../url-policy.js";
@@ -52,7 +53,7 @@ export async function runRelayWorker(options = {}) {
       if (request.version !== RELAY_PROTOCOL)
         throw Error("Relay protocol mismatch");
       if (request.profile !== location.profile)
-        throw Error("Relay profile mismatch");
+        throw relayProfileMismatchError();
       if (
         typeof request.requestId !== "string" ||
         request.requestId.length < 1 ||

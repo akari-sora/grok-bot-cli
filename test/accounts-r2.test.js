@@ -1092,6 +1092,82 @@ test("a relay records delivery rejected when a 401 rebuild fails", {
   assert.equal(ensured.length, 2);
 });
 
+test("a later relay send stays rejected when saved-login rebuild keeps failing", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
+  const { fakeAppServer } = await import("./helpers/codex-server.js");
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const sub = "user_synthetic_r4_relay_repeat";
+  const home = savedLoginHome(sub, "relay-repeat@example.com");
+  const dir = await mkdtemp(join(tmpdir(), "relay-r4-repeat-"));
+  const ensured = [];
+  const prompts = [];
+  const fake = await fakeAppServer({
+    initialize: (_, ok) => ok({}),
+    "thread/resume": (p, ok) => ok({
+      thread: { id: p.threadId, cwd: process.cwd(), status: { type: "idle" } },
+      cwd: process.cwd(),
+    }),
+    "thread/turns/list": (_, ok) => ok({ data: [], nextCursor: null }),
+    "thread/items/list": (_, ok) => ok({ data: [], nextCursor: null }),
+  });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      if (ensured.length === 1) return runningSandbox("gateway-relay-repeat", 1424);
+      return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    if (target.endsWith("/api/getAgentTranscriptTail")) {
+      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+    }
+    prompts.push(body);
+    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  });
+  let engine;
+  t.after(async () => {
+    await engine?.close().catch(() => {});
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  await withEnv(gatewayEnv(home, { CODEX_HOME: fake.home }), async () => {
+    engine = await openRelayEngine({
+      stateDir: dir,
+      profile: "relay-r4-repeat",
+      env: { CODEX_HOME: fake.home, GROK_BOT_TEST: "1", HOME: home, USERPROFILE: home },
+      accountScope: scopeFor(sub),
+      clock: () => 1000,
+    });
+    const binding = await engine.startBinding({
+      grokTarget: "bot-1",
+      codexThreadId: "thread",
+      requestId: "link-repeat",
+    });
+    const first = await engine.sendToGrok({
+      bindingId: binding.id,
+      message: "hello",
+      requestId: "send-repeat-1",
+    });
+    const second = await engine.sendToGrok({
+      bindingId: binding.id,
+      message: "again",
+      requestId: "send-repeat-2",
+    });
+    assert.equal(first.delivery, "rejected");
+    assert.equal(second.delivery, "rejected");
+    assert.notEqual(first.reason, "delivery-unknown");
+    assert.notEqual(second.reason, "delivery-unknown");
+    assert.equal(JSON.stringify([first, second]).includes("synthetic-r2-token-do-not-leak"), false);
+  });
+  assert.equal(prompts.length, 1);
+  assert.equal(ensured.length, 3);
+});
+
 test("a v1 descriptor that contradicts the only saved login is not merged", {
   skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
 }, async (t) => {

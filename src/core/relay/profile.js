@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { chmod, lstat, open, readFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, lstat, open, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { codexSocketPath } from "../codex-bridge.js";
@@ -96,12 +96,25 @@ export async function writeRelayProfileFile(dir, profile) {
   assertProfileText(profile);
   const { path, stat } = await profileFileStat(dir);
   ownedProfileFile(stat);
-  const file = await open(path, stat ? "r+" : "wx", 0o600);
+  // Temp file plus rename. Truncating the destination first leaves an empty
+  // file if the process dies before the write, and that empty file fails every
+  // later status list.
+  const temp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const file = await open(temp, "wx", 0o600);
   try {
-    await file.truncate(0);
     await file.write(profile, 0, "utf8");
-  } finally {
+    await file.sync();
+  } catch (error) {
     await file.close();
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
+  await file.close();
+  try {
+    await rename(temp, path);
+  } catch (error) {
+    await unlink(temp).catch(() => {});
+    throw error;
   }
   await chmod(path, 0o600);
 }

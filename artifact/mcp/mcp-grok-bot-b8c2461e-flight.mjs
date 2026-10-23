@@ -30233,12 +30233,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
                 if (found.length === 1) return found[0];
             }
-            if (!scope && !email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            if (!email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
             return null;
         }
         function provenDescriptorScope(row, login) {
             const own = descriptorScope(row);
-            if (own) return !login || login.scope === own ? own : null;
+            if (own) return own;
             const email = descriptorEmail(row);
             if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
             return null;
@@ -30510,6 +30510,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_net__rspack_import_1 = __webpack_require__("node:net");
         var node_crypto__rspack_import_2 = __webpack_require__("node:crypto");
         var _profile_js__rspack_import_3 = __webpack_require__("./src/core/relay/profile.js");
+        var _stored_profile_js__rspack_import_4 = __webpack_require__("./src/core/relay/stored-profile.js");
         const RELAY_PROTOCOL = 1;
         const CONTROL_BYTES = 1024 * 1024;
         const CONTROL_TIMEOUT = 45000;
@@ -30560,7 +30561,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         const reply = JSON.parse(buffer.slice(0, end));
                         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId) throw Error("Relay protocol identity mismatch");
                         if (reply.error) throw Error(reply.error);
-                        if (reply.profile !== profile) throw Error("Relay profile mismatch");
+                        if (reply.profile !== profile) throw (0, _stored_profile_js__rspack_import_4.Xm)();
                         finish(null, reply.result);
                     } catch (error) {
                         finish(error);
@@ -30622,6 +30623,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } catch (error) {
                 if (!unavailable1(error)) throw error;
             }
+            await assertStoredProfile(location);
             const workerPath = await resolveRelayWorker(options);
             const child = (0, node_child_process__rspack_import_0.spawn)(process.execPath, [
                 workerPath
@@ -30658,6 +30660,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             throw Error("Relay worker startup failed or timed out; no untracked send was attempted. Inspect bridge status and the relay owner lock.");
         }
+        async function assertStoredProfile(location) {
+            const stored = await (0, _stored_profile_js__rspack_import_7.EN)(location.stateDir);
+            if (stored && stored !== location.profile) throw (0, _stored_profile_js__rspack_import_7.Xm)();
+        }
         function stoppedWorker(profile) {
             return {
                 worker: {
@@ -30677,7 +30683,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 fromFile = null;
             }
             if (fromFile) return fromFile;
-            return await (0, _stored_profile_js__rspack_import_7.E)(dir);
+            return await (0, _stored_profile_js__rspack_import_7.EN)(dir);
         }
         async function listOwnedRelayDirectories(env) {
             const root = (0, node_path__rspack_import_3.join)(env.HOME || env.USERPROFILE || (0, node_os__rspack_import_2.homedir)(), ".grok-bot-cli", "relay");
@@ -30700,7 +30706,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 }
                 if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
                 if (process.getuid && stat.uid !== process.getuid()) continue;
-                const profile = await profileInDirectory(stateDir);
+                let profile;
+                try {
+                    profile = await profileInDirectory(stateDir);
+                } catch (error) {
+                    rows.push({
+                        stateDir,
+                        profile: null,
+                        worker: {
+                            state: "unreadable",
+                            supervised: false
+                        },
+                        reason: (0, _url_policy_js__rspack_import_9.fp)(error instanceof Error ? error.message : String(error)).slice(0, 300)
+                    });
+                    continue;
+                }
                 if (!profile) continue;
                 let worker = {
                     state: "stopped",
@@ -30768,8 +30788,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 return {
                     ...reply,
                     accountResolution: "failed",
-                    stateDir,
-                    directories: undefined
+                    stateDir
                 };
             } catch (error) {
                 if (method === "status" && unavailable1(error)) {
@@ -30807,7 +30826,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     requestId
                 });
             } catch (error) {
-                if (method === "status" && unavailable1(error)) return stoppedWorker(location.profile);
+                if (unavailable1(error)) {
+                    await assertStoredProfile(location);
+                    if (method === "status") return stoppedWorker(location.profile);
+                }
                 throw error;
             }
         }
@@ -30905,12 +30927,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             assertProfileText(profile);
             const { path, stat } = await profileFileStat(dir);
             ownedProfileFile(stat);
-            const file = await open(path, stat ? "r+" : "wx", 384);
+            const temp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+            const file = await open(temp, "wx", 384);
             try {
-                await file.truncate(0);
                 await file.write(profile, 0, "utf8");
-            } finally{
+                await file.sync();
+            } catch (error) {
                 await file.close();
+                await unlink(temp).catch(()=>{});
+                throw error;
+            }
+            await file.close();
+            try {
+                await rename(temp, path);
+            } catch (error) {
+                await unlink(temp).catch(()=>{});
+                throw error;
             }
             await chmod(path, 384);
         }
@@ -30952,10 +30984,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/relay/stored-profile.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_fs_promises__rspack_import_0 = __webpack_require__("node:fs/promises");
         var node_path__rspack_import_1 = __webpack_require__("node:path");
+        const MAX_STORED_PROFILE_BYTES = 64 * 1024 * 1024;
+        function relayProfileMismatchError() {
+            return new Error("Relay profile mismatch. This directory was written for a different profile and old bindings are not adopted. With the old version, run `gbot codex bridge stop --worker` before upgrading; that version's `bridge status` includes worker.pid. A pinned GROK_BOT_RELAY_DIR keeps the same socket path, so a still-running old worker is reached on that socket and rejects this hello. Stop the process that has the directory's control.sock or worker.lock open (for example `lsof -t <dir>/worker.lock`), then move or rename the directory, or choose a new GROK_BOT_RELAY_DIR, and bind again. Only the default directory's socket path changes, because it is derived from the profile hash; its old state stays in ~/.grok-bot-cli/relay/<old hash>.");
+        }
         function lastStoredProfile(bytes) {
             const text = Buffer.from(bytes).toString("latin1");
             let last = null;
-            for (const match of text.matchAll(/"profile":"([^"\\]{1,512})","records":/g))last = match[1];
+            for (const match of text.matchAll(/"profile":"([^"\\]{1,512})"/g))last = match[1];
             return last;
         }
         async function readStoredRelayProfile(dir) {
@@ -30973,13 +31009,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     throw error;
                 }
                 if (!info.isFile() || info.isSymbolicLink()) continue;
+                if (info.size > MAX_STORED_PROFILE_BYTES) throw new Error("Relay storage capacity exceeded");
                 const found = lastStoredProfile(await (0, node_fs_promises__rspack_import_0.readFile)(file));
                 if (found) profile = found;
             }
             return profile;
         }
         __webpack_require__.d(__webpack_exports__, {
-            E: ()=>readStoredRelayProfile
+            EN: ()=>readStoredRelayProfile,
+            Xm: ()=>relayProfileMismatchError
         });
     },
     "./src/core/secret-store.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {

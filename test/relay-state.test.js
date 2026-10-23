@@ -13,6 +13,21 @@ const target = {
   nextPoll: 0,
   failures: 0,
 };
+test("a state file with profile before targets is Relay profile mismatch, not a replay disagreement", async () => {
+  const { openRelayState } = await load();
+  const dir = await mkdtemp(join(tmpdir(), "relay-order-"));
+  try {
+    await writeFile(join(dir, "relay.sqlite"), Buffer.from('{"version":1,"profile":"legacy-order","targets":{}}'));
+    await assert.rejects(openRelayState({ dir, profile: "other-order" }), (error) => {
+      assert.match(error.message, /Relay profile mismatch/);
+      assert.doesNotMatch(error.message, /disagrees|could not be opened/);
+      return true;
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("state commits atomically, reopens without replay, and skips unchanged patches", async () => {
   const { openRelayState } = await load();
   const dir = await mkdtemp(join(tmpdir(), "relay-state-"));

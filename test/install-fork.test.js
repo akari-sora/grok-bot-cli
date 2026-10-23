@@ -83,7 +83,7 @@ test("install-fork.ps1 names the same steps and refuses Administrator without -A
   assert.match(text, /Test-ReportedMissing/);
   assert.match(text, /Get-Content -Raw -LiteralPath/);
   assert.doesNotMatch(text, /Get-Content\b[^\n]*\s-Path\b/);
-  assert.match(text, /\$importLog = @\(gbot config import \$Config 2>&1/);
+  assert.match(text, /\$ErrorActionPreference = "Continue"\r?\n\s*gbot config import \$Config 2>&1/);
   assert.match(text, /\$sha -cnotmatch '\^\[0-9a-f\]\{40\}\(\[0-9a-f\]\{24\}\)\?\$'/);
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -496,4 +496,13 @@ exit 0
   assert.match(recorded, new RegExp(`checkout --detach ${branchSha}`));
   assert.match(recorded, new RegExp(`checkout --detach ${tagSha}`));
   assert.doesNotMatch(recorded, /checkout --detach --/);
+  git(["-C", remote, "config", "uploadpack.allowReachableSHA1InWant", "true"]);
+  const shaRef = spawnSync("sh", [sh, tagSha], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(shaRef.status, 0, shaRef.stderr + shaRef.stdout);
+  const shaHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(shaHead.stdout.trim(), tagSha);
+  const recordedSha = readFileSync(gitLog, "utf8");
+  assert.match(recordedSha, new RegExp(`fetch origin -- ${tagSha}`));
+  assert.match(recordedSha, new RegExp(`checkout --detach ${tagSha}`));
+  assert.doesNotMatch(recordedSha, /checkout --detach --/);
 });

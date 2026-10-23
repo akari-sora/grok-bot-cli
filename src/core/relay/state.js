@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { defineState } from "@agent-bundle/runtime/state";
-import { readStoredRelayProfile } from "./stored-profile.js";
+import { readStoredRelayProfile, relayProfileMismatchError } from "./stored-profile.js";
 
 export const relayId = z.string().min(1).max(512);
 const text = z
@@ -151,7 +151,7 @@ export async function openRelayState({ dir, profile, limits: overrides = {} }) {
   dir = resolve(dir);
   await protectRelayDirectory(dir, limits.diskBytes);
   const previous = await readStoredRelayProfile(dir);
-  if (previous && previous !== profile) throw new Error("Relay profile mismatch");
+  if (previous && previous !== profile) throw relayProfileMismatchError();
   const schema = z
     .strictObject({
       version: z.literal(1),
@@ -213,7 +213,7 @@ export async function openRelayState({ dir, profile, limits: overrides = {} }) {
     closed = false;
   if (snapshot.state.profile !== profile) {
     await driver.close();
-    throw new Error("Relay profile mismatch");
+    throw relayProfileMismatchError();
   }
   return {
     dir,

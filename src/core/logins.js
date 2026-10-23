@@ -209,14 +209,15 @@ function savedForDescriptor(row, describedCount, saved, savedByScope) {
   }
   // A legacy v1 descriptor (id "default") merges with the only saved login only when
   // the descriptor itself has neither a scope nor an email. Contradicting evidence stays two rows.
-  if (!scope && !email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+  if (!email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
   return null;
 }
 
 /** Scope for wake and caching. The unverified v1 fallback does not prove an account. */
 function provenDescriptorScope(row, login) {
   const own = descriptorScope(row);
-  if (own) return !login || login.scope === own ? own : null;
+  // A descriptor scope only merges the saved login with that same scope, or none.
+  if (own) return own;
   const email = descriptorEmail(row);
   if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
   return null;

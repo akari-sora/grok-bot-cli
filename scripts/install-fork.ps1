@@ -147,7 +147,15 @@ if ($LASTEXITCODE -ne 0) { Write-Output "gbot accounts exit $LASTEXITCODE" }
 $importStatus = 0
 $importLog = @()
 if ($Config) {
-  $importLog = @(gbot config import $Config 2>&1)
+  # Windows PowerShell 5.1 turns a native command's stderr into a terminating
+  # NativeCommandError when ErrorActionPreference is Stop and stderr is merged
+  # with 2>&1. Continue applies only to this call, so exit 3 is still visible.
+  $importLog = @(
+    & {
+      $ErrorActionPreference = "Continue"
+      gbot config import $Config 2>&1
+    }
+  )
   $importStatus = $LASTEXITCODE
   foreach ($line in $importLog) { Write-Output $line }
   if ($importStatus -ne 0 -and $importStatus -ne 3) { exit $importStatus }

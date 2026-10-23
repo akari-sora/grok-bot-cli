@@ -2,6 +2,7 @@ import { StringDecoder } from "node:string_decoder";
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
 import { relayLocation } from "./profile.js";
+import { relayProfileMismatchError } from "./stored-profile.js";
 export const RELAY_PROTOCOL = 1;
 export const CONTROL_BYTES = 1024 * 1024;
 export const CONTROL_TIMEOUT = 45000;
@@ -66,7 +67,7 @@ export function relayRequest(
         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId)
           throw Error("Relay protocol identity mismatch");
         if (reply.error) throw Error(reply.error);
-        if (reply.profile !== profile) throw Error("Relay profile mismatch");
+        if (reply.profile !== profile) throw relayProfileMismatchError();
         finish(null, reply.result);
       } catch (error) {
         finish(error);

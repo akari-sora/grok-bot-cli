@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { digest, readRelayProfileFile, relayLocation } from "./profile.js";
-import { readStoredRelayProfile } from "./stored-profile.js";
+import { readStoredRelayProfile, relayProfileMismatchError } from "./stored-profile.js";
 import { relayRequest } from "./control.js";
 import { redactSecrets } from "../url-policy.js";
 
@@ -67,6 +67,7 @@ export async function ensureRelayWorker(options = {}) {
   } catch (error) {
     if (!unavailable(error)) throw error;
   }
+  await assertStoredProfile(location);
   const workerPath = await resolveRelayWorker(options);
   const child = spawn(process.execPath, [workerPath], {
     detached: true,
@@ -104,6 +105,11 @@ export async function ensureRelayWorker(options = {}) {
     "Relay worker startup failed or timed out; no untracked send was attempted. Inspect bridge status and the relay owner lock.",
   );
 }
+async function assertStoredProfile(location) {
+  const stored = await readStoredRelayProfile(location.stateDir);
+  if (stored && stored !== location.profile) throw relayProfileMismatchError();
+}
+
 function stoppedWorker(profile) {
   return {
     worker: {
@@ -149,7 +155,18 @@ async function listOwnedRelayDirectories(env) {
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
     if (process.getuid && stat.uid !== process.getuid()) continue;
-    const profile = await profileInDirectory(stateDir);
+    let profile;
+    try {
+      profile = await profileInDirectory(stateDir);
+    } catch (error) {
+      rows.push({
+        stateDir,
+        profile: null,
+        worker: { state: "unreadable", supervised: false },
+        reason: redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 300),
+      });
+      continue;
+    }
     if (!profile) continue;
     let worker = { state: "stopped", profile, supervised: false };
     if (process.platform !== "win32") {
@@ -203,7 +220,7 @@ async function unmanagedAccountRelay(method, input, options, cause) {
       signal: options.signal,
       requestId: input.requestId ?? randomUUID(),
     });
-    return { ...reply, accountResolution: "failed", stateDir, directories: undefined };
+    return { ...reply, accountResolution: "failed", stateDir };
   } catch (error) {
     if (method === "status" && unavailable(error)) {
       return { ...stoppedWorker(profile), accountResolution: "failed", stateDir };
@@ -231,8 +248,10 @@ export async function managedOperation(method, input, options = {}) {
       requestId,
     });
   } catch (error) {
-    if (method === "status" && unavailable(error))
-      return stoppedWorker(location.profile);
+    if (unavailable(error)) {
+      await assertStoredProfile(location);
+      if (method === "status") return stoppedWorker(location.profile);
+    }
     // Never retry a disconnected mutation. Its durable request ID is the recovery handle.
     throw error;
   }

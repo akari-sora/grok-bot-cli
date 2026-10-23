@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { z } from "zod";
 import test from "./helpers/win32-test.js";
 import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
 import { relayProfile } from "../src/core/relay/profile.js";
@@ -290,8 +291,11 @@ test("bridge stop and status still see workers when login resolution fails", asy
   assert.equal(one.worker.state, "running");
   assert.equal(one.worker.profile, profileA);
   assert.equal(one.accountResolution, "failed");
-  assert.equal(one.directories, undefined);
-  await managedOperation("stop", { worker: true }, { env: { ...env, GROK_BOT_RELAY_DIR: dirA } });
+  assert.equal(Object.hasOwn(one, "directories"), false);
+  z.record(z.string(), z.json()).parse(one);
+  const stopped = await managedOperation("stop", { worker: true }, { env: { ...env, GROK_BOT_RELAY_DIR: dirA } });
+  assert.equal(Object.hasOwn(stopped, "directories"), false);
+  z.record(z.string(), z.json()).parse(stopped);
   await workerA.closed;
   assert.equal(closed.a, 1);
   assert.equal(closed.b, 0);
@@ -299,4 +303,172 @@ test("bridge stop and status still see workers when login resolution fails", asy
     (await relayRequest({ stateDir: dirB, profile: profileB, accountScope: scopeB, env }, "hello", {})).worker.state,
     "running",
   );
+});
+
+test("managed status and start surface Relay profile mismatch for a stopped pinned directory", async () => {
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const home = await mkdtemp(join(tmpdir(), "relay-mismatch-home-"));
+  const dir = await mkdtemp(join(tmpdir(), "relay-mismatch-dir-"));
+  const gateway = {
+    resolve: async (ref) => ({ id: ref, name: "Fixture" }),
+    tail: async () => ({ entries: [] }),
+    send: async () => ({ delivery: "rejected" }),
+  };
+  const legacy = await openRelayEngine({
+    stateDir: dir,
+    profile: "legacy-pinned-profile",
+    env: { CODEX_HOME: join(home, "codex"), GROK_BOT_TEST: "1" },
+    gateway,
+    clock: () => 1,
+  });
+  await legacy.close();
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GROK_BOT_RELAY_DIR: dir,
+    GBOT_ACCOUNT_SCOPE: "a".repeat(64),
+  };
+  try {
+    await assert.rejects(managedOperation("status", {}, { env }), (error) => {
+      assert.match(error.message, /^Relay profile mismatch/);
+      assert.match(error.message, /gbot codex bridge stop --worker/);
+      assert.match(error.message, /worker\.pid/);
+      assert.match(error.message, /same socket path/);
+      assert.match(error.message, /lsof -t <dir>\/worker\.lock/);
+      assert.doesNotMatch(error.message, /startup failed or timed out/);
+      assert.doesNotMatch(error.message, /Worker is not running/);
+      return true;
+    });
+    await assert.rejects(
+      managedOperation("startBinding", { grokTarget: "target", codexThreadId: "thread" }, { env }),
+      /Relay profile mismatch/,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a profile rewrite keeps the previous file when the directory cannot create a replacement", async () => {
+  const { readRelayProfileFile, writeRelayProfileFile } = await import("../src/core/relay/profile.js");
+  const dir = await mkdtemp(join(tmpdir(), "relay-profile-write-"));
+  const previous = "a".repeat(64);
+  try {
+    await writeRelayProfileFile(dir, previous);
+    await chmod(dir, 0o555);
+    await assert.rejects(writeRelayProfileFile(dir, "b".repeat(64)));
+    await chmod(dir, 0o700);
+    assert.equal(await readRelayProfileFile(dir), previous);
+  } finally {
+    await chmod(dir, 0o700).catch(() => {});
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("one unreadable relay directory does not fail the status list", async () => {
+  const home = await mkdtemp(join(tmpdir(), "relay-unreadable-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const root = join(home, ".grok-bot-cli", "relay");
+  const good = join(root, "good");
+  const bad = join(root, "bad");
+  await mkdir(good, { recursive: true });
+  await mkdir(bad, { recursive: true });
+  await writeFile(join(good, "profile"), "ab".repeat(32), { mode: 0o600 });
+  await writeFile(join(bad, "profile"), "", { mode: 0o600 });
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  };
+  try {
+    const listed = await managedOperation("status", {}, { env });
+    const goodRow = listed.directories.find((row) => row.stateDir === good);
+    const badRow = listed.directories.find((row) => row.stateDir === bad);
+    assert.equal(goodRow.profile, "ab".repeat(32));
+    assert.equal(goodRow.worker.state, "stopped");
+    assert.equal(badRow.profile, null);
+    assert.equal(badRow.worker.state, "unreadable");
+    assert.match(badRow.reason, /invalid/i);
+    await assert.rejects(
+      managedOperation("stop", { worker: true }, { env: { ...env, GROK_BOT_RELAY_DIR: bad } }),
+      /invalid/i,
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a state file over the scan cap is unreadable and is not loaded", async () => {
+  const scanCap = 64 * 1024 * 1024;
+  const home = await mkdtemp(join(tmpdir(), "relay-huge-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const huge = join(home, ".grok-bot-cli", "relay", "huge");
+  await mkdir(huge, { recursive: true });
+  const handle = await open(join(huge, "relay.sqlite"), "w");
+  await handle.truncate(scanCap + 1);
+  await handle.close();
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  };
+  try {
+    const listed = await managedOperation("status", {}, { env });
+    const row = listed.directories.find((item) => item.stateDir === huge);
+    assert.equal(row.worker.state, "unreadable");
+    assert.match(row.reason, /capacity/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("status reads the profile from state bytes when the profile file is absent", async () => {
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { access } = await import("node:fs/promises");
+  const home = await mkdtemp(join(tmpdir(), "relay-sqlite-profile-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const dir = join(home, "pinned-relay");
+  await mkdir(dir, { recursive: true });
+  const gateway = {
+    resolve: async (ref) => ({ id: ref, name: "Fixture" }),
+    tail: async () => ({ entries: [] }),
+    send: async () => ({ delivery: "rejected" }),
+  };
+  const engine = await openRelayEngine({
+    stateDir: dir,
+    profile: "stored-only-profile",
+    env: { CODEX_HOME: join(home, "codex"), GROK_BOT_TEST: "1" },
+    gateway,
+    clock: () => 1,
+  });
+  await engine.close();
+  await assert.rejects(access(join(dir, "profile")), (error) => error.code === "ENOENT");
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+    GROK_BOT_RELAY_DIR: dir,
+  };
+  try {
+    const status = await managedOperation("status", {}, { env });
+    assert.equal(status.worker.profile, "stored-only-profile");
+    assert.equal(status.worker.state, "stopped");
+    assert.equal(status.accountResolution, "failed");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

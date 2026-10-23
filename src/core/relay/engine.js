@@ -26,13 +26,18 @@ function createGateway(accountScope) {
   return {
     resolve: async (ref) => resolveRef(await connectGateway({ account }), ref),
     tail: async (id) => getTranscriptTail(await connectGateway({ account }), id, 200),
-    send: async (id, text, extra) =>
-      sendPrompt(
-        await connectGateway({ account, signal: extra.signal }),
-        id,
-        text,
-        extra,
-      ),
+    send: async (id, text, extra = {}) => {
+      let session;
+      try {
+        session = await connectGateway({ account, signal: extra.signal });
+      } catch (error) {
+        // The prompt was never transmitted. A missing delivery would be recorded
+        // as delivery-unknown on every send after the saved-login cache is dropped.
+        if (error && typeof error === "object" && error.delivery == null) error.delivery = "rejected";
+        throw error;
+      }
+      return sendPrompt(session, id, text, extra);
+    },
   };
 }
 /** Core owns policy and durable intents; its caller must hold the single-worker lock. */

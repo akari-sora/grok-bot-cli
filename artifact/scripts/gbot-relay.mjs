@@ -27487,12 +27487,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
                 if (found.length === 1) return found[0];
             }
-            if (!scope && !email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            if (!email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
             return null;
         }
         function provenDescriptorScope(row, login) {
             const own = descriptorScope(row);
-            if (own) return !login || login.scope === own ? own : null;
+            if (own) return own;
             const email = descriptorEmail(row);
             if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
             return null;
@@ -28070,6 +28070,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_net__rspack_import_1 = __webpack_require__("node:net");
         var node_crypto__rspack_import_2 = __webpack_require__("node:crypto");
         var _profile_js__rspack_import_3 = __webpack_require__("./src/core/relay/profile.js");
+        var _stored_profile_js__rspack_import_4 = __webpack_require__("./src/core/relay/stored-profile.js");
         const RELAY_PROTOCOL = 1;
         const CONTROL_BYTES = 1024 * 1024;
         const CONTROL_TIMEOUT = 45000;
@@ -28120,7 +28121,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         const reply = JSON.parse(buffer.slice(0, end));
                         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId) throw Error("Relay protocol identity mismatch");
                         if (reply.error) throw Error(reply.error);
-                        if (reply.profile !== profile) throw Error("Relay profile mismatch");
+                        if (reply.profile !== profile) throw relayProfileMismatchError();
                         finish(null, reply.result);
                     } catch (error) {
                         finish(error);
@@ -28152,10 +28153,19 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 tail: async (id)=>(0, _gateway_js__rspack_import_8.bA)(await (0, _gateway_js__rspack_import_8.Vq)({
                         account
                     }), id, 200),
-                send: async (id, text, extra)=>(0, _gateway_js__rspack_import_8.LV)(await (0, _gateway_js__rspack_import_8.Vq)({
-                        account,
-                        signal: extra.signal
-                    }), id, text, extra)
+                send: async (id, text, extra = {})=>{
+                    let session;
+                    try {
+                        session = await (0, _gateway_js__rspack_import_8.Vq)({
+                            account,
+                            signal: extra.signal
+                        });
+                    } catch (error) {
+                        if (error && typeof error === "object" && error.delivery == null) error.delivery = "rejected";
+                        throw error;
+                    }
+                    return (0, _gateway_js__rspack_import_8.LV)(session, id, text, extra);
+                }
             };
         }
         async function openRelayEngine({ stateDir, profile, env = process.env, gateway, accountScope, clock = Date.now, openSession, openConversation, limits } = {}) {
@@ -29010,12 +29020,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             assertProfileText(profile);
             const { path, stat } = await profileFileStat(dir);
             ownedProfileFile(stat);
-            const file = await (0, node_fs_promises__rspack_import_1.open)(path, stat ? "r+" : "wx", 384);
+            const temp = `${path}.${process.pid}.${(0, node_crypto__rspack_import_0.randomBytes)(4).toString("hex")}.tmp`;
+            const file = await (0, node_fs_promises__rspack_import_1.open)(temp, "wx", 384);
             try {
-                await file.truncate(0);
                 await file.write(profile, 0, "utf8");
-            } finally{
+                await file.sync();
+            } catch (error) {
                 await file.close();
+                await (0, node_fs_promises__rspack_import_1.unlink)(temp).catch(()=>{});
+                throw error;
+            }
+            await file.close();
+            try {
+                await (0, node_fs_promises__rspack_import_1.rename)(temp, path);
+            } catch (error) {
+                await (0, node_fs_promises__rspack_import_1.unlink)(temp).catch(()=>{});
+                throw error;
             }
             await (0, node_fs_promises__rspack_import_1.chmod)(path, 384);
         }
@@ -29341,8 +29361,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             relayId.parse(profile);
             dir = (0, node_path__rspack_import_1.resolve)(dir);
             await protectRelayDirectory(dir, limits.diskBytes);
-            const previous = await (0, _stored_profile_js__rspack_import_3.E)(dir);
-            if (previous && previous !== profile) throw new Error("Relay profile mismatch");
+            const previous = await (0, _stored_profile_js__rspack_import_3.EN)(dir);
+            if (previous && previous !== profile) throw (0, _stored_profile_js__rspack_import_3.Xm)();
             const schema = zod__rspack_import_4.rej({
                 version: zod__rspack_import_4.euz(1),
                 profile: relayId,
@@ -29411,7 +29431,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             let snapshot = await store.read(), queue = Promise.resolve(), closed = false;
             if (snapshot.state.profile !== profile) {
                 await driver.close();
-                throw new Error("Relay profile mismatch");
+                throw (0, _stored_profile_js__rspack_import_3.Xm)();
             }
             return {
                 dir,
@@ -29465,10 +29485,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/relay/stored-profile.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_fs_promises__rspack_import_0 = __webpack_require__("node:fs/promises");
         var node_path__rspack_import_1 = __webpack_require__("node:path");
+        const MAX_STORED_PROFILE_BYTES = 64 * 1024 * 1024;
+        function relayProfileMismatchError1() {
+            return new Error("Relay profile mismatch. This directory was written for a different profile and old bindings are not adopted. With the old version, run `gbot codex bridge stop --worker` before upgrading; that version's `bridge status` includes worker.pid. A pinned GROK_BOT_RELAY_DIR keeps the same socket path, so a still-running old worker is reached on that socket and rejects this hello. Stop the process that has the directory's control.sock or worker.lock open (for example `lsof -t <dir>/worker.lock`), then move or rename the directory, or choose a new GROK_BOT_RELAY_DIR, and bind again. Only the default directory's socket path changes, because it is derived from the profile hash; its old state stays in ~/.grok-bot-cli/relay/<old hash>.");
+        }
         function lastStoredProfile(bytes) {
             const text = Buffer.from(bytes).toString("latin1");
             let last = null;
-            for (const match of text.matchAll(/"profile":"([^"\\]{1,512})","records":/g))last = match[1];
+            for (const match of text.matchAll(/"profile":"([^"\\]{1,512})"/g))last = match[1];
             return last;
         }
         async function readStoredRelayProfile(dir) {
@@ -29486,13 +29510,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     throw error;
                 }
                 if (!info.isFile() || info.isSymbolicLink()) continue;
+                if (info.size > MAX_STORED_PROFILE_BYTES) throw new Error("Relay storage capacity exceeded");
                 const found = lastStoredProfile(await (0, node_fs_promises__rspack_import_0.readFile)(file));
                 if (found) profile = found;
             }
             return profile;
         }
         __webpack_require__.d(__webpack_exports__, {
-            E: ()=>readStoredRelayProfile
+            EN: ()=>readStoredRelayProfile,
+            Xm: ()=>relayProfileMismatchError1
         });
     },
     "./src/core/relay/worker.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -29501,12 +29527,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_fs_promises__rspack_import_2 = __webpack_require__("node:fs/promises");
         var _engine_js__rspack_import_3 = __webpack_require__("./src/core/relay/engine.js");
         var _profile_js__rspack_import_4 = __webpack_require__("./src/core/relay/profile.js");
-        var _ownership_js__rspack_import_5 = __webpack_require__("./src/core/relay/ownership.js");
-        var _control_js__rspack_import_6 = __webpack_require__("./src/core/relay/control.js");
-        var _url_policy_js__rspack_import_7 = __webpack_require__("./src/core/url-policy.js");
+        var _stored_profile_js__rspack_import_5 = __webpack_require__("./src/core/relay/stored-profile.js");
+        var _ownership_js__rspack_import_6 = __webpack_require__("./src/core/relay/ownership.js");
+        var _control_js__rspack_import_7 = __webpack_require__("./src/core/relay/control.js");
+        var _url_policy_js__rspack_import_8 = __webpack_require__("./src/core/url-policy.js");
         async function runRelayWorker(options = {}) {
             const location = (0, _profile_js__rspack_import_4.hQ)(options);
-            const release = await (0, _ownership_js__rspack_import_5.x)(location);
+            const release = await (0, _ownership_js__rspack_import_6.x)(location);
             let engine, server, timer, closing = false, inFlight = 0, ownsSocket = false;
             const clients = new Set();
             let done;
@@ -29541,7 +29568,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     });
                 async function dispatch(request) {
                     if (request.version !== 1) throw Error("Relay protocol mismatch");
-                    if (request.profile !== location.profile) throw Error("Relay profile mismatch");
+                    if (request.profile !== location.profile) throw (0, _stored_profile_js__rspack_import_5.Xm)();
                     if (typeof request.requestId !== "string" || request.requestId.length < 1 || request.requestId.length > 128) throw Error("Invalid relay request identity");
                     const input = request.input;
                     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid relay input");
@@ -29618,7 +29645,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     socket.on("data", async (chunk)=>{
                         if (received) return;
                         bytes += chunk.length;
-                        if (bytes > _control_js__rspack_import_6.Q) {
+                        if (bytes > _control_js__rspack_import_7.Q) {
                             socket.destroy();
                             return;
                         }
@@ -29636,7 +29663,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             };
                         } catch (error) {
                             reply = {
-                                error: (0, _url_policy_js__rspack_import_7.fp)(String(error.message)).slice(0, 2048)
+                                error: (0, _url_policy_js__rspack_import_8.fp)(String(error.message)).slice(0, 2048)
                             };
                         }
                         const out = JSON.stringify({
@@ -29645,7 +29672,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             requestId: request?.requestId,
                             ...reply
                         }) + "\n";
-                        if (Buffer.byteLength(out) > _control_js__rspack_import_6.Q) socket.end(JSON.stringify({
+                        if (Buffer.byteLength(out) > _control_js__rspack_import_7.Q) socket.end(JSON.stringify({
                             version: 1,
                             profile: location.profile,
                             requestId: request?.requestId,
