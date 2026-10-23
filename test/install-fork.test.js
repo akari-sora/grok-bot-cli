@@ -82,7 +82,9 @@ test("install-fork.ps1 names the same steps and refuses Administrator without -A
   assert.match(text, /sign in to /);
   assert.match(text, /Test-ReportedMissing/);
   assert.match(text, /Get-Content -Raw -LiteralPath/);
-  assert.doesNotMatch(text, /Get-Content -Path/);
+  assert.doesNotMatch(text, /Get-Content\b[^\n]*\s-Path\b/);
+  assert.match(text, /\$importLog = @\(gbot config import \$Config 2>&1/);
+  assert.match(text, /\$sha -cnotmatch '\^\[0-9a-f\]\{40\}\(\[0-9a-f\]\{24\}\)\?\$'/);
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -351,7 +353,66 @@ exit 0
   assert.match(result.stdout, /some imported logins are not signed in/);
 });
 
-test("install-fork.sh checks out the fetched commit with real git", {
+test("install-fork.sh exits 3 when the missing-login line is only on stderr", {
+  skip: process.platform === "win32" ? "POSIX shell installer test" : false,
+}, () => {
+  const bin = mkdtempSync(join(tmpdir(), "gbot-install-exit3-err-"));
+  const log = join(bin, "called");
+  const cache = join(bin, "cache", "grok-bot-cli", "src");
+  mkdirSync(join(cache, ".git"), { recursive: true });
+  fakeBin(bin, "git", `
+echo "git $*" >> "${log}"
+case " $* " in
+  *" rev-parse "*) echo "dddddddddddddddddddddddddddddddddddddddd" ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "npm", `
+echo "npm $*" >> "${log}"
+case "$1" in
+  pack)
+    destination=.; shift
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--pack-destination" ]; then destination=$2; shift 2; else shift; fi
+    done
+    echo "grok-bot-cli-9.9.9.tgz"; printf packed > "$destination/grok-bot-cli-9.9.9.tgz"
+    ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "gbot", `
+echo "gbot $*" >> "${log}"
+if [ "$1" = "config" ]; then
+  echo "sign in to work@example.com in the Grok Bot app" >&2
+  exit 3
+fi
+if [ "$1" = "wake" ]; then
+  if [ "$4" = "work" ]; then echo "wake checked work" >> "${log}"; exit 2; fi
+  echo "wake checked $4" >> "${log}"
+  exit 0
+fi
+exit 0
+`);
+  const config = join(bin, "export.json");
+  writeFileSync(config, JSON.stringify({
+    version: 1,
+    default: null,
+    aliases: {
+      work: { scope: "ab".repeat(32), email: "work@example.com" },
+      home: { scope: "cd".repeat(32), email: "home@example.com" },
+    },
+  }));
+  const result = spawnSync("sh", [sh, "--config", config, "v1.2"], {
+    encoding: "utf8",
+    env: installEnv(bin),
+  });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  const called = readFileSync(log, "utf8");
+  assert.match(called, /wake checked home/);
+  assert.doesNotMatch(called, /wake checked work/);
+});
+
+test("install-fork.sh checks out a branch ref and a tag ref with real git", {
   skip: process.platform === "win32" ? "POSIX shell installer test" : false,
 }, () => {
   const gitBin = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
@@ -377,9 +438,16 @@ test("install-fork.sh checks out the fetched commit with real git", {
   writeFileSync(join(seed, "README"), "synthetic fixture\n");
   git(["-C", seed, "add", "README"]);
   git(["-C", seed, "-c", "commit.gpgsign=false", "commit", "-m", "seed"]);
+  git(["-C", seed, "tag", "vSynthetic"]);
+  const tagSha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
+  git(["-C", seed, "checkout", "-b", "relay-line"]);
+  writeFileSync(join(seed, "BRANCH"), "branch fixture\n");
+  git(["-C", seed, "add", "BRANCH"]);
+  git(["-C", seed, "-c", "commit.gpgsign=false", "commit", "-m", "branch"]);
+  const branchSha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
+  assert.notEqual(branchSha, tagSha);
+  assert.match(branchSha, /^[0-9a-f]{40}$/);
   git(["clone", "--bare", seed, remote]);
-  const sha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
-  assert.match(sha, /^[0-9a-f]{40}$/);
   const fileRemote = `file://${remote}`;
   writeFileSync(join(bin, "git-rewrite.cjs"), `
 const { appendFileSync } = require("node:fs");
@@ -405,22 +473,27 @@ esac
 exit 0
 `);
   fakeBin(bin, "gbot", `echo "gbot $*" >> "${log}"\nexit 0`);
-  const result = spawnSync("sh", [sh, "main"], {
-    encoding: "utf8",
-    env: installEnv(bin, {
-      GBOT_REAL_GIT: gitBin,
-      GBOT_INSTALL_REMOTE: fileRemote,
-      GBOT_GIT_LOG: gitLog,
-    }),
+  const installEnvForGit = installEnv(bin, {
+    GBOT_REAL_GIT: gitBin,
+    GBOT_INSTALL_REMOTE: fileRemote,
+    GBOT_GIT_LOG: gitLog,
   });
-  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const branch = spawnSync("sh", [sh, "relay-line"], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(branch.status, 0, branch.stderr + branch.stdout);
   assert.match(readFileSync(log, "utf8"), /^npm ci$/m);
-  const recorded = readFileSync(gitLog, "utf8");
-  assert.match(recorded, new RegExp(`checkout --detach ${sha}`));
-  assert.doesNotMatch(recorded, /checkout --detach --/);
   const cache = join(bin, "cache", "grok-bot-cli", "src");
-  const head = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
-  assert.equal(head.status, 0, head.stderr);
-  assert.equal(head.stdout.trim(), sha);
-  assert.match(result.stdout, new RegExp(`resolved commit ${sha}`));
+  const branchHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(branchHead.stdout.trim(), branchSha);
+  assert.match(branch.stdout, new RegExp(`resolved commit ${branchSha}`));
+  const tagged = spawnSync("sh", [sh, "vSynthetic"], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(tagged.status, 0, tagged.stderr + tagged.stdout);
+  const tagHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(tagHead.stdout.trim(), tagSha);
+  assert.match(tagged.stdout, new RegExp(`resolved commit ${tagSha}`));
+  const recorded = readFileSync(gitLog, "utf8");
+  assert.match(recorded, /rev-parse --verify --quiet refs\/remotes\/origin\/relay-line\^\{commit\}/);
+  assert.match(recorded, /rev-parse --verify --quiet refs\/tags\/vSynthetic\^\{commit\}/);
+  assert.match(recorded, new RegExp(`checkout --detach ${branchSha}`));
+  assert.match(recorded, new RegExp(`checkout --detach ${tagSha}`));
+  assert.doesNotMatch(recorded, /checkout --detach --/);
 });

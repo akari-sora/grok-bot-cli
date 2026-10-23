@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "./helpers/win32-test.js";
+import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
 import { relayProfile } from "../src/core/relay/profile.js";
 import { runRelayWorker } from "../src/core/relay/worker.js";
 import { relayRequest } from "../src/core/relay/control.js";
+import { managedOperation } from "../src/core/relay/managed.js";
 
 const env = { CODEX_HOME: "/tmp/test-codex", GROK_BOT_TEST: "1" };
 test("profile shares hosts but isolates endpoint, auth overrides and caller restrictions", () => {
@@ -213,4 +215,88 @@ test("short socket fallback refuses a symlinked parent directory", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("bridge stop and status still see workers when login resolution fails", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "relay-login-fail-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const root = join(home, ".grok-bot-cli", "relay");
+  const dirA = join(root, "worker-a");
+  const dirB = join(root, "worker-b");
+  await mkdir(dirA, { recursive: true });
+  await mkdir(dirB, { recursive: true });
+  const scopeA = "1".repeat(64);
+  const scopeB = "2".repeat(64);
+  const profileA = "a".repeat(64);
+  const profileB = "b".repeat(64);
+  const closed = { a: 0, b: 0 };
+  const openEngine = (which) => async () => ({
+    status: () => ({ state: "running", bindings: [], receipts: [] }),
+    tick: async () => {},
+    close: async () => { closed[which] += 1; },
+  });
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  };
+  const workerA = await runRelayWorker({
+    stateDir: dirA,
+    profile: profileA,
+    accountScope: scopeA,
+    env,
+    openEngine: openEngine("a"),
+  });
+  const workerB = await runRelayWorker({
+    stateDir: dirB,
+    profile: profileB,
+    accountScope: scopeB,
+    env,
+    openEngine: openEngine("b"),
+  });
+  t.after(async () => {
+    await workerA.close().catch(() => {});
+    await workerB.close().catch(() => {});
+    await rm(home, { recursive: true, force: true });
+  });
+  await assert.rejects(
+    managedOperation("startBinding", { grokTarget: "target", codexThreadId: "thread" }, { env }),
+    (error) => error.code === "UNSUPPORTED_VERSION",
+  );
+  assert.equal(closed.a, 0);
+  assert.equal(closed.b, 0);
+  const listed = await managedOperation("status", {}, { env });
+  assert.equal(listed.accountResolution, "failed");
+  assert.equal(listed.selected, null);
+  assert.deepEqual(listed.directories.map((row) => row.stateDir).sort(), [dirA, dirB].sort());
+  assert.equal(listed.directories.find((row) => row.stateDir === dirA).worker.state, "running");
+  assert.equal(listed.directories.find((row) => row.stateDir === dirB).profile, profileB);
+  await assert.rejects(
+    managedOperation("stop", { worker: true }, { env }),
+    /will not choose/,
+  );
+  await assert.rejects(
+    managedOperation("stop", { worker: true }, { env: { ...env, GBOT_ACCOUNT_SCOPE: "not-a-scope" } }),
+    (error) => error.code === "INVALID_ACCOUNT_SCOPE",
+  );
+  assert.equal(closed.a, 0);
+  assert.equal(closed.b, 0);
+  const one = await managedOperation("status", {}, { env: { ...env, GROK_BOT_RELAY_DIR: dirA } });
+  assert.equal(one.stateDir, dirA);
+  assert.equal(one.worker.state, "running");
+  assert.equal(one.worker.profile, profileA);
+  assert.equal(one.accountResolution, "failed");
+  assert.equal(one.directories, undefined);
+  await managedOperation("stop", { worker: true }, { env: { ...env, GROK_BOT_RELAY_DIR: dirA } });
+  await workerA.closed;
+  assert.equal(closed.a, 1);
+  assert.equal(closed.b, 0);
+  assert.equal(
+    (await relayRequest({ stateDir: dirB, profile: profileB, accountScope: scopeB, env }, "hello", {})).worker.state,
+    "running",
+  );
 });

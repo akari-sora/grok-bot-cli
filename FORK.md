@@ -60,6 +60,14 @@ npm uninstall -g grok-bot-cli
 
 If you used `npm link`, run `npm unlink -g grok-bot-cli` in the clone.
 
+A pinned `GROK_BOT_RELAY_DIR` created by an older version refuses to start with `Relay profile mismatch`. It does not adopt the old bindings and it does not keep running. Upgrade in this order:
+
+1. With the **old** version, run `gbot codex bridge stop --worker`.
+2. Move or rename that directory, or choose a new one.
+3. Bind again.
+
+The default directory's old state stays in `~/.grok-bot-cli/relay/<old hash>`. After the upgrade the new CLI computes a different socket path, so `bridge stop` does not reach that old worker. There is no pid file. The old directory holds `control.sock` (or `/tmp/gbot-relay-<uid>/<hash>/control.sock` when the state path is long) and `worker.lock`. Stop the process that has those files open, then move the directory. When login resolution fails, `bridge status` lists the state directories it can see and does not choose one. `bridge stop` then needs `GROK_BOT_RELAY_DIR` set to the directory you mean. An invalid `GBOT_ACCOUNT_SCOPE` still throws and does not list other workers. Starting a worker stays fail-closed.
+
 ### Login and several logins
 
 `gbot` reads the app's encrypted gateway descriptor. It does not open a browser.
@@ -268,6 +276,7 @@ Do not put tokens, account keys, or message text into tickets or shell history. 
 | `Unknown option: --account.` | Put `--account` after the subcommand. |
 | Linux: `secret-tool` not found | Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora/Arch), unlock the keyring, and try again. |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`, or read the thread. Do not send again. |
+| `Relay profile mismatch` on a pinned `GROK_BOT_RELAY_DIR` | That directory was written by an older version. With the old version, run `gbot codex bridge stop --worker`, then move or rename the directory (or pick a new one) and bind again. The new CLI's socket path is different, and there is no pid file: stop the process that has the old directory's `control.sock` or `worker.lock` open. Default-directory state from the old version remains in `~/.grok-bot-cli/relay/<old hash>`. |
 | `gbot` not found after install | Open a new terminal. Check that `npm prefix -g` (its `bin` folder on macOS/Linux) is on PATH. |
 | `... failed: 417 ...`, `code: "BOX_ASLEEP"` | The Grok Bot box for that login is asleep. Live on 2026-10-20 the proxy answered 417 with an empty body and `x-anyrun-failure-reason: pod_hibernated`; a 417 without that header can also be `BOX_ASLEEP`, while a 417 with another proxy reason is not; the error carries the proxy reason as `failureReason`. gbot tries to wake the box itself. Only `listAgents`, `getAgentThread`, `getAgentTranscriptTail`, and `getAgentWorkflows` wake on a bare 417. Every other method, including `sendPrompt`, is resent only when that 417 has sleep evidence (`failureReason` `pod_hibernated`, or a `failureCode` matching sleep or hibernation). If waking fails, the message says why (`auto wake failed: …`, and `wake.error`). A 401 "no longer supported" during the wake is `CLIENT_VERSION_REJECTED` and names the version. If the retry is still asleep, `wake` is `{ attempted: true, woke: true }`. You can still open the Grok Bot app and select a bot of that login. Switching the app to that login was also observed to wake the box on 2026-10-20 (one owner session); that is an observation, not a rule. Opening the app or a bare `grokbot://` in the background (`open -g`) did not wake it. `GBOT_AUTO_WAKE=0` skips the automatic wake. `gbot wake` does the same wake and prints the run state, and exits 2 when both gateway override variables are set. gbot reaches EnsureSandBox through `CURSOR_ACCESS_TOKEN` only when there is no usable app login and not both `GROK_BOT_GATEWAY_URL` and `GROK_BOT_GATEWAY_TOKEN` are set. |
 | `Gateway response too large (over N bytes)` | Set `GBOT_MAX_RESPONSE_BYTES` to a byte count from 65536 to 67108864 (default 16 MiB) and retry. Other values are ignored; the error says so. |
@@ -379,6 +388,14 @@ npm uninstall -g grok-bot-cli
 ```
 
 若用 `npm link`，在 clone 裡執行 `npm unlink -g grok-bot-cli`。
+
+舊版建立的固定 `GROK_BOT_RELAY_DIR` 會以 `Relay profile mismatch` 拒絕啟動。它不會收編舊的 binding，也不會繼續跑。升級順序：
+
+1. 用**舊版**執行 `gbot codex bridge stop --worker`。
+2. 把那個目錄移走或改名，或改用新目錄。
+3. 重新 bind。
+
+預設目錄裡的舊狀態留在 `~/.grok-bot-cli/relay/<舊的 hash>`。升級後新的 CLI 算出不同的 socket 路徑，所以 `bridge stop` 碰不到那個舊 worker。沒有 pid 檔。舊目錄裡有 `control.sock`（路徑太長時在 `/tmp/gbot-relay-<uid>/<hash>/control.sock`）和 `worker.lock`。停掉正開著這兩個檔案的行程，再移走目錄。登入解析失敗時，`bridge status` 會列出看得到的狀態目錄，不會自己挑一個。這時 `bridge stop` 必須把 `GROK_BOT_RELAY_DIR` 指到你要停的那個目錄。不合法的 `GBOT_ACCOUNT_SCOPE` 仍會丟錯，不會去列出別的 worker。啟動 worker 維持 fail-closed。
 
 ### 登入與多個登入
 
@@ -588,6 +605,7 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | `Unknown option: --account.` | 把 `--account` 放到子命令後面。 |
 | Linux 找不到 `secret-tool` | 安裝 `libsecret-tools`（Debian／Ubuntu）或 `libsecret`（Fedora／Arch），解鎖 keyring 後再試。 |
 | `delivery: "unknown"` | `gbot reconcile <bot> --nonce <clientNonce>`，或先讀 thread，不要重送。 |
+| 固定的 `GROK_BOT_RELAY_DIR` 出現 `Relay profile mismatch` | 那個目錄是舊版寫的。先用舊版執行 `gbot codex bridge stop --worker`，再把目錄移走或改名（或換一個新目錄）然後重新 bind。新 CLI 的 socket 路徑不同，也沒有 pid 檔：停掉正開著舊目錄裡 `control.sock` 或 `worker.lock` 的行程。舊版預設目錄的狀態留在 `~/.grok-bot-cli/relay/<舊的 hash>`。 |
 | 裝完找不到 `gbot` | 開新的終端機。確認 `npm prefix -g`（macOS／Linux 是它底下的 `bin`）在 PATH 上。 |
 | `... failed: 417 ...`，`code: "BOX_ASLEEP"` | 那個登入的 Grok Bot 雲端電腦在睡眠。2026-10-20 實測時，proxy 以空本文和 `x-anyrun-failure-reason: pod_hibernated` 回答 417；沒有那個標頭的 417 也可以是 `BOX_ASLEEP`，但 proxy 標頭寫的是別的原因時就不算；錯誤的 `failureReason` 欄位會帶出 proxy 原因。gbot 會自己嘗試喚醒。只有 `listAgents`、`getAgentThread`、`getAgentTranscriptTail`、`getAgentWorkflows` 會在 bare 417 上喚醒。其他方法（包括 `sendPrompt`）只有在那個 417 有睡眠證據時才會重送（`failureReason` 是 `pod_hibernated`，或 `failureCode` 符合 sleep／hibernat）。若失敗，訊息會說明原因（`auto wake failed: …`，以及 `wake.error`）。喚醒途中的 401「不再支援」是 `CLIENT_VERSION_REJECTED`，並標出版本。若重試仍在睡眠，`wake` 是 `{ attempted: true, woke: true }`。你仍可打開 Grok Bot app，點選那個登入底下的一個 bot。2026-10-20 也曾觀察到把 app 切到那個登入會喚醒（一次擁有者的工作階段）；那是觀察，不是規則。在背景開啟 app 或單獨的 `grokbot://`（`open -g`）叫不醒。`GBOT_AUTO_WAKE=0` 會跳過自動喚醒。`gbot wake` 做同一件事並印出執行狀態；兩個 gateway 覆寫變數都設了時以結束碼 2 結束。gbot 只有在沒有可用的 app 登入，而且並非同時設了 `GROK_BOT_GATEWAY_URL` 與 `GROK_BOT_GATEWAY_TOKEN` 時，才會經由 `CURSOR_ACCESS_TOKEN` 呼叫 EnsureSandBox。 |
 | `Gateway response too large (over N bytes)` | 把 `GBOT_MAX_RESPONSE_BYTES` 設成 65536 到 67108864 之間的位元組數（預設 16 MiB）後再試。其他值會被忽略，錯誤訊息會說明。 |

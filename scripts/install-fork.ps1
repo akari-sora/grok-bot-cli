@@ -111,7 +111,7 @@ if ($LASTEXITCODE -ne 0) {
   }
 }
 $sha = ($shaOutput -join "`n").Trim()
-if ($sha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+if ($sha -cnotmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
   [Console]::Error.WriteLine("install-fork.ps1: resolved commit is not a git sha")
   exit 2
 }
@@ -147,7 +147,7 @@ if ($LASTEXITCODE -ne 0) { Write-Output "gbot accounts exit $LASTEXITCODE" }
 $importStatus = 0
 $importLog = @()
 if ($Config) {
-  $importLog = @(gbot config import $Config)
+  $importLog = @(gbot config import $Config 2>&1)
   $importStatus = $LASTEXITCODE
   foreach ($line in $importLog) { Write-Output $line }
   if ($importStatus -ne 0 -and $importStatus -ne 3) { exit $importStatus }
@@ -162,7 +162,7 @@ function Test-ReportedMissing([string]$Name) {
     if ($alias -and $alias.email) { $email = [string]$alias.email }
   }
   foreach ($line in @($script:importLog)) {
-    $text = [string]$line
+    $text = if ($line -is [System.Management.Automation.ErrorRecord]) { [string]$line.Exception.Message } else { [string]$line }
     if ($text -eq "sign in to $Name in the Grok Bot app") { return $true }
     if ($email -and $text -eq "sign in to $email in the Grok Bot app") { return $true }
   }

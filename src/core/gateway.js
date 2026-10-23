@@ -244,7 +244,9 @@ async function sessionFromSavedLogin(scope, signal) {
 }
 
 // Precedence: gateway URL+token override, then --account, GBOT_ACCOUNT_SCOPE, GBOT_ACCOUNT,
-// the config default, then the descriptor single entry or its active entry. A saved-only login
+// the config default, then the descriptor single entry or its active entry. An invalid
+// GBOT_ACCOUNT_SCOPE throws before that override is read. A valid or empty pin does not:
+// both gateway override variables still win. A saved-only login
 // is used only when it is selected or it is the only login. Descriptor sessions are read again
 // on every connect. Only a session built from EnsureSandBox is cached by scope. CURSOR_ACCESS_TOKEN
 // is only for no app login, or an implicit login that cannot be read, decrypted, or is expired.
@@ -595,6 +597,7 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
 
 export async function connectGateway({ signal, account } = {}) {
   assertGatewayActive(signal);
+  // Invalid GBOT_ACCOUNT_SCOPE fails closed before the override. A valid pin still loses to it.
   const pinned = workerAccountScope();
   const override = gatewayOverride();
   if (override) return override;
@@ -810,7 +813,19 @@ async function gatewayCall(session, method, body = {}, options = {}) {
       && staleSavedSession(error)
     ) {
       forgetSession(session.accountScope);
-      const fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+      let fresh;
+      try {
+        fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+      } catch (rebuildError) {
+        // The gateway already refused this call. A failed rebuild must not replace that
+        // rejection, or sendPrompt records a definite miss as delivery unknown.
+        const detail = redactSecrets(rebuildError instanceof Error ? rebuildError.message : String(rebuildError)).slice(0, 300);
+        if (error && typeof error === "object") {
+          error.rebuildError = detail;
+          if (error.cause === undefined && rebuildError instanceof Error) error.cause = rebuildError;
+        }
+        throw error;
+      }
       applySandbox(session, fresh);
       rememberSession(session);
       return await gatewayCall(session, method, body, { ...options, refreshedSession: true });

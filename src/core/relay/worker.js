@@ -2,7 +2,7 @@ import { StringDecoder } from "node:string_decoder";
 import { createServer } from "node:net";
 import { chmod, unlink, realpath } from "node:fs/promises";
 import { openRelayEngine } from "./engine.js";
-import { relayLocation } from "./profile.js";
+import { relayLocation, writeRelayProfileFile } from "./profile.js";
 import { claimRelayOwner } from "./ownership.js";
 import { CONTROL_BYTES, CONTROL_TIMEOUT, RELAY_PROTOCOL } from "./control.js";
 import { redactSecrets } from "../url-policy.js";
@@ -40,6 +40,7 @@ export async function runRelayWorker(options = {}) {
       env: location.env,
       accountScope: location.accountScope || undefined,
     });
+    await writeRelayProfileFile(location.stateDir, location.profile);
     const health = () => ({
       state: closing ? "stopped" : "running",
       pid: process.pid,

@@ -199,7 +199,9 @@ function descriptorEmail(row) {
 
 function savedForDescriptor(row, describedCount, saved, savedByScope) {
   const scope = descriptorScope(row);
-  if (scope && savedByScope.has(scope)) return savedByScope.get(scope);
+  // A descriptor that names a scope never merges by email. A different saved login
+  // for that email stays its own row, and its scope is not attached here.
+  if (scope) return savedByScope.has(scope) ? savedByScope.get(scope) : null;
   const email = descriptorEmail(row);
   if (email) {
     const found = saved.filter((item) => item.email && item.email.toLowerCase() === email.toLowerCase());
@@ -214,7 +216,7 @@ function savedForDescriptor(row, describedCount, saved, savedByScope) {
 /** Scope for wake and caching. The unverified v1 fallback does not prove an account. */
 function provenDescriptorScope(row, login) {
   const own = descriptorScope(row);
-  if (own && (!login || login.scope === own)) return own;
+  if (own) return !login || login.scope === own ? own : null;
   const email = descriptorEmail(row);
   if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
   return null;

@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { defineState } from "@agent-bundle/runtime/state";
+import { readStoredRelayProfile } from "./stored-profile.js";
 
 export const relayId = z.string().min(1).max(512);
 const text = z
@@ -115,6 +116,7 @@ export async function protectRelayDirectory(
     "relay.sqlite-wal",
     "relay.sqlite-shm",
     "worker.lock",
+    "profile",
   ]) {
     const path = join(dir, name);
     let info;
@@ -148,6 +150,8 @@ export async function openRelayState({ dir, profile, limits: overrides = {} }) {
   relayId.parse(profile);
   dir = resolve(dir);
   await protectRelayDirectory(dir, limits.diskBytes);
+  const previous = await readStoredRelayProfile(dir);
+  if (previous && previous !== profile) throw new Error("Relay profile mismatch");
   const schema = z
     .strictObject({
       version: z.literal(1),

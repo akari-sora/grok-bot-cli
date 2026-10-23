@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { chmod, lstat, open, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { codexSocketPath } from "../codex-bridge.js";
@@ -60,6 +61,60 @@ export function relayProfile(env = process.env, accountScope = "") {
     ]),
   );
 }
+const PROFILE_FILE = "profile";
+
+function assertProfileText(profile) {
+  if (typeof profile !== "string" || profile.length < 1 || profile.length > 512 || /[\0\r\n]/.test(profile)) {
+    throw new Error("Relay profile file is invalid");
+  }
+}
+
+async function profileFileStat(dir) {
+  const path = join(dir, PROFILE_FILE);
+  try {
+    return { path, stat: await lstat(path) };
+  } catch (error) {
+    if (error.code === "ENOENT") return { path, stat: null };
+    throw error;
+  }
+}
+
+function ownedProfileFile(stat) {
+  if (!stat) return;
+  if (
+    !stat.isFile()
+    || stat.isSymbolicLink()
+    || (process.getuid && stat.uid !== process.getuid())
+    || stat.size > 1024
+  ) {
+    throw new Error("Relay profile file must be an owned regular file, never a symlink");
+  }
+}
+
+/** Plain profile hash for stop/status when login resolution cannot recompute it. */
+export async function writeRelayProfileFile(dir, profile) {
+  assertProfileText(profile);
+  const { path, stat } = await profileFileStat(dir);
+  ownedProfileFile(stat);
+  const file = await open(path, stat ? "r+" : "wx", 0o600);
+  try {
+    await file.truncate(0);
+    await file.write(profile, 0, "utf8");
+  } finally {
+    await file.close();
+  }
+  await chmod(path, 0o600);
+}
+
+export async function readRelayProfileFile(dir) {
+  const { path, stat } = await profileFileStat(dir);
+  if (!stat) return null;
+  ownedProfileFile(stat);
+  const text = (await readFile(path, "utf8")).trim();
+  assertProfileText(text);
+  return text;
+}
+
 export function relayLocation({
   env = process.env,
   stateDir,
