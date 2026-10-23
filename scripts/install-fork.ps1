@@ -14,7 +14,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
   if ($arg -eq "-DryRun" -or $arg -eq "--dry-run" -or $arg -eq "-dry-run") { $DryRun = $true; continue }
   if ($arg -eq "-AllowRoot" -or $arg -eq "--allow-root" -or $arg -eq "--AllowRoot") { $AllowRoot = $true; continue }
   if ($arg -eq "-Config" -or $arg -eq "--config") {
-    if ($i + 1 -ge $args.Count) { Write-Error "install-fork.ps1: --config needs a file"; exit 2 }
+    if ($i + 1 -ge $args.Count) { [Console]::Error.WriteLine("install-fork.ps1: --config needs a file"); exit 2 }
     $i++
     $Config = [string]$args[$i]
     continue
@@ -23,18 +23,18 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     if ($i + 1 -lt $args.Count) { $Ref = [string]$args[$i + 1] }
     break
   }
-  if ($arg.StartsWith("-")) { Write-Error "install-fork.ps1: unknown option $arg"; exit 2 }
+  if ($arg.StartsWith("-")) { [Console]::Error.WriteLine("install-fork.ps1: unknown option $arg"); exit 2 }
   $Ref = $arg
 }
 
 if ($Ref.StartsWith("-") -or $Ref -notmatch '^[A-Za-z0-9._/-]+$') {
-  Write-Error "install-fork.ps1: invalid ref"
+  [Console]::Error.WriteLine("install-fork.ps1: invalid ref")
   exit 2
 }
 
 if ($Config) {
   if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
-    Write-Error "install-fork.ps1: config is not a readable file: $Config"
+    [Console]::Error.WriteLine("install-fork.ps1: config is not a readable file: $Config")
     exit 2
   }
   $Config = (Resolve-Path -LiteralPath $Config).Path
@@ -42,7 +42,7 @@ if ($Config) {
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and -not $AllowRoot) {
-  Write-Error "install-fork.ps1: refusing to run as Administrator; pass -AllowRoot"
+  [Console]::Error.WriteLine("install-fork.ps1: refusing to run as Administrator; pass -AllowRoot")
   exit 2
 }
 
@@ -56,7 +56,7 @@ if ($env:XDG_CACHE_HOME) {
 
 function Get-AliasNames([string]$Path) {
   if (-not $Path) { return @() }
-  $doc = Get-Content -Raw -Path $Path | ConvertFrom-Json
+  $doc = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
   if ($null -eq $doc.aliases) { return @() }
   return @($doc.aliases.PSObject.Properties.Name)
 }
@@ -96,7 +96,7 @@ $dirtyOutput = @(git -C $cache status --porcelain)
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $dirty = ($dirtyOutput -join "`n").Trim()
 if ($dirty) {
-  Write-Error "install-fork.ps1: cache is dirty; refusing to overwrite $cache"
+  [Console]::Error.WriteLine("install-fork.ps1: cache is dirty; refusing to overwrite $cache")
   exit 2
 }
 
@@ -111,7 +111,11 @@ if ($LASTEXITCODE -ne 0) {
   }
 }
 $sha = ($shaOutput -join "`n").Trim()
-git -C $cache checkout --detach -- $sha
+if ($sha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') {
+  [Console]::Error.WriteLine("install-fork.ps1: resolved commit is not a git sha")
+  exit 2
+}
+git -C $cache checkout --detach $sha
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Output "resolved commit $sha"
 
@@ -125,7 +129,7 @@ try {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   $tarball = ($packOutput | Where-Object { $_ } | Select-Object -Last 1)
   if (-not $tarball -or -not (Test-Path -LiteralPath (Join-Path $packDir $tarball))) {
-    Write-Error "install-fork.ps1: npm pack did not create $tarball"
+    [Console]::Error.WriteLine("install-fork.ps1: npm pack did not create $tarball")
     exit 1
   }
   npm install -g (Join-Path $packDir $tarball)
@@ -141,13 +145,32 @@ gbot accounts
 if ($LASTEXITCODE -ne 0) { Write-Output "gbot accounts exit $LASTEXITCODE" }
 
 $importStatus = 0
+$importLog = @()
 if ($Config) {
-  gbot config import $Config
+  $importLog = @(gbot config import $Config)
   $importStatus = $LASTEXITCODE
+  foreach ($line in $importLog) { Write-Output $line }
   if ($importStatus -ne 0 -and $importStatus -ne 3) { exit $importStatus }
 }
 
+function Test-ReportedMissing([string]$Name) {
+  if ($script:importStatus -ne 3) { return $false }
+  $email = ""
+  if ($Config) {
+    $doc = Get-Content -Raw -LiteralPath $Config | ConvertFrom-Json
+    $alias = $doc.aliases.$Name
+    if ($alias -and $alias.email) { $email = [string]$alias.email }
+  }
+  foreach ($line in @($script:importLog)) {
+    $text = [string]$line
+    if ($text -eq "sign in to $Name in the Grok Bot app") { return $true }
+    if ($email -and $text -eq "sign in to $email in the Grok Bot app") { return $true }
+  }
+  return $false
+}
+
 foreach ($name in (Get-AliasNames $Config)) {
+  if (Test-ReportedMissing $name) { continue }
   gbot wake --check --account $name
   if ($LASTEXITCODE -ne 0) {
     Write-Output "wake $name exit $LASTEXITCODE"

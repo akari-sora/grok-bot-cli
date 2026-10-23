@@ -90,6 +90,31 @@ alias_names() {
   ' "$config"
 }
 
+alias_email() {
+  node -e '
+    const fs = require("node:fs");
+    const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const alias = doc && doc.aliases ? doc.aliases[process.argv[2]] : null;
+    const email = alias && typeof alias.email === "string" ? alias.email : "";
+    process.stdout.write(email);
+  ' "$config" "$1" 2>/dev/null || true
+}
+
+import_reported_missing() {
+  name=$1
+  if [ "$import_status" -ne 3 ]; then
+    return 1
+  fi
+  email=$(alias_email "$name")
+  if printf '%s\n' "$import_log" | grep -F -x -q "sign in to ${name} in the Grok Bot app"; then
+    return 0
+  fi
+  if [ -n "$email" ] && printf '%s\n' "$import_log" | grep -F -x -q "sign in to ${email} in the Grok Bot app"; then
+    return 0
+  fi
+  return 1
+}
+
 print_plan() {
   say "git clone or fetch $repo into $cache"
   say "git checkout $ref"
@@ -136,7 +161,11 @@ else
   git -C "$cache" fetch origin -- "$ref" || exit $?
   sha=$(git -C "$cache" rev-parse --verify "FETCH_HEAD^{commit}") || exit $?
 fi
-git -C "$cache" checkout --detach -- "$sha" || exit $?
+printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}([0-9a-f]{24})?$' || {
+  echo "install-fork.sh: resolved commit is not a git sha" >&2
+  exit 2
+}
+git -C "$cache" checkout --detach "$sha" || exit $?
 say "resolved commit $sha"
 
 cd "$cache"
@@ -155,11 +184,15 @@ gbot --version || exit $?
 gbot accounts || true
 
 import_status=0
+import_log=""
 if [ -n "$config" ]; then
   set +e
-  gbot config import "$config"
+  import_log=$(gbot config import "$config" 2>&1)
   import_status=$?
   set -e
+  if [ -n "$import_log" ]; then
+    printf '%s\n' "$import_log"
+  fi
   if [ "$import_status" -ne 0 ] && [ "$import_status" -ne 3 ]; then
     exit "$import_status"
   fi
@@ -167,6 +200,9 @@ fi
 
 names=$(alias_names) || exit $?
 for name in $names; do
+  if import_reported_missing "$name"; then
+    continue
+  fi
   set +e
   gbot wake --check --account "$name"
   status=$?

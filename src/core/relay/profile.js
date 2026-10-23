@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { codexSocketPath } from "../codex-bridge.js";
 import { grokBotGatewayDescriptorPath } from "../app-session.js";
-import { resolveGrokBotLogin } from "../logins.js";
+import { resolveGrokBotLogin, workerAccountScope } from "../logins.js";
 
 export const digest = (value) =>
   createHash("sha256").update(value).digest("hex");
@@ -12,22 +12,17 @@ const SCOPE = /^[0-9a-f]{64}$/;
 
 /** Resolved account scope for this process, or "" when no app login is selected. */
 export function resolveRelayAccountScope(env = process.env) {
-  const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-  if (SCOPE.test(pinned)) return pinned;
+  const pinned = workerAccountScope(env);
+  if (pinned) return pinned;
   const home = env.HOME || env.USERPROFILE;
   if (!home) return "";
-  try {
-    const choice = resolveGrokBotLogin({ env, home, platform: process.platform });
-    return choice?.scope || "";
-  } catch (error) {
-    if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
-      throw error;
-    }
-    return "";
-  }
+  const choice = resolveGrokBotLogin({ env, home, platform: process.platform });
+  return choice?.scope || "";
 }
 
-// Only explicit overrides are hashed. The resolved account scope is part of the worker identity.
+// Endpoint and caller overrides are hashed. Account identity is the resolved scope only:
+// raw GBOT_ACCOUNT, GBOT_CONFIG, and GBOT_ACCOUNT_SCOPE are not hashed, so two selectors
+// for the same account share one worker and one duplicate-binding check.
 export function relayProfile(env = process.env, accountScope = "") {
   const keys = [
     "GROK_BOT_GATEWAY_URL",
@@ -54,9 +49,6 @@ export function relayProfile(env = process.env, accountScope = "") {
     // Secret Service credentials depend on the caller's desktop session.
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
-    "GBOT_CONFIG",
-    "GBOT_ACCOUNT",
-    "GBOT_ACCOUNT_SCOPE",
   ];
   const scope = typeof accountScope === "string" ? accountScope : "";
   return digest(

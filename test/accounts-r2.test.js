@@ -13,14 +13,23 @@ import {
   readGbotConfig,
   writeGbotConfig,
 } from "../src/core/gbot-config.js";
-import {
+import * as logins from "../src/core/logins.js";
+
+const {
   defineAlias,
   formatLoginCatalog,
   listLoginCatalog,
   resolveGrokBotLogin,
   setDefaultAccount,
-} from "../src/core/logins.js";
-import { relayLocation, relayProfile } from "../src/core/relay/profile.js";
+} = logins;
+
+function workerAccountScope(env) {
+  if (typeof logins.workerAccountScope !== "function") {
+    throw new Error("workerAccountScope is not exported");
+  }
+  return logins.workerAccountScope(env);
+}
+import { relayLocation, relayProfile, resolveRelayAccountScope } from "../src/core/relay/profile.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const TOKEN_MARK = "synthetic-r2-token-do-not-leak";
@@ -45,6 +54,17 @@ function encrypt(text, password = "demo-password") {
   const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
   const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
   return Buffer.concat([Buffer.from("v10"), cipher.update(text, "utf8"), cipher.final()]).toString("base64");
+}
+
+function encryptForPlatform(text, platform = process.platform, password = "demo-password") {
+  const linux = platform === "linux";
+  const key = crypto.pbkdf2Sync(password, "saltysalt", linux ? 1 : 1003, 16, "sha1");
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
+  return Buffer.concat([
+    Buffer.from(linux ? "v11" : "v10"),
+    cipher.update(text, "utf8"),
+    cipher.final(),
+  ]).toString("base64");
 }
 
 function homeWith({ secrets, descriptor } = {}, platform = "darwin") {
@@ -211,6 +231,10 @@ test("two accounts in one process each hit their own gateway", async (t) => {
     await listAgents(second).catch(() => {});
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1401/")));
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1402/")));
+    assert.equal(
+      relayProfile({ GROK_BOT_TEST: "1", GBOT_ACCOUNT: "work", GBOT_CONFIG: "/tmp/a.json" }, scopeA),
+      relayProfile({ GROK_BOT_TEST: "1", GBOT_ACCOUNT: "a@example.com", GBOT_CONFIG: "/tmp/b.json" }, scopeA),
+    );
     assert.notEqual(relayProfile({ GROK_BOT_TEST: "1" }, scopeA), relayProfile({ GROK_BOT_TEST: "1" }, scopeB));
     process.env.GBOT_ACCOUNT_SCOPE = scopeA;
     const pinned = await connectGateway();
@@ -270,13 +294,114 @@ test("a relay binding stays on the account that created it", { skip: process.pla
     clock: () => 1000,
   });
   t.after(async () => { await engineB.close().catch(() => {}); });
-  await assert.rejects(engineB.tick(), /different Grok Bot account/);
+  const status = await engineB.tick();
+  assert.equal(status.state, "running");
+  const skipped = status.bindings.find((binding) => binding.accountScope === scopeA);
+  assert.ok(skipped);
+  assert.equal(skipped.state, "running");
   const located = relayLocation({
     stateDir: dir,
     env: { ...env, GBOT_ACCOUNT_SCOPE: scopeA },
     accountScope: scopeA,
   });
   assert.equal(located.accountScope, scopeA);
+});
+
+test("an unscoped relay binding is adopted and another account is skipped", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
+  const { fakeAppServer } = await import("./helpers/codex-server.js");
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const scope = "c".repeat(64);
+  const other = "d".repeat(64);
+  const dir = await mkdtemp(join(tmpdir(), "relay-r2-old-"));
+  const fake = await fakeAppServer({
+    initialize: (_, ok) => ok({}),
+    "thread/resume": (p, ok) => ok({
+      thread: { id: p.threadId, cwd: process.cwd(), status: { type: "idle" } },
+      cwd: process.cwd(),
+    }),
+    "thread/turns/list": (_, ok) => ok({ data: [], nextCursor: null }),
+    "thread/items/list": (_, ok) => ok({ data: [], nextCursor: null }),
+  });
+  const gateway = {
+    resolve: async (ref) => ({ id: ref, name: "Fixture" }),
+    tail: async () => ({ entries: [] }),
+    send: async () => ({ delivery: "unknown" }),
+  };
+  const env = { CODEX_HOME: fake.home, GROK_BOT_TEST: "1" };
+  const legacy = await openRelayEngine({
+    stateDir: dir,
+    profile: "fixture-old",
+    env,
+    gateway,
+    clock: () => 1000,
+  });
+  t.after(async () => {
+    await legacy.close().catch(() => {});
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const binding = await legacy.startBinding({
+    grokTarget: "target",
+    codexThreadId: "thread",
+    requestId: "link-old",
+  });
+  assert.equal(binding.accountScope, undefined);
+  await legacy.close();
+  const engine = await openRelayEngine({
+    stateDir: dir,
+    profile: "fixture-old",
+    env,
+    gateway,
+    accountScope: scope,
+    clock: () => 1000,
+  });
+  t.after(async () => { await engine.close().catch(() => {}); });
+  const running = await engine.tick();
+  assert.equal(running.state, "running");
+  const adopted = running.bindings.find((row) => row.id === binding.id);
+  assert.equal(adopted.accountScope, scope);
+  await assert.rejects(
+    engine.startBinding({
+      grokTarget: "target",
+      codexThreadId: "thread-2",
+      requestId: "link-new",
+    }),
+    /already has an active binding/,
+  );
+  await engine.close();
+  const foreignDir = await mkdtemp(join(tmpdir(), "relay-r2-foreign-"));
+  const owner = await openRelayEngine({
+    stateDir: foreignDir,
+    profile: "fixture-foreign",
+    env,
+    gateway,
+    accountScope: other,
+    clock: () => 1000,
+  });
+  const foreign = await owner.startBinding({
+    grokTarget: "other-target",
+    codexThreadId: "thread",
+    requestId: "link-foreign",
+  });
+  await owner.close();
+  const pinned = await openRelayEngine({
+    stateDir: foreignDir,
+    profile: "fixture-foreign",
+    env,
+    gateway,
+    accountScope: scope,
+    clock: () => 1000,
+  });
+  t.after(async () => {
+    await pinned.close().catch(() => {});
+    await rm(foreignDir, { recursive: true, force: true });
+  });
+  const skipped = await pinned.tick();
+  assert.equal(skipped.state, "running");
+  assert.equal(skipped.bindings.find((row) => row.id === foreign.id).accountScope, other);
 });
 
 test("no account uses the descriptor's single entry when another saved login exists", () => {
@@ -646,4 +771,233 @@ test("an explicit config default that misses does not use another login", () => 
   }, base);
   assert.throws(() => resolveGrokBotLogin(base), (error) => error.code === "UNKNOWN_ACCOUNT");
   assert.throws(() => setDefaultAccount({ ...base, name: "toString" }), (error) => error.exitCode === 2);
+});
+
+function sealedDescriptor(payload, platform = process.platform) {
+  return { encrypted: encryptForPlatform(JSON.stringify(payload), platform) };
+}
+
+test("a rewritten descriptor is used on the next connectGateway", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async () => {
+  const platform = process.platform;
+  const scope = scopeFor("user_synthetic_r2_rewrite");
+  const home = homeWith({
+    descriptor: {
+      version: 2,
+      entries: {
+        [scope]: {
+          ...sealedDescriptor({
+            baseUrl: "http://127.0.0.1:1341",
+            token: "descriptor-token-old",
+            headers: {},
+            name: "Desk",
+          }, platform),
+          savedAtMs: 1,
+        },
+      },
+    },
+  }, platform);
+  const path = grokBotGatewayDescriptorPath(home, platform, {});
+  await withEnv(gatewayEnv(home, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const first = await connectGateway();
+    assert.equal(first.gatewayToken, "descriptor-token-old");
+    writeFileSync(path, JSON.stringify({
+      version: 2,
+      entries: {
+        [scope]: {
+          ...sealedDescriptor({
+            baseUrl: "http://127.0.0.1:1341",
+            token: "descriptor-token-new",
+            headers: {},
+            name: "Desk",
+          }, platform),
+          savedAtMs: 2,
+        },
+      },
+    }));
+    const second = await connectGateway();
+    assert.equal(second.gatewayToken, "descriptor-token-new");
+  });
+});
+
+test("a saved-login session is rebuilt once after 401", async (t) => {
+  const sub = "user_synthetic_r2_refresh";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "refresh@example.com"),
+    }, scope),
+  }, process.platform);
+  const ensured = [];
+  let gatewayCalls = 0;
+  let failFresh = false;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      const token = ensured.length === 1 ? "gateway-stale" : ensured.length === 2 ? "gateway-fresh" : "gateway-again";
+      return new Response(JSON.stringify({
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
+        gatewayUrl: "http://127.0.0.1:1410",
+        gatewayToken: token,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    gatewayCalls += 1;
+    const bearer = String(init?.headers?.authorization ?? "");
+    if (bearer.includes("gateway-stale") || (failFresh && bearer.includes("gateway-fresh")) || bearer.includes("gateway-again")) {
+      return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+    }
+    if (bearer.includes("could-not-route")) {
+      return new Response("request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
+    }
+    return new Response(JSON.stringify({ agents: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "gateway-stale");
+    const agents = await listAgents(session);
+    assert.deepEqual(agents, []);
+    assert.equal(session.gatewayToken, "gateway-fresh");
+    assert.equal(ensured.length, 2);
+    assert.equal(gatewayCalls, 2);
+    failFresh = true;
+    await assert.rejects(listAgents(session), (error) => error.status === 401 && error.kind === "auth");
+    assert.equal(ensured.length, 3);
+    assert.equal(gatewayCalls, 4);
+    assert.equal(session.gatewayToken, "gateway-again");
+  });
+});
+
+test("a saved-login session is rebuilt once after a routing failure", async (t) => {
+  const sub = "user_synthetic_r2_route";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "route@example.com"),
+    }, scope),
+  }, process.platform);
+  const ensured = [];
+  let gatewayCalls = 0;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
+        gatewayUrl: "http://127.0.0.1:1411",
+        gatewayToken: ensured.length === 1 ? "gateway-moved" : "gateway-moved-ok",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    gatewayCalls += 1;
+    const bearer = String(init?.headers?.authorization ?? "");
+    if (bearer.includes("gateway-moved-ok")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    return new Response("the request could not be routed", {
+      status: 404,
+      headers: { "content-type": "text/plain" },
+    });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    const agents = await listAgents(session);
+    assert.equal(agents.length, 1);
+    assert.equal(session.gatewayToken, "gateway-moved-ok");
+    assert.equal(ensured.length, 2);
+    assert.equal(gatewayCalls, 2);
+  });
+});
+
+test("a v1 descriptor that contradicts the only saved login is not merged", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async (t) => {
+  const platform = process.platform;
+  const savedSub = "user_synthetic_r2_contradict";
+  const savedScope = scopeFor(savedSub);
+  const otherScope = "e".repeat(64);
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("descriptor session must not call EnsureSandBox");
+  });
+  const emailHome = homeWith({
+    secrets: accountsDoc({
+      [savedScope]: savedEntry(jwt(savedSub), "saved@example.com"),
+    }, savedScope),
+    descriptor: {
+      version: 1,
+      ...sealedDescriptor({
+        baseUrl: "http://127.0.0.1:1341",
+        token: "descriptor-email-token",
+        headers: {},
+        name: "Legacy",
+        email: "other@example.com",
+      }, platform),
+    },
+  }, platform);
+  const emailRows = listLoginCatalog(options(emailHome, { platform }));
+  assert.equal(emailRows.length, 2);
+  const emailDescriptor = emailRows.find((row) => row.id === "default");
+  const emailSaved = emailRows.find((row) => row.id === savedScope);
+  assert.equal(emailDescriptor.scope, null);
+  assert.equal(emailSaved.scope, savedScope);
+  await withEnv(gatewayEnv(emailHome, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "descriptor-email-token");
+    assert.equal(session.accountScope, undefined);
+  });
+
+  const scopeHome = homeWith({
+    secrets: accountsDoc({
+      [savedScope]: savedEntry(jwt(savedSub), "saved@example.com"),
+    }, savedScope),
+    descriptor: {
+      version: 1,
+      ...sealedDescriptor({
+        baseUrl: "http://127.0.0.1:1341",
+        token: "descriptor-scope-token",
+        headers: {},
+        name: "Legacy",
+        accountScope: otherScope,
+      }, platform),
+    },
+  }, platform);
+  const scopeRows = listLoginCatalog(options(scopeHome, { platform }));
+  assert.equal(scopeRows.length, 2);
+  assert.equal(scopeRows.find((row) => row.id === "default").scope, otherScope);
+  assert.equal(scopeRows.find((row) => row.id === savedScope).scope, savedScope);
+  await withEnv(gatewayEnv(scopeHome, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "descriptor-scope-token");
+    assert.equal(session.accountScope, otherScope);
+    assert.notEqual(session.accountScope, savedScope);
+  });
+});
+
+test("GBOT_ACCOUNT_SCOPE accepts only 64 lowercase hex characters", async () => {
+  const sub = "user_synthetic_r2_scopepin";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "pin@example.com"),
+    }, scope),
+  }, process.platform);
+  await withEnv(gatewayEnv(home, { GBOT_ACCOUNT_SCOPE: "not-a-scope" }), async () => {
+    await assert.rejects(connectGateway({ account: scope }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  });
+  assert.equal(workerAccountScope({ GBOT_ACCOUNT_SCOPE: scope }), scope);
+  assert.throws(() => workerAccountScope({ GBOT_ACCOUNT_SCOPE: "A".repeat(64) }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  assert.throws(() => workerAccountScope({ GBOT_ACCOUNT_SCOPE: `${scope} ` }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  assert.equal(workerAccountScope({}), "");
+});
+
+test("relay account resolution fails closed on an unexpected login error", () => {
+  const home = homeWith({
+    descriptor: { version: 99, encrypted: "not-used" },
+  }, process.platform);
+  assert.throws(() => resolveRelayAccountScope({
+    HOME: home,
+    USERPROFILE: home,
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  }), (error) => error.code === "UNSUPPORTED_VERSION");
 });

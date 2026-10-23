@@ -11,6 +11,7 @@ import {
   transcriptEntries,
   withRedactedErrors,
 } from '../../../gbot.js';
+import { workerAccountScope } from '../../../core/logins.js';
 
 export const inputSchema = z.object({
   // ponytail: the route inputJsonSchema type cannot express minimum/maximum, so the
@@ -62,7 +63,7 @@ export default defineTool(
   },
   async ({ after, limit, target, full }) => {
     const tail = await withRedactedErrors(async () => getTranscriptTail(
-      await connectGateway({ account: process.env.GBOT_ACCOUNT_SCOPE || undefined }),
+      await connectGateway({ account: workerAccountScope() || undefined }),
       target,
       limit,
     ));

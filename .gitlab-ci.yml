@@ -63,7 +63,9 @@ unit:
         if (-not $nodeReady) {
           $nodeTemp = Join-Path $env:TEMP "gbot-node-$($env:CI_PROJECT_ID)-$($env:CI_JOB_ID)"
           New-Item -ItemType Directory -Force -Path $nodeTemp | Out-Null
-          $sums = (Invoke-RestMethod "https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt") -split "`n"
+          $nodeVersion = "v22.23.4"
+          $dist = "https://nodejs.org/dist/$nodeVersion"
+          $sums = (Invoke-RestMethod "$dist/SHASUMS256.txt") -split "`n"
           $sumLine = $sums | Where-Object { $_ -match "win-x64\.zip$" } | Select-Object -First 1
           if (-not $sumLine) { throw "node win-x64 zip not listed" }
           $parts = $sumLine.Trim() -split "\s+"
@@ -71,7 +73,7 @@ unit:
           $expected = $parts[0].ToLowerInvariant()
           $name = $parts[-1]
           $zip = Join-Path $nodeTemp $name
-          Invoke-WebRequest "https://nodejs.org/dist/latest-v22.x/$name" -OutFile $zip
+          Invoke-WebRequest "$dist/$name" -OutFile $zip
           $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "node win-x64 zip checksum mismatch" }
           $dest = Join-Path $nodeTemp "node-win"

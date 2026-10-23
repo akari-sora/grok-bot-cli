@@ -417,3 +417,48 @@ test("gbot send --json includes wake and failureReason when auto wake fails", {
     await fx.close();
   }
 });
+
+test("gbot wake --check keeps the resolved scope when the descriptor session has none", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  const bodies = [];
+  const fx = await fixture(async (req, res) => {
+    bodies.push(await readBody(req));
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ runState: "SAND_BOX_RUN_STATE_HIBERNATED" }));
+  });
+  try {
+    const platform = process.platform;
+    const descriptorPath = grokBotGatewayDescriptorPath(fx.env.HOME, platform, {});
+    writeFileSync(descriptorPath, JSON.stringify({
+      version: 1,
+      encrypted: encryptEntry({
+        baseUrl: "http://127.0.0.1:9",
+        token: "descriptor-gateway-token-unused",
+        headers: {},
+        email: "wake-cli@example.com",
+        name: "Legacy",
+      }, SECRETS.password, platform === "linux" ? "linux" : "darwin"),
+    }));
+    writeFileSync(join(dirname(descriptorPath), "sand-secrets.json"), JSON.stringify({
+      version: 1,
+      "cursor-accounts": JSON.stringify({
+        active: SCOPE,
+        accounts: {
+          [SCOPE]: {
+            "cursor-access-token": `plaintext:v1:${jwt(Math.floor(Date.now() / 1000) + 3600)}`,
+            "cursor-account-profile": `plaintext:v1:${JSON.stringify({ email: "wake-cli@example.com", name: "Legacy" })}`,
+          },
+        },
+      }),
+    }));
+    const result = await run(["wake", "--check"], fx.env);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(result.stdout, /before: HIBERNATED/);
+    assert.deepEqual(bodies, [{ wake: false }]);
+    assert.doesNotMatch(result.stdout + result.stderr, /no account scope/);
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});

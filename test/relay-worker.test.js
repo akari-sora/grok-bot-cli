@@ -29,6 +29,10 @@ test("profile shares hosts but isolates endpoint, auth overrides and caller rest
     { DISPLAY: ":0" },
   ])
     assert.notEqual(base, relayProfile({ ...env, ...extra }));
+  assert.equal(
+    relayProfile({ ...env, GBOT_ACCOUNT: "work", GBOT_CONFIG: "/tmp/a.json" }, "ab".repeat(32)),
+    relayProfile({ ...env, GBOT_ACCOUNT: "work@example.com", GBOT_CONFIG: "/tmp/b.json" }, "ab".repeat(32)),
+  );
   assert.ok(
     !relayProfile({ ...env, GROK_BOT_GATEWAY_TOKEN: "secret" }).includes(
       "secret",

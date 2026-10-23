@@ -12151,7 +12151,7 @@ var __webpack_modules__ = {
                     });
                     if (selection) {
                         label = printable(String(selection.label));
-                        scope = selection.session.accountScope;
+                        scope = selection.session.accountScope ?? scope;
                     }
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';
@@ -16709,20 +16709,21 @@ var __webpack_modules__ = {
         });
     },
     "./src/core/grok-approval-routes.ts" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
-        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _gateway_js__rspack_import_0 = __webpack_require__("./src/core/gateway.js");
         var _grok_approvals_js__rspack_import_1 = __webpack_require__("./src/core/grok-approvals.js");
-        var _gbot_js__rspack_import_2 = __webpack_require__("./src/gbot.ts");
-        const listSchema = zod__rspack_import_3.rej({
-            target: zod__rspack_import_3.YjP().min(1).max(1024)
+        var _logins_js__rspack_import_2 = __webpack_require__("./src/core/logins.js");
+        var _gbot_js__rspack_import_3 = __webpack_require__("./src/gbot.ts");
+        const listSchema = zod__rspack_import_4.rej({
+            target: zod__rspack_import_4.YjP().min(1).max(1024)
         });
         const respondSchema = _grok_approvals_js__rspack_import_1.T5;
-        const resultSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP(), zod__rspack_import_3.Pq9());
-        const accountScope = ()=>process.env.GBOT_ACCOUNT_SCOPE || undefined;
-        const listOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)({
+        const resultSchema = zod__rspack_import_4.g1P(zod__rspack_import_4.YjP(), zod__rspack_import_4.Pq9());
+        const accountScope = ()=>(0, _logins_js__rspack_import_2.SH)() || undefined;
+        const listOperation = (input)=>(0, _gbot_js__rspack_import_3.yF)(async ()=>(0, _gateway_js__rspack_import_0.MI)(await (0, _gateway_js__rspack_import_0.Vq)({
                     account: accountScope()
                 }), listSchema.parse(input).target));
-        const respondOperation = (input)=>(0, _gbot_js__rspack_import_2.yF)(async ()=>{
+        const respondOperation = (input)=>(0, _gbot_js__rspack_import_3.yF)(async ()=>{
                 const { target, ...response } = respondSchema.parse(input);
                 return (0, _gateway_js__rspack_import_0.OR)(await (0, _gateway_js__rspack_import_0.Vq)({
                     account: accountScope()
@@ -16737,68 +16738,69 @@ var __webpack_modules__ = {
         });
     },
     "./src/core/relay/routes.ts" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
-        var _agent_bundle_runtime__rspack_import_4 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/40.js");
-        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_5 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/40.js");
+        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _managed_js__rspack_import_0 = __webpack_require__("./src/core/relay/managed.js");
         var _gbot_js__rspack_import_1 = __webpack_require__("./src/gbot.ts");
         var _codex_bridge_js__rspack_import_2 = __webpack_require__("./src/core/codex-bridge.js");
-        const id = zod__rspack_import_3.YjP().min(1).max(128);
+        var _logins_js__rspack_import_3 = __webpack_require__("./src/core/logins.js");
+        const id = zod__rspack_import_4.YjP().min(1).max(128);
         const routeFields = {
             codexThreadId: id.optional(),
-            expectedCwd: zod__rspack_import_3.YjP().min(1).max(4096).optional(),
-            bindingId: zod__rspack_import_3.YjP().min(1).max(512).optional(),
+            expectedCwd: zod__rspack_import_4.YjP().min(1).max(4096).optional(),
+            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
             requestId: id.optional()
         };
-        const grokSendSchema = zod__rspack_import_3.Ikc({
-            target: zod__rspack_import_3.YjP().min(1),
-            message: zod__rspack_import_3.YjP().min(1),
-            replyMode: zod__rspack_import_3.k5n([
+        const grokSendSchema = zod__rspack_import_4.Ikc({
+            target: zod__rspack_import_4.YjP().min(1),
+            message: zod__rspack_import_4.YjP().min(1),
+            replyMode: zod__rspack_import_4.k5n([
                 "auto",
                 "manual"
             ]).optional(),
-            hop: zod__rspack_import_3.aig().int().min(0).optional(),
+            hop: zod__rspack_import_4.aig().int().min(0).optional(),
             correlationId: id.optional(),
             ...routeFields
         }).strict();
-        const bridgeStartSchema = zod__rspack_import_3.Ikc({
-            grokTarget: zod__rspack_import_3.YjP().min(1),
+        const bridgeStartSchema = zod__rspack_import_4.Ikc({
+            grokTarget: zod__rspack_import_4.YjP().min(1),
             codexThreadId: id.optional(),
-            expectedCwd: zod__rspack_import_3.YjP().min(1).max(4096).optional(),
-            busyPolicy: zod__rspack_import_3.k5n([
+            expectedCwd: zod__rspack_import_4.YjP().min(1).max(4096).optional(),
+            busyPolicy: zod__rspack_import_4.k5n([
                 "steer",
                 "reject"
             ]).optional(),
             requestId: id.optional()
         }).strict();
-        const bridgeStatusSchema = zod__rspack_import_3.Ikc({
-            bindingId: zod__rspack_import_3.YjP().min(1).max(512).optional(),
-            limit: zod__rspack_import_3.aig().int().min(1).max(100).optional()
+        const bridgeStatusSchema = zod__rspack_import_4.Ikc({
+            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
+            limit: zod__rspack_import_4.aig().int().min(1).max(100).optional()
         }).strict();
-        const bridgeStopSchema = zod__rspack_import_3.Ikc({
-            bindingId: zod__rspack_import_3.YjP().min(1).max(512).optional(),
-            all: zod__rspack_import_3.zMY().optional(),
-            worker: zod__rspack_import_3.zMY().optional()
+        const bridgeStopSchema = zod__rspack_import_4.Ikc({
+            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
+            all: zod__rspack_import_4.zMY().optional(),
+            worker: zod__rspack_import_4.zMY().optional()
         }).strict().refine((x)=>!!x.bindingId || x.all === true || x.worker === true, "Specify bindingId, all or worker");
-        const respondSchema = zod__rspack_import_3.Ikc({
-            interactionId: zod__rspack_import_3.YjP().min(1).max(512),
+        const respondSchema = zod__rspack_import_4.Ikc({
+            interactionId: zod__rspack_import_4.YjP().min(1).max(512),
             generation: id,
             threadId: id,
             turnId: id,
-            bindingId: zod__rspack_import_3.YjP().min(1).max(512).optional(),
-            exchangeId: zod__rspack_import_3.YjP().min(1).max(512).optional(),
-            decision: zod__rspack_import_3.k5n([
+            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
+            exchangeId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
+            decision: zod__rspack_import_4.k5n([
                 "accept",
                 "decline",
                 "cancel"
             ]).optional(),
-            answersJson: zod__rspack_import_3.YjP().min(2).max(65536).optional()
+            answersJson: zod__rspack_import_4.YjP().min(2).max(65536).optional()
         }).strict().refine((x)=>!!x.bindingId || !!x.exchangeId, "Binding or exchange scope required").refine((x)=>!!x.decision !== !!x.answersJson, "Supply decision or answersJson");
-        const answersSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP().min(1).max(128), zod__rspack_import_3.Ikc({
-            answers: zod__rspack_import_3.YOg(zod__rspack_import_3.YjP().max(8192)).max(20)
+        const answersSchema = zod__rspack_import_4.g1P(zod__rspack_import_4.YjP().min(1).max(128), zod__rspack_import_4.Ikc({
+            answers: zod__rspack_import_4.YOg(zod__rspack_import_4.YjP().max(8192)).max(20)
         }).strict());
-        const relayResultSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP(), zod__rspack_import_3.Pq9());
+        const relayResultSchema = zod__rspack_import_4.g1P(zod__rspack_import_4.YjP(), zod__rspack_import_4.Pq9());
         function nativeCodexThread(context) {
-            return context.host.state === "available" && (0, _agent_bundle_runtime__rspack_import_4.bg)(context.host.value.name) === "codex" && context.lineage.state === "available" && context.lineage.source === "native" && context.lineage.value.resolution === "native" ? context.lineage.value.conversation : undefined;
+            return context.host.state === "available" && (0, _agent_bundle_runtime__rspack_import_5.bg)(context.host.value.name) === "codex" && context.lineage.state === "available" && context.lineage.source === "native" && context.lineage.value.resolution === "native" ? context.lineage.value.conversation : undefined;
         }
         function options(context) {
             return {
@@ -16833,7 +16835,7 @@ var __webpack_modules__ = {
             if (input.replyMode === "auto") throw Error("Automatic reply delivery requires a native Codex source, codexThreadId or bindingId");
             const message = input.hop !== undefined || input.correlationId !== undefined ? (0, _codex_bridge_js__rspack_import_2.Mr)(input.message, (0, _codex_bridge_js__rspack_import_2.nq)(input)) : input.message;
             const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)({
-                    account: process.env.GBOT_ACCOUNT_SCOPE || undefined
+                    account: (0, _logins_js__rspack_import_3.SH)() || undefined
                 }), input.target, message));
             return {
                 result: sent.result,
@@ -31129,7 +31131,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "NOT_JWT",
             "NO_ACCOUNT",
             "NO_SECRETS_FILE",
-            "UNSUPPORTED_VERSION",
             "SCOPE_MISMATCH",
             "UNUSABLE_SESSION",
             "MISSING_ENCRYPTED_PAYLOAD",
@@ -31170,6 +31171,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } : {});
         }
         const sessionsByScope = new Map();
+        const savedLoginSessions = new WeakSet();
         function sessionCacheKey(scope) {
             return [
                 scope,
@@ -31181,9 +31183,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         function rememberSession(session) {
             if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+                savedLoginSessions.add(session);
                 sessionsByScope.set(sessionCacheKey(session.accountScope), session);
             }
             return session;
+        }
+        function forgetSession(scope) {
+            if (scope && /^[0-9a-f]{64}$/.test(scope)) sessionsByScope.delete(sessionCacheKey(scope));
         }
         function cachedSession(scope) {
             if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
@@ -31255,13 +31261,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
             }
-            if (choice?.scope) {
-                const cached = cachedSession(choice.scope);
-                if (cached) return cached;
-            }
             if (!choice) {
                 try {
-                    return rememberSession(descriptorSession(account));
+                    return descriptorSession(account);
                 } catch (error) {
                     if (implicitAuthFallback(error)) return null;
                     throw scrubOutbound(toGatewayError(error), []);
@@ -31279,7 +31281,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         ...session,
                         accountScope: choice.scope
                     };
-                    return rememberSession(session);
+                    return session;
                 }
                 return await sessionFromSavedLogin(choice.scope, signal);
             } catch (error) {
@@ -31585,10 +31587,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function connectGateway({ signal, account } = {}) {
             assertGatewayActive(signal);
+            const pinned = (0, _logins_js__rspack_import_6.SH)();
             const override = gatewayOverride();
             if (override) return override;
-            const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            const selected = typeof account === "string" && account.trim() ? account.trim() : /^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined;
+            const selected = typeof account === "string" && account.trim() ? account.trim() : pinned || undefined;
             const fromApp = await sessionFromApp(selected, signal);
             if (fromApp) return fromApp;
             const token = accessTokenFromEnv();
@@ -31785,10 +31787,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!BARE_417_WAKE_METHODS.has(method) && !sleepEvidence(error)) return false;
             return true;
         }
+        function staleSavedSession(error) {
+            return error instanceof GatewayError && (error.kind === "auth" || error.kind === "routing");
+        }
         async function gatewayCall(session, method, body = {}, options = {}) {
             try {
                 return await performGatewayCall(session, method, body, options);
             } catch (error) {
+                if (!options.refreshedSession && savedLoginSessions.has(session) && staleSavedSession(error)) {
+                    forgetSession(session.accountScope);
+                    const fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+                    applySandbox(session, fresh);
+                    rememberSession(session);
+                    return await gatewayCall(session, method, body, {
+                        ...options,
+                        refreshedSession: true
+                    });
+                }
                 if (!canRetryAsleep(method, error, session, options)) throw error;
                 let sandbox;
                 try {
@@ -33041,8 +33056,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
                 if (found.length === 1) return found[0];
             }
-            if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            if (!scope && !email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
             return null;
+        }
+        function provenDescriptorScope(row, login) {
+            const own = descriptorScope(row);
+            if (own && (!login || login.scope === own)) return own;
+            const email = descriptorEmail(row);
+            if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
+            return null;
+        }
+        function workerAccountScope(env = process.env) {
+            const raw = env?.GBOT_ACCOUNT_SCOPE;
+            if (raw == null || raw === "") return "";
+            const value = String(raw);
+            if (!/^[0-9a-f]{64}$/.test(value)) {
+                throw selectionError("INVALID_ACCOUNT_SCOPE", "GBOT_ACCOUNT_SCOPE must be exactly 64 lowercase hex characters.");
+            }
+            return value;
         }
         function readConfigForCatalog(options) {
             if (options.config) return options.config;
@@ -33062,8 +33093,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const consumed = new Set();
             for (const row of described){
                 const login = savedForDescriptor(row, described.length, saved, savedByScope);
-                const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
-                if (scope) consumed.add(scope);
+                const scope = provenDescriptorScope(row, login);
+                if (login?.scope) consumed.add(login.scope);
+                else if (scope) consumed.add(scope);
                 const email = login?.email ?? descriptorEmail(row);
                 drafts.push({
                     id: row.id,
@@ -33295,6 +33327,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             Es: ()=>defineAlias,
             Pf: ()=>hasSavedAccessToken,
             Rz: ()=>setDefaultAccount,
+            SH: ()=>workerAccountScope,
             cq: ()=>resolveGrokBotLogin,
             d3: ()=>removeAlias,
             fR: ()=>listLoginCatalog,
@@ -33491,23 +33524,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         const digest = (value)=>(0, node_crypto__rspack_import_0.createHash)("sha256").update(value).digest("hex");
         const SCOPE = /^[0-9a-f]{64}$/;
         function resolveRelayAccountScope(env = process.env) {
-            const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            if (SCOPE.test(pinned)) return pinned;
+            const pinned = (0, _logins_js__rspack_import_5.SH)(env);
+            if (pinned) return pinned;
             const home = env.HOME || env.USERPROFILE;
             if (!home) return "";
-            try {
-                const choice = (0, _logins_js__rspack_import_5.cq)({
-                    env,
-                    home,
-                    platform: process.platform
-                });
-                return choice?.scope || "";
-            } catch (error) {
-                if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
-                    throw error;
-                }
-                return "";
-            }
+            const choice = (0, _logins_js__rspack_import_5.cq)({
+                env,
+                home,
+                platform: process.platform
+            });
+            return choice?.scope || "";
         }
         function relayProfile(env = process.env, accountScope = "") {
             const keys = [
@@ -33533,10 +33559,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "GROK_BOT_TEST",
                 "NODE_ENV",
                 "DBUS_SESSION_BUS_ADDRESS",
-                "DISPLAY",
-                "GBOT_CONFIG",
-                "GBOT_ACCOUNT",
-                "GBOT_ACCOUNT_SCOPE"
+                "DISPLAY"
             ];
             const scope = typeof accountScope === "string" ? accountScope : "";
             return digest(JSON.stringify([

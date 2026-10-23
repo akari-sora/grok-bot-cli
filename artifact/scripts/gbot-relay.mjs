@@ -25683,7 +25683,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "NOT_JWT",
             "NO_ACCOUNT",
             "NO_SECRETS_FILE",
-            "UNSUPPORTED_VERSION",
             "SCOPE_MISMATCH",
             "UNUSABLE_SESSION",
             "MISSING_ENCRYPTED_PAYLOAD",
@@ -25724,6 +25723,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } : {});
         }
         const sessionsByScope = new Map();
+        const savedLoginSessions = new WeakSet();
         function sessionCacheKey(scope) {
             return [
                 scope,
@@ -25735,9 +25735,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         function rememberSession(session) {
             if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+                savedLoginSessions.add(session);
                 sessionsByScope.set(sessionCacheKey(session.accountScope), session);
             }
             return session;
+        }
+        function forgetSession(scope) {
+            if (scope && /^[0-9a-f]{64}$/.test(scope)) sessionsByScope.delete(sessionCacheKey(scope));
         }
         function cachedSession(scope) {
             if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
@@ -25809,13 +25813,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
             }
-            if (choice?.scope) {
-                const cached = cachedSession(choice.scope);
-                if (cached) return cached;
-            }
             if (!choice) {
                 try {
-                    return rememberSession(descriptorSession(account));
+                    return descriptorSession(account);
                 } catch (error) {
                     if (implicitAuthFallback(error)) return null;
                     throw scrubOutbound(toGatewayError(error), []);
@@ -25833,7 +25833,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         ...session,
                         accountScope: choice.scope
                     };
-                    return rememberSession(session);
+                    return session;
                 }
                 return await sessionFromSavedLogin(choice.scope, signal);
             } catch (error) {
@@ -26139,10 +26139,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function connectGateway({ signal, account } = {}) {
             assertGatewayActive(signal);
+            const pinned = (0, _logins_js__rspack_import_6.SH)();
             const override = gatewayOverride();
             if (override) return override;
-            const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            const selected = typeof account === "string" && account.trim() ? account.trim() : /^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined;
+            const selected = typeof account === "string" && account.trim() ? account.trim() : pinned || undefined;
             const fromApp = await sessionFromApp(selected, signal);
             if (fromApp) return fromApp;
             const token = accessTokenFromEnv();
@@ -26339,10 +26339,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!BARE_417_WAKE_METHODS.has(method) && !sleepEvidence(error)) return false;
             return true;
         }
+        function staleSavedSession(error) {
+            return error instanceof GatewayError && (error.kind === "auth" || error.kind === "routing");
+        }
         async function gatewayCall(session, method, body = {}, options = {}) {
             try {
                 return await performGatewayCall(session, method, body, options);
             } catch (error) {
+                if (!options.refreshedSession && savedLoginSessions.has(session) && staleSavedSession(error)) {
+                    forgetSession(session.accountScope);
+                    const fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+                    applySandbox(session, fresh);
+                    rememberSession(session);
+                    return await gatewayCall(session, method, body, {
+                        ...options,
+                        refreshedSession: true
+                    });
+                }
                 if (!canRetryAsleep(method, error, session, options)) throw error;
                 let sandbox;
                 try {
@@ -27464,8 +27477,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
                 if (found.length === 1) return found[0];
             }
-            if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            if (!scope && !email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
             return null;
+        }
+        function provenDescriptorScope(row, login) {
+            const own = descriptorScope(row);
+            if (own && (!login || login.scope === own)) return own;
+            const email = descriptorEmail(row);
+            if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
+            return null;
+        }
+        function workerAccountScope(env = process.env) {
+            const raw = env?.GBOT_ACCOUNT_SCOPE;
+            if (raw == null || raw === "") return "";
+            const value = String(raw);
+            if (!/^[0-9a-f]{64}$/.test(value)) {
+                throw selectionError("INVALID_ACCOUNT_SCOPE", "GBOT_ACCOUNT_SCOPE must be exactly 64 lowercase hex characters.");
+            }
+            return value;
         }
         function readConfigForCatalog(options) {
             if (options.config) return options.config;
@@ -27485,8 +27514,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const consumed = new Set();
             for (const row of described){
                 const login = savedForDescriptor(row, described.length, saved, savedByScope);
-                const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
-                if (scope) consumed.add(scope);
+                const scope = provenDescriptorScope(row, login);
+                if (login?.scope) consumed.add(login.scope);
+                else if (scope) consumed.add(scope);
                 const email = login?.email ?? descriptorEmail(row);
                 drafts.push({
                     id: row.id,
@@ -27715,6 +27745,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }, options);
         }
         __webpack_require__.d(__webpack_exports__, {
+            SH: ()=>workerAccountScope,
             cq: ()=>resolveGrokBotLogin
         });
     },
@@ -28101,6 +28132,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _intake_js__rspack_import_6 = __webpack_require__("./src/core/relay/intake.js");
         var _completion_js__rspack_import_7 = __webpack_require__("./src/core/relay/completion.js");
         var _gateway_js__rspack_import_8 = __webpack_require__("./src/core/gateway.js");
+        var _logins_js__rspack_import_9 = __webpack_require__("./src/core/logins.js");
         function createGateway(accountScope) {
             const account = typeof accountScope === "string" && accountScope ? accountScope : undefined;
             return {
@@ -28117,7 +28149,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         async function openRelayEngine({ stateDir, profile, env = process.env, gateway, accountScope, clock = Date.now, openSession, openConversation, limits } = {}) {
-            const pinnedScope = typeof accountScope === "string" && /^[0-9a-f]{64}$/.test(accountScope) ? accountScope : /^[0-9a-f]{64}$/.test(String(env.GBOT_ACCOUNT_SCOPE ?? "").trim()) ? String(env.GBOT_ACCOUNT_SCOPE).trim() : "";
+            const fromEnv = (0, _logins_js__rspack_import_9.SH)(env);
+            let pinnedScope = fromEnv;
+            if (accountScope != null && accountScope !== "") {
+                if (typeof accountScope !== "string" || !/^[0-9a-f]{64}$/.test(accountScope)) {
+                    throw new Error("Relay account scope must be 64 lowercase hex characters.");
+                }
+                pinnedScope = accountScope;
+            }
             gateway = gateway ?? createGateway(pinnedScope);
             _state_js__rspack_import_3.pT.parse(profile);
             const state = await (0, _state_js__rspack_import_3.$o)({
@@ -28147,7 +28186,27 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scoped.signal
                 ]);
             }
-            const runnable = (r)=>!closed && (!r.bindingId || !stoppedBindings.has(r.bindingId) && state.read().bindings[r.bindingId]?.state === "running");
+            function sameAccount(binding) {
+                if (!pinnedScope) return true;
+                return binding?.accountScope === pinnedScope;
+            }
+            async function adoptUnscopedBindings() {
+                if (!pinnedScope) return;
+                const pending = Object.values(state.read().bindings).filter((binding)=>binding.state === "running" && typeof binding.accountScope !== "string");
+                for (const binding of pending){
+                    await change("bindings", {
+                        ...binding,
+                        accountScope: pinnedScope
+                    });
+                }
+            }
+            const runnable = (r)=>{
+                if (closed) return false;
+                if (!r.bindingId) return true;
+                if (stoppedBindings.has(r.bindingId)) return false;
+                const binding = state.read().bindings[r.bindingId];
+                return binding?.state === "running" && sameAccount(binding);
+            };
             const change = async (section, value)=>state.commit([
                     (0, _records_js__rspack_import_5.op)(section, value)
                 ]);
@@ -28186,10 +28245,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     "steer",
                     "reject"
                 ].includes(input.busyPolicy)) throw new Error("Unsupported busy policy");
+                await adoptUnscopedBindings();
                 if (input.bindingId) {
                     const b = state.read().bindings[input.bindingId];
-                    if (!b || b.state !== "running") throw new Error("Unknown or stopped binding");
-                    if (pinnedScope && b.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
+                    if (!b || b.state !== "running" || !sameAccount(b)) throw new Error("Unknown or stopped binding");
                     if (input.grokTarget !== undefined) {
                         const target = await gateway.resolve(input.grokTarget);
                         if (_state_js__rspack_import_3.pT.parse(target.id) !== b.targetId) throw new Error("Explicit Grok target does not match binding");
@@ -28275,6 +28334,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 return state.read().records[id];
             }
             async function startBinding(input) {
+                await adoptUnscopedBindings();
                 const id = "binding:" + (0, _records_js__rspack_import_5.tW)(input.requestId ?? (0, node_crypto__rspack_import_0.randomUUID)()), fingerprint = (0, _records_js__rspack_import_5.tW)({
                     ...input,
                     requestId: undefined
@@ -28286,11 +28346,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     return old;
                 }
                 const r = await route(input);
-                const conflict = Object.values(state.read().bindings).find((b)=>b.targetId === r.targetId && b.state === "running");
-                if (conflict) {
-                    if (pinnedScope && conflict.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
-                    throw new Error("Grok target already has an active binding");
-                }
+                const conflict = Object.values(state.read().bindings).find((b)=>b.targetId === r.targetId && b.state === "running" && sameAccount(b));
+                if (conflict) throw new Error("Grok target already has an active binding");
                 if (state.read().targets[r.targetId]) await poll(r.targetId, true);
                 await baseline(r.targetId);
                 if (state.read().targets[r.targetId].state !== "running") throw new Error("Target coverage is paused");
@@ -28366,15 +28423,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             async function tick() {
                 lastError = null;
                 try {
-                    if (pinnedScope) {
-                        for (const binding of Object.values(state.read().bindings)){
-                            if (binding.state === "running" && binding.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
-                        }
-                    }
+                    await adoptUnscopedBindings();
                     await reconcile();
                     await completions();
                     for (const target of Object.values(state.read().targets)){
-                        const needed = Object.values(state.read().bindings).some((b)=>b.targetId === target.id && b.state === "running") || (0, _records_js__rspack_import_5.V0)(state.read()).some((r)=>r.targetId === target.id && runnable(r) && r.kind !== "codex");
+                        const needed = Object.values(state.read().bindings).some((b)=>sameAccount(b) && b.targetId === target.id && b.state === "running") || (0, _records_js__rspack_import_5.V0)(state.read()).some((r)=>r.targetId === target.id && runnable(r) && r.kind !== "codex");
                         if (needed) await poll(target.id);
                     }
                     for (const r of (0, _records_js__rspack_import_5.V0)(state.read()).filter((r)=>r.submission === "prepared" && runnable(r)).slice(0, 20))await submit(r.id);
@@ -28885,23 +28938,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         const digest = (value)=>(0, node_crypto__rspack_import_0.createHash)("sha256").update(value).digest("hex");
         const SCOPE = /^[0-9a-f]{64}$/;
         function resolveRelayAccountScope(env = process.env) {
-            const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            if (SCOPE.test(pinned)) return pinned;
+            const pinned = (0, _logins_js__rspack_import_5.SH)(env);
+            if (pinned) return pinned;
             const home = env.HOME || env.USERPROFILE;
             if (!home) return "";
-            try {
-                const choice = (0, _logins_js__rspack_import_5.cq)({
-                    env,
-                    home,
-                    platform: process.platform
-                });
-                return choice?.scope || "";
-            } catch (error) {
-                if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
-                    throw error;
-                }
-                return "";
-            }
+            const choice = (0, _logins_js__rspack_import_5.cq)({
+                env,
+                home,
+                platform: process.platform
+            });
+            return choice?.scope || "";
         }
         function relayProfile(env = process.env, accountScope = "") {
             const keys = [
@@ -28927,10 +28973,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "GROK_BOT_TEST",
                 "NODE_ENV",
                 "DBUS_SESSION_BUS_ADDRESS",
-                "DISPLAY",
-                "GBOT_CONFIG",
-                "GBOT_ACCOUNT",
-                "GBOT_ACCOUNT_SCOPE"
+                "DISPLAY"
             ];
             const scope = typeof accountScope === "string" ? accountScope : "";
             return digest(JSON.stringify([
