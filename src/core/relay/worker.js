@@ -2,7 +2,8 @@ import { StringDecoder } from "node:string_decoder";
 import { createServer } from "node:net";
 import { chmod, unlink, realpath } from "node:fs/promises";
 import { openRelayEngine } from "./engine.js";
-import { relayLocation } from "./profile.js";
+import { relayLocation, removeStaleProfileTemps, writeRelayProfileFile } from "./profile.js";
+import { relayProfileMismatchError } from "./stored-profile.js";
 import { claimRelayOwner } from "./ownership.js";
 import { CONTROL_BYTES, CONTROL_TIMEOUT, RELAY_PROTOCOL } from "./control.js";
 import { redactSecrets } from "../url-policy.js";
@@ -10,6 +11,7 @@ import { redactSecrets } from "../url-policy.js";
 export async function runRelayWorker(options = {}) {
   const location = relayLocation(options);
   const release = await claimRelayOwner(location);
+  await removeStaleProfileTemps(location.stateDir);
   let engine,
     server,
     timer,
@@ -40,6 +42,7 @@ export async function runRelayWorker(options = {}) {
       env: location.env,
       accountScope: location.accountScope || undefined,
     });
+    await writeRelayProfileFile(location.stateDir, location.profile);
     const health = () => ({
       state: closing ? "stopped" : "running",
       pid: process.pid,
@@ -51,7 +54,7 @@ export async function runRelayWorker(options = {}) {
       if (request.version !== RELAY_PROTOCOL)
         throw Error("Relay protocol mismatch");
       if (request.profile !== location.profile)
-        throw Error("Relay profile mismatch");
+        throw relayProfileMismatchError();
       if (
         typeof request.requestId !== "string" ||
         request.requestId.length < 1 ||

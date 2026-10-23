@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, lstat, open, readdir, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { codexSocketPath } from "../codex-bridge.js";
 import { grokBotGatewayDescriptorPath } from "../app-session.js";
-import { resolveGrokBotLogin } from "../logins.js";
+import { resolveGrokBotLogin, workerAccountScope } from "../logins.js";
 
 export const digest = (value) =>
   createHash("sha256").update(value).digest("hex");
@@ -12,22 +13,17 @@ const SCOPE = /^[0-9a-f]{64}$/;
 
 /** Resolved account scope for this process, or "" when no app login is selected. */
 export function resolveRelayAccountScope(env = process.env) {
-  const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-  if (SCOPE.test(pinned)) return pinned;
+  const pinned = workerAccountScope(env);
+  if (pinned) return pinned;
   const home = env.HOME || env.USERPROFILE;
   if (!home) return "";
-  try {
-    const choice = resolveGrokBotLogin({ env, home, platform: process.platform });
-    return choice?.scope || "";
-  } catch (error) {
-    if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
-      throw error;
-    }
-    return "";
-  }
+  const choice = resolveGrokBotLogin({ env, home, platform: process.platform });
+  return choice?.scope || "";
 }
 
-// Only explicit overrides are hashed. The resolved account scope is part of the worker identity.
+// Endpoint and caller overrides are hashed. Account identity is the resolved scope only:
+// raw GBOT_ACCOUNT, GBOT_CONFIG, and GBOT_ACCOUNT_SCOPE are not hashed, so two selectors
+// for the same account share one worker and one duplicate-binding check.
 export function relayProfile(env = process.env, accountScope = "") {
   const keys = [
     "GROK_BOT_GATEWAY_URL",
@@ -54,9 +50,6 @@ export function relayProfile(env = process.env, accountScope = "") {
     // Secret Service credentials depend on the caller's desktop session.
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
-    "GBOT_CONFIG",
-    "GBOT_ACCOUNT",
-    "GBOT_ACCOUNT_SCOPE",
   ];
   const scope = typeof accountScope === "string" ? accountScope : "";
   return digest(
@@ -68,6 +61,99 @@ export function relayProfile(env = process.env, accountScope = "") {
     ]),
   );
 }
+const PROFILE_FILE = "profile";
+const PROFILE_TEMP = /^profile\.\d+\.[0-9a-f]{8}\.tmp$/;
+
+/** Drop profile.<pid>.<hex>.tmp left behind when a write dies before rename. */
+export async function removeStaleProfileTemps(dir) {
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const name of names) {
+    if (!PROFILE_TEMP.test(name)) continue;
+    const tempPath = join(dir, name);
+    let info;
+    try {
+      info = await lstat(tempPath);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    if (info.isDirectory()) continue;
+    await unlink(tempPath);
+  }
+}
+
+function assertProfileText(profile) {
+  if (typeof profile !== "string" || profile.length < 1 || profile.length > 512 || /[\0\r\n]/.test(profile)) {
+    throw new Error("Relay profile file is invalid");
+  }
+}
+
+async function profileFileStat(dir) {
+  const path = join(dir, PROFILE_FILE);
+  try {
+    return { path, stat: await lstat(path) };
+  } catch (error) {
+    if (error.code === "ENOENT") return { path, stat: null };
+    throw error;
+  }
+}
+
+function ownedProfileFile(stat) {
+  if (!stat) return;
+  if (
+    !stat.isFile()
+    || stat.isSymbolicLink()
+    || (process.getuid && stat.uid !== process.getuid())
+    || stat.size > 1024
+  ) {
+    throw new Error("Relay profile file must be an owned regular file, never a symlink");
+  }
+}
+
+/** Plain profile hash for stop/status when login resolution cannot recompute it. */
+export async function writeRelayProfileFile(dir, profile) {
+  assertProfileText(profile);
+  const { path, stat } = await profileFileStat(dir);
+  ownedProfileFile(stat);
+  await removeStaleProfileTemps(dir);
+  // Temp file plus rename. Truncating the destination first leaves an empty
+  // file if the process dies before the write, and that empty file fails every
+  // later status list.
+  const temp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const file = await open(temp, "wx", 0o600);
+  try {
+    await file.write(profile, 0, "utf8");
+    await file.sync();
+    await file.close();
+  } catch (error) {
+    await file.close().catch(() => {});
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
+  try {
+    await rename(temp, path);
+  } catch (error) {
+    await unlink(temp).catch(() => {});
+    throw error;
+  }
+  await chmod(path, 0o600);
+}
+
+export async function readRelayProfileFile(dir) {
+  const { path, stat } = await profileFileStat(dir);
+  if (!stat) return null;
+  ownedProfileFile(stat);
+  const text = (await readFile(path, "utf8")).trim();
+  assertProfileText(text);
+  return text;
+}
+
 export function relayLocation({
   env = process.env,
   stateDir,

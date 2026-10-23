@@ -11,6 +11,7 @@ import {
 } from "../../gbot.js";
 
 import { buildEnvelope, withEnvelopeHeader } from "../codex-bridge.js";
+import { workerAccountScope } from "../logins.js";
 
 const id = z.string().min(1).max(128);
 export const routeFields = {
@@ -143,7 +144,7 @@ export async function grokSendOperation(
       ? withEnvelopeHeader(input.message, buildEnvelope(input))
       : input.message;
   const sent = await withRedactedErrors(async () =>
-    sendPrompt(await connectGateway({ account: process.env.GBOT_ACCOUNT_SCOPE || undefined }), input.target, message),
+    sendPrompt(await connectGateway({ account: workerAccountScope() || undefined }), input.target, message),
   );
   return {
     result: sent.result,

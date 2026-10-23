@@ -19,19 +19,25 @@ import {
   getTranscriptTail,
   sendPrompt,
 } from "../gateway.js";
+import { workerAccountScope } from "../logins.js";
 
 function createGateway(accountScope) {
   const account = typeof accountScope === "string" && accountScope ? accountScope : undefined;
   return {
     resolve: async (ref) => resolveRef(await connectGateway({ account }), ref),
     tail: async (id) => getTranscriptTail(await connectGateway({ account }), id, 200),
-    send: async (id, text, extra) =>
-      sendPrompt(
-        await connectGateway({ account, signal: extra.signal }),
-        id,
-        text,
-        extra,
-      ),
+    send: async (id, text, extra = {}) => {
+      let session;
+      try {
+        session = await connectGateway({ account, signal: extra.signal });
+      } catch (error) {
+        // The prompt was never transmitted. A missing delivery would be recorded
+        // as delivery-unknown on every send after the saved-login cache is dropped.
+        if (error && typeof error === "object" && error.delivery == null) error.delivery = "rejected";
+        throw error;
+      }
+      return sendPrompt(session, id, text, extra);
+    },
   };
 }
 /** Core owns policy and durable intents; its caller must hold the single-worker lock. */
@@ -46,11 +52,14 @@ export async function openRelayEngine({
   openConversation,
   limits,
 } = {}) {
-  const pinnedScope = typeof accountScope === "string" && /^[0-9a-f]{64}$/.test(accountScope)
-    ? accountScope
-    : (/^[0-9a-f]{64}$/.test(String(env.GBOT_ACCOUNT_SCOPE ?? "").trim())
-      ? String(env.GBOT_ACCOUNT_SCOPE).trim()
-      : "");
+  const fromEnv = workerAccountScope(env);
+  let pinnedScope = fromEnv;
+  if (accountScope != null && accountScope !== "") {
+    if (typeof accountScope !== "string" || !/^[0-9a-f]{64}$/.test(accountScope)) {
+      throw new Error("Relay account scope must be 64 lowercase hex characters.");
+    }
+    pinnedScope = accountScope;
+  }
   gateway = gateway ?? createGateway(pinnedScope);
   relayId.parse(profile);
   const state = await openRelayState({
@@ -88,11 +97,13 @@ export async function openRelayEngine({
       scoped.abort();
     return AbortSignal.any([controller.signal, scoped.signal]);
   }
-  const runnable = (r) =>
-    !closed &&
-    (!r.bindingId ||
-      (!stoppedBindings.has(r.bindingId) &&
-        state.read().bindings[r.bindingId]?.state === "running"));
+  const runnable = (r) => {
+    if (closed) return false;
+    if (!r.bindingId) return true;
+    if (stoppedBindings.has(r.bindingId)) return false;
+    const binding = state.read().bindings[r.bindingId];
+    return binding?.state === "running";
+  };
   const change = async (section, value) => state.commit([op(section, value)]);
   const update = async (id, patch) =>
     change("records", { ...state.read().records[id], ...patch });
@@ -132,8 +143,6 @@ export async function openRelayEngine({
       const b = state.read().bindings[input.bindingId];
       if (!b || b.state !== "running")
         throw new Error("Unknown or stopped binding");
-      if (pinnedScope && b.accountScope !== pinnedScope)
-        throw new Error("Relay binding belongs to a different Grok Bot account");
       if (input.grokTarget !== undefined) {
         const target = await gateway.resolve(input.grokTarget);
         if (relayId.parse(target.id) !== b.targetId)
@@ -220,8 +229,6 @@ export async function openRelayEngine({
       fingerprint = hash({ ...input, requestId: undefined });
     const old = state.read().bindings[id];
     if (old) {
-      if (pinnedScope && old.accountScope !== pinnedScope)
-        throw new Error("Relay binding belongs to a different Grok Bot account");
       if (old.fingerprint !== fingerprint)
         throw new Error("Idempotency conflict");
       return old;
@@ -230,11 +237,7 @@ export async function openRelayEngine({
     const conflict = Object.values(state.read().bindings).find(
       (b) => b.targetId === r.targetId && b.state === "running",
     );
-    if (conflict) {
-      if (pinnedScope && conflict.accountScope !== pinnedScope)
-        throw new Error("Relay binding belongs to a different Grok Bot account");
-      throw new Error("Grok target already has an active binding");
-    }
+    if (conflict) throw new Error("Grok target already has an active binding");
     // Bring existing tracked requests to a safe checkpoint before starting the new link.
     if (state.read().targets[r.targetId]) await poll(r.targetId, true);
     await baseline(r.targetId);
@@ -316,12 +319,6 @@ export async function openRelayEngine({
   async function tick() {
     lastError = null;
     try {
-      if (pinnedScope) {
-        for (const binding of Object.values(state.read().bindings)) {
-          if (binding.state === "running" && binding.accountScope !== pinnedScope)
-            throw new Error("Relay binding belongs to a different Grok Bot account");
-        }
-      }
       // Reconnect/reconcile receipts before admitting new inbound deliveries.
       await reconcile();
       await completions();

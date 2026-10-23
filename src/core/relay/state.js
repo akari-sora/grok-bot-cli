@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { defineState } from "@agent-bundle/runtime/state";
+import { RELAY_DISK_BYTES, readStoredRelayProfile, relayProfileMismatchError } from "./stored-profile.js";
 
 export const relayId = z.string().min(1).max(512);
 const text = z
@@ -92,7 +93,7 @@ const DEFAULTS = {
   bindings: 100,
   records: 1000,
   stateBytes: 8 * 1024 * 1024,
-  diskBytes: 64 * 1024 * 1024,
+  diskBytes: RELAY_DISK_BYTES,
 };
 
 /** Check before SQLite opens any database, WAL, SHM or worker control path. */
@@ -115,6 +116,7 @@ export async function protectRelayDirectory(
     "relay.sqlite-wal",
     "relay.sqlite-shm",
     "worker.lock",
+    "profile",
   ]) {
     const path = join(dir, name);
     let info;
@@ -140,7 +142,7 @@ export async function protectRelayDirectory(
 }
 
 /** The worker owns exclusivity; this wrapper serializes only durable mutations, never network waits. */
-export async function openRelayState({ dir, profile, limits: overrides = {} }) {
+export async function openRelayState({ dir, profile, limits: overrides = {}, busyTimeoutMs } = {}) {
   const limits = { ...DEFAULTS, ...overrides };
   for (const value of Object.values(limits))
     if (!Number.isSafeInteger(value) || value < 1)
@@ -148,6 +150,11 @@ export async function openRelayState({ dir, profile, limits: overrides = {} }) {
   relayId.parse(profile);
   dir = resolve(dir);
   await protectRelayDirectory(dir, limits.diskBytes);
+  const previous = await readStoredRelayProfile(dir, {
+    maxBytes: limits.diskBytes,
+    ...(busyTimeoutMs === undefined ? {} : { busyTimeoutMs }),
+  });
+  if (previous && previous !== profile) throw relayProfileMismatchError();
   const schema = z
     .strictObject({
       version: z.literal(1),
@@ -209,7 +216,7 @@ export async function openRelayState({ dir, profile, limits: overrides = {} }) {
     closed = false;
   if (snapshot.state.profile !== profile) {
     await driver.close();
-    throw new Error("Relay profile mismatch");
+    throw relayProfileMismatchError();
   }
   return {
     dir,

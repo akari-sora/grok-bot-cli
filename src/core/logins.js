@@ -199,15 +199,45 @@ function descriptorEmail(row) {
 
 function savedForDescriptor(row, describedCount, saved, savedByScope) {
   const scope = descriptorScope(row);
-  if (scope && savedByScope.has(scope)) return savedByScope.get(scope);
+  // A descriptor that names a scope never merges by email. A different saved login
+  // for that email stays its own row, and its scope is not attached here.
+  if (scope) return savedByScope.has(scope) ? savedByScope.get(scope) : null;
   const email = descriptorEmail(row);
   if (email) {
     const found = saved.filter((item) => item.email && item.email.toLowerCase() === email.toLowerCase());
     if (found.length === 1) return found[0];
   }
-  // A single legacy v1 descriptor (id "default") and one saved login are the same account.
-  if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+  // A legacy v1 descriptor (id "default") merges with the only saved login only when
+  // the descriptor itself has neither a scope nor an email. Contradicting evidence stays two rows.
+  if (!email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
   return null;
+}
+
+/** Scope for wake and caching. The unverified v1 fallback does not prove an account. */
+function provenDescriptorScope(row, login) {
+  const own = descriptorScope(row);
+  // A descriptor scope only merges the saved login with that same scope, or none.
+  if (own) return own;
+  const email = descriptorEmail(row);
+  if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
+  return null;
+}
+
+/**
+ * Internal account pin set by gbot for its own relay and MCP workers.
+ * Empty means unset. Any other value that is not 64 lowercase hex characters is an error.
+ */
+export function workerAccountScope(env = process.env) {
+  const raw = env?.GBOT_ACCOUNT_SCOPE;
+  if (raw == null || raw === "") return "";
+  const value = String(raw);
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw selectionError(
+      "INVALID_ACCOUNT_SCOPE",
+      "GBOT_ACCOUNT_SCOPE must be exactly 64 lowercase hex characters.",
+    );
+  }
+  return value;
 }
 
 function readConfigForCatalog(options) {
@@ -231,8 +261,9 @@ export function listLoginCatalog(options = {}) {
   const consumed = new Set();
   for (const row of described) {
     const login = savedForDescriptor(row, described.length, saved, savedByScope);
-    const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
-    if (scope) consumed.add(scope);
+    const scope = provenDescriptorScope(row, login);
+    if (login?.scope) consumed.add(login.scope);
+    else if (scope) consumed.add(scope);
     const email = login?.email ?? descriptorEmail(row);
     drafts.push({
       id: row.id,

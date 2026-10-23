@@ -9,6 +9,7 @@ import * as __rspack_external_node_os_4f3c9d58 from "node:os";
 import * as __rspack_external_node_path_806ed179 from "node:path";
 import * as __rspack_external_node_sqlite_cecf0237 from "node:sqlite";
 import * as __rspack_external_node_string_decoder_69b9bd04 from "node:string_decoder";
+import * as __rspack_external_node_url_3991086a from "node:url";
 var __webpack_modules__ = {
     "./src/scripts/gbot-relay.ts" (module, __unused_rspack___webpack_exports__, __webpack_require__) {
         __webpack_require__.a(module, async function(__rspack_load_async_deps, __rspack_async_done) {
@@ -81,6 +82,9 @@ var __webpack_modules__ = {
     },
     "node:string_decoder" (module) {
         module.exports = __rspack_external_node_string_decoder_69b9bd04;
+    },
+    "node:url" (module) {
+        module.exports = __rspack_external_node_url_3991086a;
     },
     "./node_modules/@agent-bundle/runtime/dist/158.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var _65_js__rspack_import_0 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/65.js");
@@ -22000,11 +22004,11 @@ var __webpack_modules__ = {
             if (!payload || typeof payload !== "object" || payload.iss !== ISSUER || typeof payload.sub !== "string" || !payload.sub || typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw fail("NOT_JWT");
             return payload;
         }
-        function loadAppAccessToken({ scope, platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env, getKeychainPassword, unprotectData, now = ()=>Date.now(), readFile = secretFiles.readFileSync } = {}) {
+        function loadAppAccessToken({ scope, platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env, getKeychainPassword, unprotectData, now = ()=>Date.now(), readFile: readFile1 = secretFiles.readFileSync } = {}) {
             const path = (0, node_path__rspack_import_3.join)((0, node_path__rspack_import_3.dirname)((0, _app_session_js__rspack_import_4.dQ)(home, platform, env)), "sand-secrets.json");
             let text;
             try {
-                text = readFile(path, "utf8");
+                text = readFile1(path, "utf8");
             } catch  {
                 throw fail("NO_SECRETS_FILE");
             }
@@ -22586,7 +22590,7 @@ var __webpack_modules__ = {
             const candidate = fourPart ? fourPart[1] : trimmed;
             return VERSION.test(candidate) ? candidate : null;
         }
-        function macVersion(home, readFile) {
+        function macVersion(home, readFile1) {
             const paths = [
                 "/Applications/Grok Bot.app/Contents/Info.plist",
                 node_path__rspack_import_3["default"].join(home, "Applications/Grok Bot.app/Contents/Info.plist")
@@ -22594,7 +22598,7 @@ var __webpack_modules__ = {
             for (const file of paths){
                 let text = "";
                 try {
-                    text = readFile(file, "utf8");
+                    text = readFile1(file, "utf8");
                 } catch  {
                     continue;
                 }
@@ -22699,8 +22703,8 @@ var __webpack_modules__ = {
             }
             return null;
         }
-        function installedVersion({ platform, home, readFile, execFile, env, now }) {
-            if (platform === "darwin") return macVersion(home, readFile);
+        function installedVersion({ platform, home, readFile: readFile1, execFile, env, now }) {
+            if (platform === "darwin") return macVersion(home, readFile1);
             if (platform === "win32") return windowsVersion(execFile, env, now);
             return null;
         }
@@ -22738,9 +22742,9 @@ var __webpack_modules__ = {
                 source: version ? "env" : "default"
             };
         }
-        function cursorClientVersion({ env = process.env, platform, home, readFile, execFile, now } = {}) {
+        function cursorClientVersion({ env = process.env, platform, home, readFile: readFile1, execFile, now } = {}) {
             const fromEnv = envClientVersion(env);
-            const injected = platform != null || home != null || readFile != null || execFile != null || now != null;
+            const injected = platform != null || home != null || readFile1 != null || execFile != null || now != null;
             if (fromEnv) {
                 if (!injected) versionSource = fromEnv.source;
                 return fromEnv.version;
@@ -22762,7 +22766,7 @@ var __webpack_modules__ = {
             return installedVersion({
                 platform: platform ?? process.platform,
                 home: home ?? (0, node_os__rspack_import_2.homedir)(),
-                readFile: readFile ?? node_fs__rspack_import_1.readFileSync,
+                readFile: readFile1 ?? node_fs__rspack_import_1.readFileSync,
                 execFile: execFile ?? node_child_process__rspack_import_0.execFileSync,
                 env,
                 now: now ?? Date.now
@@ -25683,7 +25687,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "NOT_JWT",
             "NO_ACCOUNT",
             "NO_SECRETS_FILE",
-            "UNSUPPORTED_VERSION",
             "SCOPE_MISMATCH",
             "UNUSABLE_SESSION",
             "MISSING_ENCRYPTED_PAYLOAD",
@@ -25724,6 +25727,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } : {});
         }
         const sessionsByScope = new Map();
+        const savedLoginSessions = new WeakSet();
         function sessionCacheKey(scope) {
             return [
                 scope,
@@ -25735,9 +25739,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         function rememberSession(session) {
             if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+                savedLoginSessions.add(session);
                 sessionsByScope.set(sessionCacheKey(session.accountScope), session);
             }
             return session;
+        }
+        function forgetSession(scope) {
+            if (scope && /^[0-9a-f]{64}$/.test(scope)) sessionsByScope.delete(sessionCacheKey(scope));
         }
         function cachedSession(scope) {
             if (!scope || !/^[0-9a-f]{64}$/.test(scope)) return null;
@@ -25809,13 +25817,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
             }
-            if (choice?.scope) {
-                const cached = cachedSession(choice.scope);
-                if (cached) return cached;
-            }
             if (!choice) {
                 try {
-                    return rememberSession(descriptorSession(account));
+                    return descriptorSession(account);
                 } catch (error) {
                     if (implicitAuthFallback(error)) return null;
                     throw scrubOutbound(toGatewayError(error), []);
@@ -25833,7 +25837,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         ...session,
                         accountScope: choice.scope
                     };
-                    return rememberSession(session);
+                    return session;
                 }
                 return await sessionFromSavedLogin(choice.scope, signal);
             } catch (error) {
@@ -26139,10 +26143,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function connectGateway({ signal, account } = {}) {
             assertGatewayActive(signal);
+            const pinned = (0, _logins_js__rspack_import_6.SH)();
             const override = gatewayOverride();
             if (override) return override;
-            const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            const selected = typeof account === "string" && account.trim() ? account.trim() : /^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined;
+            const selected = typeof account === "string" && account.trim() ? account.trim() : pinned || undefined;
             const fromApp = await sessionFromApp(selected, signal);
             if (fromApp) return fromApp;
             const token = accessTokenFromEnv();
@@ -26339,10 +26343,31 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!BARE_417_WAKE_METHODS.has(method) && !sleepEvidence(error)) return false;
             return true;
         }
+        function staleSavedSession(error) {
+            return error instanceof GatewayError && (error.kind === "auth" || error.kind === "routing");
+        }
         async function gatewayCall(session, method, body = {}, options = {}) {
             try {
                 return await performGatewayCall(session, method, body, options);
             } catch (error) {
+                if (!options.refreshedSession && savedLoginSessions.has(session) && staleSavedSession(error)) {
+                    forgetSession(session.accountScope);
+                    let fresh;
+                    try {
+                        fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+                    } catch (rebuildError) {
+                        if (error && typeof error === "object" && error.cause === undefined && rebuildError instanceof Error) {
+                            error.cause = rebuildError;
+                        }
+                        throw error;
+                    }
+                    applySandbox(session, fresh);
+                    rememberSession(session);
+                    return await gatewayCall(session, method, body, {
+                        ...options,
+                        refreshedSession: true
+                    });
+                }
                 if (!canRetryAsleep(method, error, session, options)) throw error;
                 let sandbox;
                 try {
@@ -27458,14 +27483,30 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         function savedForDescriptor(row, describedCount, saved, savedByScope) {
             const scope = descriptorScope(row);
-            if (scope && savedByScope.has(scope)) return savedByScope.get(scope);
+            if (scope) return savedByScope.has(scope) ? savedByScope.get(scope) : null;
             const email = descriptorEmail(row);
             if (email) {
                 const found = saved.filter((item)=>item.email && item.email.toLowerCase() === email.toLowerCase());
                 if (found.length === 1) return found[0];
             }
-            if (row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
+            if (!email && row.id === "default" && describedCount === 1 && saved.length === 1) return saved[0];
             return null;
+        }
+        function provenDescriptorScope(row, login) {
+            const own = descriptorScope(row);
+            if (own) return own;
+            const email = descriptorEmail(row);
+            if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
+            return null;
+        }
+        function workerAccountScope(env = process.env) {
+            const raw = env?.GBOT_ACCOUNT_SCOPE;
+            if (raw == null || raw === "") return "";
+            const value = String(raw);
+            if (!/^[0-9a-f]{64}$/.test(value)) {
+                throw selectionError("INVALID_ACCOUNT_SCOPE", "GBOT_ACCOUNT_SCOPE must be exactly 64 lowercase hex characters.");
+            }
+            return value;
         }
         function readConfigForCatalog(options) {
             if (options.config) return options.config;
@@ -27485,8 +27526,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const consumed = new Set();
             for (const row of described){
                 const login = savedForDescriptor(row, described.length, saved, savedByScope);
-                const scope = login?.scope ?? (SCOPE.test(row.id) ? row.id : null);
-                if (scope) consumed.add(scope);
+                const scope = provenDescriptorScope(row, login);
+                if (login?.scope) consumed.add(login.scope);
+                else if (scope) consumed.add(scope);
                 const email = login?.email ?? descriptorEmail(row);
                 drafts.push({
                     id: row.id,
@@ -27715,6 +27757,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }, options);
         }
         __webpack_require__.d(__webpack_exports__, {
+            SH: ()=>workerAccountScope,
             cq: ()=>resolveGrokBotLogin
         });
     },
@@ -28029,6 +28072,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_net__rspack_import_1 = __webpack_require__("node:net");
         var node_crypto__rspack_import_2 = __webpack_require__("node:crypto");
         var _profile_js__rspack_import_3 = __webpack_require__("./src/core/relay/profile.js");
+        var _stored_profile_js__rspack_import_4 = __webpack_require__("./src/core/relay/stored-profile.js");
         const RELAY_PROTOCOL = 1;
         const CONTROL_BYTES = 1024 * 1024;
         const CONTROL_TIMEOUT = 45000;
@@ -28078,8 +28122,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     try {
                         const reply = JSON.parse(buffer.slice(0, end));
                         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId) throw Error("Relay protocol identity mismatch");
-                        if (reply.error) throw Error(reply.error);
-                        if (reply.profile !== profile) throw Error("Relay profile mismatch");
+                        if (reply.error) {
+                            if (typeof reply.error === "string" && reply.error.startsWith("Relay profile mismatch")) {
+                                throw relayProfileMismatchError();
+                            }
+                            throw Error(reply.error);
+                        }
+                        if (reply.profile !== profile) throw relayProfileMismatchError();
                         finish(null, reply.result);
                     } catch (error) {
                         finish(error);
@@ -28101,6 +28150,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _intake_js__rspack_import_6 = __webpack_require__("./src/core/relay/intake.js");
         var _completion_js__rspack_import_7 = __webpack_require__("./src/core/relay/completion.js");
         var _gateway_js__rspack_import_8 = __webpack_require__("./src/core/gateway.js");
+        var _logins_js__rspack_import_9 = __webpack_require__("./src/core/logins.js");
         function createGateway(accountScope) {
             const account = typeof accountScope === "string" && accountScope ? accountScope : undefined;
             return {
@@ -28110,14 +28160,30 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 tail: async (id)=>(0, _gateway_js__rspack_import_8.bA)(await (0, _gateway_js__rspack_import_8.Vq)({
                         account
                     }), id, 200),
-                send: async (id, text, extra)=>(0, _gateway_js__rspack_import_8.LV)(await (0, _gateway_js__rspack_import_8.Vq)({
-                        account,
-                        signal: extra.signal
-                    }), id, text, extra)
+                send: async (id, text, extra = {})=>{
+                    let session;
+                    try {
+                        session = await (0, _gateway_js__rspack_import_8.Vq)({
+                            account,
+                            signal: extra.signal
+                        });
+                    } catch (error) {
+                        if (error && typeof error === "object" && error.delivery == null) error.delivery = "rejected";
+                        throw error;
+                    }
+                    return (0, _gateway_js__rspack_import_8.LV)(session, id, text, extra);
+                }
             };
         }
         async function openRelayEngine({ stateDir, profile, env = process.env, gateway, accountScope, clock = Date.now, openSession, openConversation, limits } = {}) {
-            const pinnedScope = typeof accountScope === "string" && /^[0-9a-f]{64}$/.test(accountScope) ? accountScope : /^[0-9a-f]{64}$/.test(String(env.GBOT_ACCOUNT_SCOPE ?? "").trim()) ? String(env.GBOT_ACCOUNT_SCOPE).trim() : "";
+            const fromEnv = (0, _logins_js__rspack_import_9.SH)(env);
+            let pinnedScope = fromEnv;
+            if (accountScope != null && accountScope !== "") {
+                if (typeof accountScope !== "string" || !/^[0-9a-f]{64}$/.test(accountScope)) {
+                    throw new Error("Relay account scope must be 64 lowercase hex characters.");
+                }
+                pinnedScope = accountScope;
+            }
             gateway = gateway ?? createGateway(pinnedScope);
             _state_js__rspack_import_3.pT.parse(profile);
             const state = await (0, _state_js__rspack_import_3.$o)({
@@ -28147,7 +28213,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scoped.signal
                 ]);
             }
-            const runnable = (r)=>!closed && (!r.bindingId || !stoppedBindings.has(r.bindingId) && state.read().bindings[r.bindingId]?.state === "running");
+            const runnable = (r)=>{
+                if (closed) return false;
+                if (!r.bindingId) return true;
+                if (stoppedBindings.has(r.bindingId)) return false;
+                const binding = state.read().bindings[r.bindingId];
+                return binding?.state === "running";
+            };
             const change = async (section, value)=>state.commit([
                     (0, _records_js__rspack_import_5.op)(section, value)
                 ]);
@@ -28189,7 +28261,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (input.bindingId) {
                     const b = state.read().bindings[input.bindingId];
                     if (!b || b.state !== "running") throw new Error("Unknown or stopped binding");
-                    if (pinnedScope && b.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
                     if (input.grokTarget !== undefined) {
                         const target = await gateway.resolve(input.grokTarget);
                         if (_state_js__rspack_import_3.pT.parse(target.id) !== b.targetId) throw new Error("Explicit Grok target does not match binding");
@@ -28281,16 +28352,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
                 const old = state.read().bindings[id];
                 if (old) {
-                    if (pinnedScope && old.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
                     if (old.fingerprint !== fingerprint) throw new Error("Idempotency conflict");
                     return old;
                 }
                 const r = await route(input);
                 const conflict = Object.values(state.read().bindings).find((b)=>b.targetId === r.targetId && b.state === "running");
-                if (conflict) {
-                    if (pinnedScope && conflict.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
-                    throw new Error("Grok target already has an active binding");
-                }
+                if (conflict) throw new Error("Grok target already has an active binding");
                 if (state.read().targets[r.targetId]) await poll(r.targetId, true);
                 await baseline(r.targetId);
                 if (state.read().targets[r.targetId].state !== "running") throw new Error("Target coverage is paused");
@@ -28366,11 +28433,6 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             async function tick() {
                 lastError = null;
                 try {
-                    if (pinnedScope) {
-                        for (const binding of Object.values(state.read().bindings)){
-                            if (binding.state === "running" && binding.accountScope !== pinnedScope) throw new Error("Relay binding belongs to a different Grok Bot account");
-                        }
-                    }
                     await reconcile();
                     await completions();
                     for (const target of Object.values(state.read().targets)){
@@ -28877,31 +28939,25 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     },
     "./src/core/relay/profile.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
-        var node_os__rspack_import_1 = __webpack_require__("node:os");
-        var node_path__rspack_import_2 = __webpack_require__("node:path");
-        var _codex_bridge_js__rspack_import_3 = __webpack_require__("./src/core/codex-bridge.js");
-        var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
-        var _logins_js__rspack_import_5 = __webpack_require__("./src/core/logins.js");
+        var node_fs_promises__rspack_import_1 = __webpack_require__("node:fs/promises");
+        var node_os__rspack_import_2 = __webpack_require__("node:os");
+        var node_path__rspack_import_3 = __webpack_require__("node:path");
+        var _codex_bridge_js__rspack_import_4 = __webpack_require__("./src/core/codex-bridge.js");
+        var _app_session_js__rspack_import_5 = __webpack_require__("./src/core/app-session.js");
+        var _logins_js__rspack_import_6 = __webpack_require__("./src/core/logins.js");
         const digest = (value)=>(0, node_crypto__rspack_import_0.createHash)("sha256").update(value).digest("hex");
         const SCOPE = /^[0-9a-f]{64}$/;
         function resolveRelayAccountScope(env = process.env) {
-            const pinned = String(env.GBOT_ACCOUNT_SCOPE ?? "").trim();
-            if (SCOPE.test(pinned)) return pinned;
+            const pinned = (0, _logins_js__rspack_import_6.SH)(env);
+            if (pinned) return pinned;
             const home = env.HOME || env.USERPROFILE;
             if (!home) return "";
-            try {
-                const choice = (0, _logins_js__rspack_import_5.cq)({
-                    env,
-                    home,
-                    platform: process.platform
-                });
-                return choice?.scope || "";
-            } catch (error) {
-                if (error?.code === "AMBIGUOUS_ENTRIES" || error?.code === "UNKNOWN_ACCOUNT" || error?.name === "GbotConfigError") {
-                    throw error;
-                }
-                return "";
-            }
+            const choice = (0, _logins_js__rspack_import_6.cq)({
+                env,
+                home,
+                platform: process.platform
+            });
+            return choice?.scope || "";
         }
         function relayProfile(env = process.env, accountScope = "") {
             const keys = [
@@ -28927,21 +28983,100 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "GROK_BOT_TEST",
                 "NODE_ENV",
                 "DBUS_SESSION_BUS_ADDRESS",
-                "DISPLAY",
-                "GBOT_CONFIG",
-                "GBOT_ACCOUNT",
-                "GBOT_ACCOUNT_SCOPE"
+                "DISPLAY"
             ];
             const scope = typeof accountScope === "string" ? accountScope : "";
             return digest(JSON.stringify([
-                (0, node_path__rspack_import_2.resolve)((0, _codex_bridge_js__rspack_import_3.ql)(env)),
-                (0, _app_session_js__rspack_import_4.dQ)((0, node_os__rspack_import_1.homedir)(), process.platform, env),
+                (0, node_path__rspack_import_3.resolve)((0, _codex_bridge_js__rspack_import_4.ql)(env)),
+                (0, _app_session_js__rspack_import_5.dQ)((0, node_os__rspack_import_2.homedir)(), process.platform, env),
                 scope,
                 ...keys.map((key)=>[
                         key,
                         env[key] ?? ""
                     ])
             ]));
+        }
+        const PROFILE_FILE = "profile";
+        const PROFILE_TEMP = /^profile\.\d+\.[0-9a-f]{8}\.tmp$/;
+        async function removeStaleProfileTemps(dir) {
+            let names;
+            try {
+                names = await (0, node_fs_promises__rspack_import_1.readdir)(dir);
+            } catch (error) {
+                if (error.code === "ENOENT") return;
+                throw error;
+            }
+            for (const name of names){
+                if (!PROFILE_TEMP.test(name)) continue;
+                const tempPath = (0, node_path__rspack_import_3.join)(dir, name);
+                let info;
+                try {
+                    info = await (0, node_fs_promises__rspack_import_1.lstat)(tempPath);
+                } catch (error) {
+                    if (error.code === "ENOENT") continue;
+                    throw error;
+                }
+                if (info.isDirectory()) continue;
+                await (0, node_fs_promises__rspack_import_1.unlink)(tempPath);
+            }
+        }
+        function assertProfileText(profile) {
+            if (typeof profile !== "string" || profile.length < 1 || profile.length > 512 || /[\0\r\n]/.test(profile)) {
+                throw new Error("Relay profile file is invalid");
+            }
+        }
+        async function profileFileStat(dir) {
+            const path = (0, node_path__rspack_import_3.join)(dir, PROFILE_FILE);
+            try {
+                return {
+                    path,
+                    stat: await (0, node_fs_promises__rspack_import_1.lstat)(path)
+                };
+            } catch (error) {
+                if (error.code === "ENOENT") return {
+                    path,
+                    stat: null
+                };
+                throw error;
+            }
+        }
+        function ownedProfileFile(stat) {
+            if (!stat) return;
+            if (!stat.isFile() || stat.isSymbolicLink() || process.getuid && stat.uid !== process.getuid() || stat.size > 1024) {
+                throw new Error("Relay profile file must be an owned regular file, never a symlink");
+            }
+        }
+        async function writeRelayProfileFile(dir, profile) {
+            assertProfileText(profile);
+            const { path, stat } = await profileFileStat(dir);
+            ownedProfileFile(stat);
+            await removeStaleProfileTemps(dir);
+            const temp = `${path}.${process.pid}.${(0, node_crypto__rspack_import_0.randomBytes)(4).toString("hex")}.tmp`;
+            const file = await (0, node_fs_promises__rspack_import_1.open)(temp, "wx", 384);
+            try {
+                await file.write(profile, 0, "utf8");
+                await file.sync();
+                await file.close();
+            } catch (error) {
+                await file.close().catch(()=>{});
+                await (0, node_fs_promises__rspack_import_1.unlink)(temp).catch(()=>{});
+                throw error;
+            }
+            try {
+                await (0, node_fs_promises__rspack_import_1.rename)(temp, path);
+            } catch (error) {
+                await (0, node_fs_promises__rspack_import_1.unlink)(temp).catch(()=>{});
+                throw error;
+            }
+            await (0, node_fs_promises__rspack_import_1.chmod)(path, 384);
+        }
+        async function readRelayProfileFile(dir) {
+            const { path, stat } = await profileFileStat(dir);
+            if (!stat) return null;
+            ownedProfileFile(stat);
+            const text = (await readFile(path, "utf8")).trim();
+            assertProfileText(text);
+            return text;
         }
         function relayLocation1({ env = process.env, stateDir, profile, accountScope } = {}) {
             const scope = accountScope !== undefined ? accountScope : resolveRelayAccountScope(env);
@@ -28952,19 +29087,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (pinned) effectiveEnv.GBOT_ACCOUNT_SCOPE = pinned;
             const resolvedProfile = profile ?? relayProfile(effectiveEnv, pinned);
             if (process.platform === "win32") throw Error("Codex relay requires Unix-domain sockets; Windows is unsupported.");
-            const dir = (0, node_path__rspack_import_2.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), ".grok-bot-cli", "relay", resolvedProfile.slice(0, 24)));
-            const socketDir = Buffer.byteLength((0, node_path__rspack_import_2.join)(dir, "control.sock")) < 100 ? dir : (0, node_path__rspack_import_2.join)("/tmp", `gbot-relay-${process.getuid()}`, digest(dir).slice(0, 24));
+            const dir = (0, node_path__rspack_import_3.resolve)(stateDir ?? env.GROK_BOT_RELAY_DIR ?? (0, node_path__rspack_import_3.join)((0, node_os__rspack_import_2.homedir)(), ".grok-bot-cli", "relay", resolvedProfile.slice(0, 24)));
+            const socketDir = Buffer.byteLength((0, node_path__rspack_import_3.join)(dir, "control.sock")) < 100 ? dir : (0, node_path__rspack_import_3.join)("/tmp", `gbot-relay-${process.getuid()}`, digest(dir).slice(0, 24));
             return {
                 stateDir: dir,
                 profile: resolvedProfile,
                 accountScope: pinned,
                 env: effectiveEnv,
                 socketDir,
-                socketPath: (0, node_path__rspack_import_2.join)(socketDir, "control.sock")
+                socketPath: (0, node_path__rspack_import_3.join)(socketDir, "control.sock")
             };
         }
         __webpack_require__.d(__webpack_exports__, {
-            hQ: ()=>relayLocation1
+            St: ()=>removeStaleProfileTemps,
+            hQ: ()=>relayLocation1,
+            kr: ()=>writeRelayProfileFile
         });
     },
     "./src/core/relay/records.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -29107,59 +29244,60 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var node_fs_promises__rspack_import_0 = __webpack_require__("node:fs/promises");
         var node_path__rspack_import_1 = __webpack_require__("node:path");
         var node_crypto__rspack_import_2 = __webpack_require__("node:crypto");
-        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
-        var _agent_bundle_runtime_state__rspack_import_4 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/65.js");
-        const relayId = zod__rspack_import_3.YjP().min(1).max(512);
-        const text = zod__rspack_import_3.YjP().refine((s)=>Buffer.byteLength(s) <= 65536, "text exceeds 64 KiB");
-        const reason = zod__rspack_import_3.YjP().max(1024).nullable();
-        const targetSchema = zod__rspack_import_3.rej({
+        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime_state__rspack_import_5 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/65.js");
+        var _stored_profile_js__rspack_import_3 = __webpack_require__("./src/core/relay/stored-profile.js");
+        const relayId = zod__rspack_import_4.YjP().min(1).max(512);
+        const text = zod__rspack_import_4.YjP().refine((s)=>Buffer.byteLength(s) <= 65536, "text exceeds 64 KiB");
+        const reason = zod__rspack_import_4.YjP().max(1024).nullable();
+        const targetSchema = zod__rspack_import_4.rej({
             id: relayId,
             cursor: relayId.nullable(),
             observedCursor: relayId.nullable().optional(),
-            baseline: zod__rspack_import_3.euz(true),
-            state: zod__rspack_import_3.k5n([
+            baseline: zod__rspack_import_4.euz(true),
+            state: zod__rspack_import_4.k5n([
                 "running",
                 "paused",
                 "backoff"
             ]),
             reason,
-            nextPoll: zod__rspack_import_3.aig().nonnegative(),
-            failures: zod__rspack_import_3.aig().int().nonnegative()
+            nextPoll: zod__rspack_import_4.aig().nonnegative(),
+            failures: zod__rspack_import_4.aig().int().nonnegative()
         });
-        const bindingSchema = zod__rspack_import_3.rej({
+        const bindingSchema = zod__rspack_import_4.rej({
             id: relayId,
             targetId: relayId,
             threadId: relayId,
-            expectedCwd: zod__rspack_import_3.YjP().max(4096),
-            busyPolicy: zod__rspack_import_3.k5n([
+            expectedCwd: zod__rspack_import_4.YjP().max(4096),
+            busyPolicy: zod__rspack_import_4.k5n([
                 "steer",
                 "reject"
             ]),
-            state: zod__rspack_import_3.k5n([
+            state: zod__rspack_import_4.k5n([
                 "running",
                 "stopped"
             ]),
-            createdAt: zod__rspack_import_3.aig(),
+            createdAt: zod__rspack_import_4.aig(),
             createdCursor: relayId.nullable(),
-            fingerprint: zod__rspack_import_3.YjP(),
-            accountScope: zod__rspack_import_3.YjP().regex(/^[0-9a-f]{64}$/).optional()
+            fingerprint: zod__rspack_import_4.YjP(),
+            accountScope: zod__rspack_import_4.YjP().regex(/^[0-9a-f]{64}$/).optional()
         });
-        const recordSchema = zod__rspack_import_3.rej({
+        const recordSchema = zod__rspack_import_4.rej({
             id: relayId,
-            kind: zod__rspack_import_3.k5n([
+            kind: zod__rspack_import_4.k5n([
                 "grok-request",
                 "grok-return",
                 "codex"
             ]),
             targetId: relayId,
             threadId: relayId,
-            expectedCwd: zod__rspack_import_3.YjP().max(4096),
-            busyPolicy: zod__rspack_import_3.k5n([
+            expectedCwd: zod__rspack_import_4.YjP().max(4096),
+            busyPolicy: zod__rspack_import_4.k5n([
                 "steer",
                 "reject"
             ]),
-            model: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/).optional(),
-            effort: zod__rspack_import_3.k5n([
+            model: zod__rspack_import_4.YjP().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/).optional(),
+            effort: zod__rspack_import_4.k5n([
                 "none",
                 "minimal",
                 "low",
@@ -29169,21 +29307,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             ]).optional(),
             bindingId: relayId.nullable(),
             text,
-            sourceIds: zod__rspack_import_3.YOg(relayId).max(200),
+            sourceIds: zod__rspack_import_4.YOg(relayId).max(200),
             parentId: relayId.nullable(),
-            returnToGrok: zod__rspack_import_3.zMY(),
+            returnToGrok: zod__rspack_import_4.zMY(),
             clientId: relayId,
             correlationId: relayId,
-            hop: zod__rspack_import_3.aig().int().nonnegative(),
-            maxHops: zod__rspack_import_3.aig().int().positive(),
-            submission: zod__rspack_import_3.k5n([
+            hop: zod__rspack_import_4.aig().int().nonnegative(),
+            maxHops: zod__rspack_import_4.aig().int().positive(),
+            submission: zod__rspack_import_4.k5n([
                 "prepared",
                 "sending",
                 "accepted",
                 "rejected",
                 "unknown"
             ]),
-            execution: zod__rspack_import_3.k5n([
+            execution: zod__rspack_import_4.k5n([
                 "pending",
                 "completed",
                 "failed",
@@ -29196,16 +29334,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             requestId: relayId.nullable(),
             messageId: relayId.nullable(),
             returnId: relayId.nullable(),
-            createdAt: zod__rspack_import_3.aig(),
-            fingerprint: zod__rspack_import_3.YjP()
+            createdAt: zod__rspack_import_4.aig(),
+            fingerprint: zod__rspack_import_4.YjP()
         });
         const sections = {
             targets: targetSchema,
             bindings: bindingSchema,
             records: recordSchema
         };
-        const operation = zod__rspack_import_3.gMt("section", Object.entries(sections).map(([section, schema])=>zod__rspack_import_3.rej({
-                section: zod__rspack_import_3.euz(section),
+        const operation = zod__rspack_import_4.gMt("section", Object.entries(sections).map(([section, schema])=>zod__rspack_import_4.rej({
+                section: zod__rspack_import_4.euz(section),
                 key: relayId,
                 value: schema
             })));
@@ -29214,7 +29352,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             bindings: 100,
             records: 1000,
             stateBytes: 8 * 1024 * 1024,
-            diskBytes: 64 * 1024 * 1024
+            diskBytes: _stored_profile_js__rspack_import_3.EY
         };
         async function protectRelayDirectory(dir, maxBytes = DEFAULTS.diskBytes) {
             await (0, node_fs_promises__rspack_import_0.mkdir)(dir, {
@@ -29229,7 +29367,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "relay.sqlite",
                 "relay.sqlite-wal",
                 "relay.sqlite-shm",
-                "worker.lock"
+                "worker.lock",
+                "profile"
             ]){
                 const path = (0, node_path__rspack_import_1.join)(dir, name);
                 let info;
@@ -29245,7 +29384,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 await (0, node_fs_promises__rspack_import_0.chmod)(path, 384);
             }
         }
-        async function openRelayState({ dir, profile, limits: overrides = {} }) {
+        async function openRelayState({ dir, profile, limits: overrides = {}, busyTimeoutMs } = {}) {
             const limits = {
                 ...DEFAULTS,
                 ...overrides
@@ -29254,12 +29393,19 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             relayId.parse(profile);
             dir = (0, node_path__rspack_import_1.resolve)(dir);
             await protectRelayDirectory(dir, limits.diskBytes);
-            const schema = zod__rspack_import_3.rej({
-                version: zod__rspack_import_3.euz(1),
+            const previous = await (0, _stored_profile_js__rspack_import_3.EN)(dir, {
+                maxBytes: limits.diskBytes,
+                ...busyTimeoutMs === undefined ? {} : {
+                    busyTimeoutMs
+                }
+            });
+            if (previous && previous !== profile) throw (0, _stored_profile_js__rspack_import_3.Xm)();
+            const schema = zod__rspack_import_4.rej({
+                version: zod__rspack_import_4.euz(1),
                 profile: relayId,
                 ...Object.fromEntries(Object.entries(sections).map(([name, s])=>[
                         name,
-                        zod__rspack_import_3.g1P(relayId, s)
+                        zod__rspack_import_4.g1P(relayId, s)
                     ]))
             }).superRefine((state, ctx)=>{
                 for (const section of Object.keys(sections)){
@@ -29273,7 +29419,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     });
                 }
             });
-            const definition = (0, _agent_bundle_runtime_state__rspack_import_4.bg)({
+            const definition = (0, _agent_bundle_runtime_state__rspack_import_5.bg)({
                 id: "grok-codex-relay",
                 version: 1,
                 lifetime: "workspace-durable",
@@ -29286,7 +29432,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     records: {}
                 },
                 events: {
-                    transition: zod__rspack_import_3.YOg(operation).min(1).max(250)
+                    transition: zod__rspack_import_4.YOg(operation).min(1).max(250)
                 },
                 budgets: {
                     maxStateBytes: limits.stateBytes,
@@ -29322,7 +29468,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             let snapshot = await store.read(), queue = Promise.resolve(), closed = false;
             if (snapshot.state.profile !== profile) {
                 await driver.close();
-                throw new Error("Relay profile mismatch");
+                throw (0, _stored_profile_js__rspack_import_3.Xm)();
             }
             return {
                 dir,
@@ -29373,18 +29519,140 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             pT: relayId
         });
     },
+    "./src/core/relay/stored-profile.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_fs_promises__rspack_import_0 = __webpack_require__("node:fs/promises");
+        var node_path__rspack_import_1 = __webpack_require__("node:path");
+        var node_url__rspack_import_2 = __webpack_require__("node:url");
+        const RELAY_DISK_BYTES = 64 * 1024 * 1024;
+        const STORAGE_NAMES = [
+            "relay.sqlite",
+            "relay.sqlite-wal",
+            "relay.sqlite-shm",
+            "worker.lock",
+            "profile"
+        ];
+        const SQLITE_BUSY = 5;
+        const SQLITE_LOCKED = 6;
+        class RelayStorageError extends Error {
+            constructor(code, message, options){
+                super(message, options);
+                this.name = "RelayStorageError";
+                this.code = code;
+            }
+        }
+        function relayProfileMismatchError1() {
+            return new Error("Relay profile mismatch. This directory was written for a different account or environment, or by an older version of gbot, and old bindings are not adopted. The stored profile includes the account, gateway and token settings, thread limits, and the DISPLAY or DBUS session, so a profile can change for reasons other than an upgrade. Run again with the same account and environment to keep this directory. If an older version wrote it, upgrade in this order: with the old version, run `gbot codex bridge stop --worker` before upgrading; that version's `bridge status` includes worker.pid. A pinned GROK_BOT_RELAY_DIR keeps the same socket path. If a still-running old worker is reached on that socket, it rejects this hello and does not stop. Stop the process that has the directory's control.sock or worker.lock open (for example `lsof -t <dir>/worker.lock`), then move or rename the directory, or choose a new GROK_BOT_RELAY_DIR, and bind again. Only the default directory's socket path changes, because it is derived from the profile hash; its old state stays in ~/.grok-bot-cli/relay/<old hash>.");
+        }
+        function sqlitePrimaryCode(error) {
+            const errcode = error?.errcode;
+            return typeof errcode === "number" ? errcode & 0xff : undefined;
+        }
+        function asStorageError(error) {
+            if (error instanceof RelayStorageError) return error;
+            const code = sqlitePrimaryCode(error);
+            const message = String(error?.message ?? "");
+            if (code === SQLITE_BUSY || code === SQLITE_LOCKED || /database is locked|sqlite_busy|sqlite_locked/i.test(message)) {
+                return new RelayStorageError("locked", "Relay state is locked", {
+                    cause: error
+                });
+            }
+            if (code !== undefined || typeof error?.code === "string" && error.code.startsWith("ERR_SQLITE")) {
+                return new RelayStorageError("corrupt", "Relay state is corrupt", {
+                    cause: error
+                });
+            }
+            return error;
+        }
+        async function fileInfo(path) {
+            try {
+                return await (0, node_fs_promises__rspack_import_0.lstat)(path);
+            } catch (error) {
+                if (error.code === "ENOENT") return null;
+                throw error;
+            }
+        }
+        async function assertStorageBudget(dir, maxBytes) {
+            let total = 0;
+            for (const name of STORAGE_NAMES){
+                const info = await fileInfo((0, node_path__rspack_import_1.join)(dir, name));
+                if (!info) continue;
+                if (!info.isFile() || info.isSymbolicLink()) {
+                    throw new RelayStorageError("corrupt", "Relay storage must be an owned regular file, never a symlink");
+                }
+                total += info.size;
+                if (total > maxBytes) {
+                    throw new RelayStorageError("capacity", "Relay storage capacity exceeded");
+                }
+            }
+        }
+        async function readStoredRelayProfile(dir, { busyTimeoutMs = 5000, maxBytes = RELAY_DISK_BYTES } = {}) {
+            if (!Number.isInteger(busyTimeoutMs) || busyTimeoutMs < 1) {
+                throw new Error("Invalid relay busy timeout");
+            }
+            if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+                throw new RelayStorageError("capacity", "Relay storage capacity exceeded");
+            }
+            const info = await fileInfo((0, node_path__rspack_import_1.join)(dir, "relay.sqlite"));
+            if (info && (!info.isFile() || info.isSymbolicLink())) {
+                throw new RelayStorageError("corrupt", "Relay storage must be an owned regular file, never a symlink");
+            }
+            await assertStorageBudget(dir, maxBytes);
+            if (!info) return null;
+            let db;
+            try {
+                const { DatabaseSync } = await import("node:sqlite");
+                const wal = await fileInfo((0, node_path__rspack_import_1.join)(dir, "relay.sqlite-wal"));
+                const location = wal ? (0, node_path__rspack_import_1.join)(dir, "relay.sqlite") : `${(0, node_url__rspack_import_2.pathToFileURL)((0, node_path__rspack_import_1.join)(dir, "relay.sqlite")).href}?immutable=1`;
+                db = new DatabaseSync(location, {
+                    readOnly: true,
+                    timeout: busyTimeoutMs
+                });
+                const row = db.prepare("SELECT state FROM agent_state_head WHERE id = 1").get();
+                if (!row || typeof row.state !== "string") {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt");
+                }
+                let parsed;
+                try {
+                    parsed = JSON.parse(row.state);
+                } catch (cause) {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt", {
+                        cause
+                    });
+                }
+                const profile = parsed?.profile;
+                if (typeof profile !== "string" || profile.length < 1) {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt");
+                }
+                return profile;
+            } catch (error) {
+                throw asStorageError(error);
+            } finally{
+                try {
+                    db?.close();
+                } catch  {}
+            }
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            EN: ()=>readStoredRelayProfile,
+            Xm: ()=>relayProfileMismatchError1
+        }, {
+            EY: RELAY_DISK_BYTES
+        });
+    },
     "./src/core/relay/worker.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_string_decoder__rspack_import_0 = __webpack_require__("node:string_decoder");
         var node_net__rspack_import_1 = __webpack_require__("node:net");
         var node_fs_promises__rspack_import_2 = __webpack_require__("node:fs/promises");
         var _engine_js__rspack_import_3 = __webpack_require__("./src/core/relay/engine.js");
         var _profile_js__rspack_import_4 = __webpack_require__("./src/core/relay/profile.js");
-        var _ownership_js__rspack_import_5 = __webpack_require__("./src/core/relay/ownership.js");
-        var _control_js__rspack_import_6 = __webpack_require__("./src/core/relay/control.js");
-        var _url_policy_js__rspack_import_7 = __webpack_require__("./src/core/url-policy.js");
+        var _stored_profile_js__rspack_import_5 = __webpack_require__("./src/core/relay/stored-profile.js");
+        var _ownership_js__rspack_import_6 = __webpack_require__("./src/core/relay/ownership.js");
+        var _control_js__rspack_import_7 = __webpack_require__("./src/core/relay/control.js");
+        var _url_policy_js__rspack_import_8 = __webpack_require__("./src/core/url-policy.js");
         async function runRelayWorker(options = {}) {
             const location = (0, _profile_js__rspack_import_4.hQ)(options);
-            const release = await (0, _ownership_js__rspack_import_5.x)(location);
+            const release = await (0, _ownership_js__rspack_import_6.x)(location);
+            await (0, _profile_js__rspack_import_4.St)(location.stateDir);
             let engine, server, timer, closing = false, inFlight = 0, ownsSocket = false;
             const clients = new Set();
             let done;
@@ -29409,6 +29677,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     env: location.env,
                     accountScope: location.accountScope || undefined
                 });
+                await (0, _profile_js__rspack_import_4.kr)(location.stateDir, location.profile);
                 const health = ()=>({
                         state: closing ? "stopped" : "running",
                         pid: process.pid,
@@ -29418,7 +29687,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     });
                 async function dispatch(request) {
                     if (request.version !== 1) throw Error("Relay protocol mismatch");
-                    if (request.profile !== location.profile) throw Error("Relay profile mismatch");
+                    if (request.profile !== location.profile) throw (0, _stored_profile_js__rspack_import_5.Xm)();
                     if (typeof request.requestId !== "string" || request.requestId.length < 1 || request.requestId.length > 128) throw Error("Invalid relay request identity");
                     const input = request.input;
                     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Invalid relay input");
@@ -29495,7 +29764,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     socket.on("data", async (chunk)=>{
                         if (received) return;
                         bytes += chunk.length;
-                        if (bytes > _control_js__rspack_import_6.Q) {
+                        if (bytes > _control_js__rspack_import_7.Q) {
                             socket.destroy();
                             return;
                         }
@@ -29513,7 +29782,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             };
                         } catch (error) {
                             reply = {
-                                error: (0, _url_policy_js__rspack_import_7.fp)(String(error.message)).slice(0, 2048)
+                                error: (0, _url_policy_js__rspack_import_8.fp)(String(error.message)).slice(0, 2048)
                             };
                         }
                         const out = JSON.stringify({
@@ -29522,7 +29791,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             requestId: request?.requestId,
                             ...reply
                         }) + "\n";
-                        if (Buffer.byteLength(out) > _control_js__rspack_import_6.Q) socket.end(JSON.stringify({
+                        if (Buffer.byteLength(out) > _control_js__rspack_import_7.Q) socket.end(JSON.stringify({
                             version: 1,
                             profile: location.profile,
                             requestId: request?.requestId,

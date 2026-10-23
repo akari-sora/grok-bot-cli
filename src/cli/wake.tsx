@@ -121,7 +121,7 @@ async function wake(input: z.infer<typeof inputSchema>, signal: AbortSignal): Pr
       const selection = loadGrokBotGatewaySelection({ account: choice.id, ...secretStore() });
       if (selection) {
         label = printable(String(selection.label));
-        scope = selection.session.accountScope;
+        scope = selection.session.accountScope ?? scope;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not read the saved Grok Bot login.';

@@ -2,6 +2,7 @@ import { StringDecoder } from "node:string_decoder";
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
 import { relayLocation } from "./profile.js";
+import { relayProfileMismatchError } from "./stored-profile.js";
 export const RELAY_PROTOCOL = 1;
 export const CONTROL_BYTES = 1024 * 1024;
 export const CONTROL_TIMEOUT = 45000;
@@ -65,8 +66,15 @@ export function relayRequest(
         const reply = JSON.parse(buffer.slice(0, end));
         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId)
           throw Error("Relay protocol identity mismatch");
-        if (reply.error) throw Error(reply.error);
-        if (reply.profile !== profile) throw Error("Relay profile mismatch");
+        if (reply.error) {
+          // An older worker replies with only this sentence. The calling
+          // process still has to show the upgrade steps.
+          if (typeof reply.error === "string" && reply.error.startsWith("Relay profile mismatch")) {
+            throw relayProfileMismatchError();
+          }
+          throw Error(reply.error);
+        }
+        if (reply.profile !== profile) throw relayProfileMismatchError();
         finish(null, reply.result);
       } catch (error) {
         finish(error);

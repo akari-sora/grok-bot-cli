@@ -75,6 +75,16 @@ test("install-fork.ps1 names the same steps and refuses Administrator without -A
   assert.match(text, /\[guid\]::NewGuid\(\)/);
   assert.match(text, /npm pack --pack-destination \$packDir/);
   assert.match(text, /Remove-Item -LiteralPath \$packDir -Recurse -Force/);
+  assert.doesNotMatch(text, /Write-Error/);
+  assert.match(text, /\[Console\]::Error\.WriteLine/);
+  assert.doesNotMatch(text, /checkout --detach --/);
+  assert.match(text, /checkout --detach \$sha/);
+  assert.match(text, /sign in to /);
+  assert.match(text, /Test-ReportedMissing/);
+  assert.match(text, /Get-Content -Raw -LiteralPath/);
+  assert.doesNotMatch(text, /Get-Content\b[^\n]*\s-Path\b/);
+  assert.match(text, /\$ErrorActionPreference = "Continue"\r?\n\s*gbot config import \$Config 2>&1/);
+  assert.match(text, /\$sha -cnotmatch '\^\[0-9a-f\]\{40\}\(\[0-9a-f\]\{24\}\)\?\$'/);
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -153,6 +163,7 @@ test("install-fork.sh installs from a private pack directory twice and propagate
   fakeBin(bin, "git", `
 echo "git $*" >> "${log}"
 case " $* " in
+  *" checkout --detach -- "*) exit 128 ;;
   *" status --porcelain "*)
     if [ -e "${join(cache, "pack.txt")}" ] || find "${cache}" -maxdepth 1 -name '*.tgz' -print -quit | grep -q .; then
       echo "?? installer-artifact"
@@ -189,6 +200,8 @@ exit 0
     assert.match(packed.stdout, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/);
   }
   const called = readFileSync(log, "utf8");
+  assert.match(called, /checkout --detach /);
+  assert.doesNotMatch(called, /checkout --detach --/);
   assert.match(called, /npm pack --pack-destination \/.*grok-bot-cli-pack\./);
   assert.match(called, /npm install -g \/.*grok-bot-cli-pack\..*\/grok-bot-cli-9\.9\.9\.tgz/);
   assert.equal(readFileSync(join(caller, "dirty.txt"), "utf8"), "keep dirty");
@@ -213,6 +226,7 @@ exit 0
   fakeBin(importBin, "git", `
 echo "git $*" >> "${importLog}"
 case " $* " in
+  *" checkout --detach -- "*) exit 128 ;;
   *" rev-parse "*) echo "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
 esac
 exit 0
@@ -276,4 +290,231 @@ exit 0
   assert.match(result.stderr, /cache is dirty; refusing to overwrite/);
   assert.equal(readFileSync(legacy, "utf8"), "preserve these bytes");
   assert.doesNotMatch(readFileSync(log, "utf8"), /^(npm|gbot) /m);
+});
+
+test("install-fork.sh exits 3 when import reports a missing login and still checks the others", {
+  skip: process.platform === "win32" ? "POSIX shell installer test" : false,
+}, () => {
+  const bin = mkdtempSync(join(tmpdir(), "gbot-install-exit3-"));
+  const log = join(bin, "called");
+  const cache = join(bin, "cache", "grok-bot-cli", "src");
+  mkdirSync(join(cache, ".git"), { recursive: true });
+  fakeBin(bin, "git", `
+echo "git $*" >> "${log}"
+case " $* " in
+  *" checkout --detach -- "*) exit 128 ;;
+  *" rev-parse "*) echo "cccccccccccccccccccccccccccccccccccccccc" ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "npm", `
+echo "npm $*" >> "${log}"
+case "$1" in
+  pack)
+    destination=.; shift
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--pack-destination" ]; then destination=$2; shift 2; else shift; fi
+    done
+    echo "grok-bot-cli-9.9.9.tgz"; printf packed > "$destination/grok-bot-cli-9.9.9.tgz"
+    ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "gbot", `
+echo "gbot $*" >> "${log}"
+if [ "$1" = "config" ]; then
+  echo "sign in to work@example.com in the Grok Bot app"
+  exit 3
+fi
+if [ "$1" = "wake" ]; then
+  if [ "$4" = "work" ]; then echo "wake checked work" >> "${log}"; exit 2; fi
+  echo "wake checked $4" >> "${log}"
+  exit 0
+fi
+exit 0
+`);
+  const config = join(bin, "export.json");
+  writeFileSync(config, JSON.stringify({
+    version: 1,
+    default: null,
+    aliases: {
+      work: { scope: "ab".repeat(32), email: "work@example.com" },
+      home: { scope: "cd".repeat(32), email: "home@example.com" },
+    },
+  }));
+  const result = spawnSync("sh", [sh, "--config", config, "v1.2"], {
+    encoding: "utf8",
+    env: installEnv(bin),
+  });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  const called = readFileSync(log, "utf8");
+  assert.match(called, /wake checked home/);
+  assert.doesNotMatch(called, /wake checked work/);
+  assert.match(result.stdout, /some imported logins are not signed in/);
+});
+
+test("install-fork.sh exits 3 when the missing-login line is only on stderr", {
+  skip: process.platform === "win32" ? "POSIX shell installer test" : false,
+}, () => {
+  const bin = mkdtempSync(join(tmpdir(), "gbot-install-exit3-err-"));
+  const log = join(bin, "called");
+  const cache = join(bin, "cache", "grok-bot-cli", "src");
+  mkdirSync(join(cache, ".git"), { recursive: true });
+  fakeBin(bin, "git", `
+echo "git $*" >> "${log}"
+case " $* " in
+  *" rev-parse "*) echo "dddddddddddddddddddddddddddddddddddddddd" ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "npm", `
+echo "npm $*" >> "${log}"
+case "$1" in
+  pack)
+    destination=.; shift
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--pack-destination" ]; then destination=$2; shift 2; else shift; fi
+    done
+    echo "grok-bot-cli-9.9.9.tgz"; printf packed > "$destination/grok-bot-cli-9.9.9.tgz"
+    ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "gbot", `
+echo "gbot $*" >> "${log}"
+if [ "$1" = "config" ]; then
+  echo "sign in to work@example.com in the Grok Bot app" >&2
+  exit 3
+fi
+if [ "$1" = "wake" ]; then
+  if [ "$4" = "work" ]; then echo "wake checked work" >> "${log}"; exit 2; fi
+  echo "wake checked $4" >> "${log}"
+  exit 0
+fi
+exit 0
+`);
+  const config = join(bin, "export.json");
+  writeFileSync(config, JSON.stringify({
+    version: 1,
+    default: null,
+    aliases: {
+      work: { scope: "ab".repeat(32), email: "work@example.com" },
+      home: { scope: "cd".repeat(32), email: "home@example.com" },
+    },
+  }));
+  const result = spawnSync("sh", [sh, "--config", config, "v1.2"], {
+    encoding: "utf8",
+    env: installEnv(bin),
+  });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  const called = readFileSync(log, "utf8");
+  assert.match(called, /wake checked home/);
+  assert.doesNotMatch(called, /wake checked work/);
+});
+
+test("install-fork.sh checks out a branch ref and a tag ref with real git", {
+  skip: process.platform === "win32" ? "POSIX shell installer test" : false,
+}, () => {
+  const gitBin = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+  assert.ok(gitBin, "real git is required");
+  const bin = mkdtempSync(join(tmpdir(), "gbot-install-realgit-"));
+  const seed = join(bin, "seed");
+  const remote = join(bin, "origin.git");
+  const log = join(bin, "called");
+  const gitLog = join(bin, "git.log");
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Synthetic",
+    GIT_AUTHOR_EMAIL: "synthetic@example.com",
+    GIT_COMMITTER_NAME: "Synthetic",
+    GIT_COMMITTER_EMAIL: "synthetic@example.com",
+  };
+  const git = (args) => {
+    const result = spawnSync(gitBin, args, { encoding: "utf8", env: gitEnv });
+    assert.equal(result.status, 0, `${args.join(" ")}\n${result.stderr}`);
+    return result;
+  };
+  git(["init", "-b", "main", seed]);
+  writeFileSync(join(seed, "README"), "synthetic fixture\n");
+  git(["-C", seed, "add", "README"]);
+  git(["-C", seed, "-c", "commit.gpgsign=false", "commit", "-m", "seed"]);
+  git(["-C", seed, "tag", "vSynthetic"]);
+  const tagSha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
+  git(["-C", seed, "checkout", "-b", "relay-line"]);
+  writeFileSync(join(seed, "BRANCH"), "branch fixture\n");
+  git(["-C", seed, "add", "BRANCH"]);
+  git(["-C", seed, "-c", "commit.gpgsign=false", "commit", "-m", "branch"]);
+  const branchSha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
+  assert.notEqual(branchSha, tagSha);
+  assert.match(branchSha, /^[0-9a-f]{40}$/);
+  git(["clone", "--bare", seed, remote]);
+  const fileRemote = `file://${remote}`;
+  writeFileSync(join(bin, "git-rewrite.cjs"), `
+const { appendFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const from = "https://gitlab.com/aa22396584/grok-bot-cli.git";
+const args = process.argv.slice(2).map((arg) => arg === from ? process.env.GBOT_INSTALL_REMOTE : arg);
+appendFileSync(process.env.GBOT_GIT_LOG, args.join(" ") + "\\n");
+const result = spawnSync(process.env.GBOT_REAL_GIT, args, { stdio: "inherit" });
+process.exit(result.status === null ? 1 : result.status);
+`);
+  fakeBin(bin, "git", `exec node "${join(bin, "git-rewrite.cjs")}" "$@"`);
+  fakeBin(bin, "npm", `
+echo "npm $*" >> "${log}"
+case "$1" in
+  pack)
+    destination=.; shift
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--pack-destination" ]; then destination=$2; shift 2; else shift; fi
+    done
+    echo "grok-bot-cli-9.9.9.tgz"; printf packed > "$destination/grok-bot-cli-9.9.9.tgz"
+    ;;
+esac
+exit 0
+`);
+  fakeBin(bin, "gbot", `echo "gbot $*" >> "${log}"\nexit 0`);
+  const installEnvForGit = installEnv(bin, {
+    GBOT_REAL_GIT: gitBin,
+    GBOT_INSTALL_REMOTE: fileRemote,
+    GBOT_GIT_LOG: gitLog,
+  });
+  const branch = spawnSync("sh", [sh, "relay-line"], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(branch.status, 0, branch.stderr + branch.stdout);
+  assert.match(readFileSync(log, "utf8"), /^npm ci$/m);
+  const cache = join(bin, "cache", "grok-bot-cli", "src");
+  const branchHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(branchHead.stdout.trim(), branchSha);
+  assert.match(branch.stdout, new RegExp(`resolved commit ${branchSha}`));
+  const tagged = spawnSync("sh", [sh, "vSynthetic"], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(tagged.status, 0, tagged.stderr + tagged.stdout);
+  const tagHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(tagHead.stdout.trim(), tagSha);
+  assert.match(tagged.stdout, new RegExp(`resolved commit ${tagSha}`));
+  const recorded = readFileSync(gitLog, "utf8");
+  assert.match(recorded, /rev-parse --verify --quiet refs\/remotes\/origin\/relay-line\^\{commit\}/);
+  assert.match(recorded, /rev-parse --verify --quiet refs\/tags\/vSynthetic\^\{commit\}/);
+  assert.match(recorded, new RegExp(`checkout --detach ${branchSha}`));
+  assert.match(recorded, new RegExp(`checkout --detach ${tagSha}`));
+  assert.doesNotMatch(recorded, /checkout --detach --/);
+  git(["-C", seed, "checkout", "main"]);
+  writeFileSync(join(seed, "SHA"), "raw sha fixture\n");
+  git(["-C", seed, "add", "SHA"]);
+  git(["-C", seed, "-c", "commit.gpgsign=false", "commit", "-m", "raw sha"]);
+  const rawSha = git(["-C", seed, "rev-parse", "HEAD"]).stdout.trim();
+  assert.notEqual(rawSha, tagSha);
+  assert.notEqual(rawSha, branchSha);
+  git(["-C", seed, "push", remote, "HEAD:refs/heads/main"]);
+  git(["-C", remote, "config", "uploadpack.allowReachableSHA1InWant", "true"]);
+  const beforeSha = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(beforeSha.stdout.trim(), tagSha);
+  writeFileSync(gitLog, "");
+  const shaRef = spawnSync("sh", [sh, rawSha], { encoding: "utf8", env: installEnvForGit });
+  assert.equal(shaRef.status, 0, shaRef.stderr + shaRef.stdout);
+  assert.match(shaRef.stdout, new RegExp(`resolved commit ${rawSha}`));
+  const shaHead = spawnSync(gitBin, ["-C", cache, "rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(shaHead.stdout.trim(), rawSha);
+  const recordedSha = readFileSync(gitLog, "utf8");
+  assert.match(recordedSha, new RegExp(`fetch origin -- ${rawSha}`));
+  assert.match(recordedSha, new RegExp(`checkout --detach ${rawSha}`));
+  assert.doesNotMatch(recordedSha, /checkout --detach --/);
 });

@@ -4,7 +4,7 @@ import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
 import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
 import { ensureSandboxHeaders, headersFromEnsureSandbox, headersFromEnv, mergeGatewayHeaders, normalizeHeaderMap, requestHeaders } from "./headers.js";
 import { hasGrokBotGatewaySession, loadGrokBotGatewaySession } from "./app-session.js";
-import { hasSavedAccessToken, resolveGrokBotLogin } from "./logins.js";
+import { hasSavedAccessToken, resolveGrokBotLogin, workerAccountScope } from "./logins.js";
 import { secretStoreOptions } from "./secret-store.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
 import { assertAllowedCredentialUrl, redactKnownSecrets, redactSecrets } from "./url-policy.js";
@@ -124,15 +124,17 @@ function descriptorSession(account) {
   return loaded ? sessionFields(loaded) : null;
 }
 
-// Read, decrypt, or expiry of an implicit app login may fall back to CURSOR_ACCESS_TOKEN.
-// A named selector, a host-policy rejection, and any other backend error must not.
+// An implicit app login may fall back to CURSOR_ACCESS_TOKEN only for the read, decrypt,
+// and expiry failures listed here. A named selector, a host-policy rejection, an unsupported
+// descriptor version, and any other backend error fail closed and must not switch accounts.
+// UNSUPPORTED_VERSION is intentionally absent: a descriptor this build cannot read does not
+// fall back, including when the login was chosen implicitly.
 const IMPLICIT_AUTH_FAILURES = new Set([
   "EXPIRED",
   "DECRYPT_FAILED",
   "NOT_JWT",
   "NO_ACCOUNT",
   "NO_SECRETS_FILE",
-  "UNSUPPORTED_VERSION",
   "SCOPE_MISMATCH",
   "UNUSABLE_SESSION",
   "MISSING_ENCRYPTED_PAYLOAD",
@@ -174,6 +176,7 @@ function scrubOutbound(error, secrets) {
 }
 
 const sessionsByScope = new Map();
+const savedLoginSessions = new WeakSet();
 
 function sessionCacheKey(scope) {
   return [
@@ -187,9 +190,14 @@ function sessionCacheKey(scope) {
 
 function rememberSession(session) {
   if (session?.accountScope && /^[0-9a-f]{64}$/.test(session.accountScope)) {
+    savedLoginSessions.add(session);
     sessionsByScope.set(sessionCacheKey(session.accountScope), session);
   }
   return session;
+}
+
+function forgetSession(scope) {
+  if (scope && /^[0-9a-f]{64}$/.test(scope)) sessionsByScope.delete(sessionCacheKey(scope));
 }
 
 function cachedSession(scope) {
@@ -235,11 +243,15 @@ async function sessionFromSavedLogin(scope, signal) {
   });
 }
 
-// Precedence: gateway URL+token override, then --account, GBOT_ACCOUNT, the config default,
-// then the descriptor single entry or its active entry. A saved-only login is used only when
-// it is selected or it is the only login. CURSOR_ACCESS_TOKEN is only for no app login, or an
-// implicit login that cannot be read, decrypted, or is expired. A selector that misses, an
-// unusable selected login, a host-policy rejection, and any other backend error do not switch accounts.
+// Precedence: gateway URL+token override, then --account, GBOT_ACCOUNT_SCOPE, GBOT_ACCOUNT,
+// the config default, then the descriptor single entry or its active entry. An invalid
+// GBOT_ACCOUNT_SCOPE throws before that override is read. A valid or empty pin does not:
+// both gateway override variables still win. A saved-only login
+// is used only when it is selected or it is the only login. Descriptor sessions are read again
+// on every connect. Only a session built from EnsureSandBox is cached by scope. CURSOR_ACCESS_TOKEN
+// is only for no app login, or an implicit login that cannot be read, decrypted, or is expired.
+// A selector that misses, an unsupported descriptor version, an unusable selected login, a
+// host-policy rejection, and any other backend error do not switch accounts.
 async function sessionFromApp(account, signal) {
   let choice;
   try {
@@ -247,13 +259,9 @@ async function sessionFromApp(account, signal) {
   } catch (error) {
     throw scrubOutbound(toGatewayError(error), []);
   }
-  if (choice?.scope) {
-    const cached = cachedSession(choice.scope);
-    if (cached) return cached;
-  }
   if (!choice) {
     try {
-      return rememberSession(descriptorSession(account));
+      return descriptorSession(account);
     } catch (error) {
       if (implicitAuthFallback(error)) return null;
       throw scrubOutbound(toGatewayError(error), []);
@@ -265,8 +273,9 @@ async function sessionFromApp(account, signal) {
       if (!session) {
         throw new GatewayError("The selected Grok Bot login could not be read.", { code: "UNUSABLE_SESSION" });
       }
+      // choice.scope is set only when the descriptor's own scope or email proves the account.
       if (choice.scope && !session.accountScope) session = { ...session, accountScope: choice.scope };
-      return rememberSession(session);
+      return session;
     }
     return await sessionFromSavedLogin(choice.scope, signal);
   } catch (error) {
@@ -588,12 +597,13 @@ export async function wakeSandbox(accessToken, { signal, timeoutMs, intervalMs, 
 
 export async function connectGateway({ signal, account } = {}) {
   assertGatewayActive(signal);
+  // Invalid GBOT_ACCOUNT_SCOPE fails closed before the override. A valid pin still loses to it.
+  const pinned = workerAccountScope();
   const override = gatewayOverride();
   if (override) return override;
-  const pinned = String(process.env.GBOT_ACCOUNT_SCOPE ?? "").trim();
   const selected = typeof account === "string" && account.trim()
     ? account.trim()
-    : (/^[0-9a-f]{64}$/.test(pinned) ? pinned : undefined);
+    : (pinned || undefined);
   const fromApp = await sessionFromApp(selected, signal);
   if (fromApp) return fromApp;
   const token = accessTokenFromEnv();
@@ -789,10 +799,35 @@ function canRetryAsleep(method, error, session, options) {
   return true;
 }
 
+function staleSavedSession(error) {
+  return error instanceof GatewayError && (error.kind === "auth" || error.kind === "routing");
+}
+
 async function gatewayCall(session, method, body = {}, options = {}) {
   try {
     return await performGatewayCall(session, method, body, options);
   } catch (error) {
+    if (
+      !options.refreshedSession
+      && savedLoginSessions.has(session)
+      && staleSavedSession(error)
+    ) {
+      forgetSession(session.accountScope);
+      let fresh;
+      try {
+        fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
+      } catch (rebuildError) {
+        // The gateway already refused this call. A failed rebuild must not replace that
+        // rejection, or sendPrompt records a definite miss as delivery unknown.
+        if (error && typeof error === "object" && error.cause === undefined && rebuildError instanceof Error) {
+          error.cause = rebuildError;
+        }
+        throw error;
+      }
+      applySandbox(session, fresh);
+      rememberSession(session);
+      return await gatewayCall(session, method, body, { ...options, refreshedSession: true });
+    }
     if (!canRetryAsleep(method, error, session, options)) throw error;
     let sandbox;
     try {

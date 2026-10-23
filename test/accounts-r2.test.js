@@ -7,20 +7,30 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { grokBotGatewayDescriptorPath, loadGrokBotGatewaySelection } from "../src/core/app-session.js";
-import { connectGateway, listAgents } from "../src/core/gateway.js";
+import { outcomeFromError } from "../src/core/codex/contract.js";
+import { connectGateway, listAgents, sendPrompt } from "../src/core/gateway.js";
 import {
   importAccountConfig,
   readGbotConfig,
   writeGbotConfig,
 } from "../src/core/gbot-config.js";
-import {
+import * as logins from "../src/core/logins.js";
+
+const {
   defineAlias,
   formatLoginCatalog,
   listLoginCatalog,
   resolveGrokBotLogin,
   setDefaultAccount,
-} from "../src/core/logins.js";
-import { relayLocation, relayProfile } from "../src/core/relay/profile.js";
+} = logins;
+
+function workerAccountScope(env) {
+  if (typeof logins.workerAccountScope !== "function") {
+    throw new Error("workerAccountScope is not exported");
+  }
+  return logins.workerAccountScope(env);
+}
+import { relayLocation, relayProfile, resolveRelayAccountScope } from "../src/core/relay/profile.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const TOKEN_MARK = "synthetic-r2-token-do-not-leak";
@@ -45,6 +55,17 @@ function encrypt(text, password = "demo-password") {
   const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
   const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
   return Buffer.concat([Buffer.from("v10"), cipher.update(text, "utf8"), cipher.final()]).toString("base64");
+}
+
+function encryptForPlatform(text, platform = process.platform, password = "demo-password") {
+  const linux = platform === "linux";
+  const key = crypto.pbkdf2Sync(password, "saltysalt", linux ? 1 : 1003, 16, "sha1");
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
+  return Buffer.concat([
+    Buffer.from(linux ? "v11" : "v10"),
+    cipher.update(text, "utf8"),
+    cipher.final(),
+  ]).toString("base64");
 }
 
 function homeWith({ secrets, descriptor } = {}, platform = "darwin") {
@@ -211,6 +232,10 @@ test("two accounts in one process each hit their own gateway", async (t) => {
     await listAgents(second).catch(() => {});
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1401/")));
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1402/")));
+    assert.equal(
+      relayProfile({ GROK_BOT_TEST: "1", GBOT_ACCOUNT: "work", GBOT_CONFIG: "/tmp/a.json" }, scopeA),
+      relayProfile({ GROK_BOT_TEST: "1", GBOT_ACCOUNT: "a@example.com", GBOT_CONFIG: "/tmp/b.json" }, scopeA),
+    );
     assert.notEqual(relayProfile({ GROK_BOT_TEST: "1" }, scopeA), relayProfile({ GROK_BOT_TEST: "1" }, scopeB));
     process.env.GBOT_ACCOUNT_SCOPE = scopeA;
     const pinned = await connectGateway();
@@ -219,13 +244,14 @@ test("two accounts in one process each hit their own gateway", async (t) => {
   });
 });
 
-test("a relay binding stays on the account that created it", { skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false }, async (t) => {
+test("a relay binding records the scope relayLocation resolved", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
   const { fakeAppServer } = await import("./helpers/codex-server.js");
   const { openRelayEngine } = await import("../src/core/relay/engine.js");
   const { mkdtemp, rm } = await import("node:fs/promises");
-  const scopeA = "a".repeat(64);
-  const scopeB = "b".repeat(64);
-  const dir = await mkdtemp(join(tmpdir(), "relay-r2-"));
+  const scope = "a".repeat(64);
+  const dir = await mkdtemp(join(tmpdir(), "relay-r3-scope-"));
   const fake = await fakeAppServer({
     initialize: (_, ok) => ok({}),
     "thread/resume": (p, ok) => ok({
@@ -240,43 +266,134 @@ test("a relay binding stays on the account that created it", { skip: process.pla
     tail: async () => ({ entries: [] }),
     send: async () => ({ delivery: "unknown" }),
   };
-  const env = { CODEX_HOME: fake.home, GROK_BOT_TEST: "1" };
-  const engineA = await openRelayEngine({
-    stateDir: dir,
-    profile: "fixture-a",
-    env,
+  const env = {
+    HOME: dir,
+    USERPROFILE: dir,
+    CODEX_HOME: fake.home,
+    GROK_BOT_TEST: "1",
+    GBOT_ACCOUNT_SCOPE: scope,
+    GROK_BOT_RELAY_DIR: dir,
+  };
+  const located = relayLocation({ env });
+  const engine = await openRelayEngine({
+    stateDir: located.stateDir,
+    profile: located.profile,
+    env: located.env,
+    accountScope: located.accountScope,
     gateway,
-    accountScope: scopeA,
     clock: () => 1000,
   });
   t.after(async () => {
-    await engineA.close().catch(() => {});
+    await engine.close().catch(() => {});
     await fake.close();
     await rm(dir, { recursive: true, force: true });
   });
-  const binding = await engineA.startBinding({
+  const binding = await engine.startBinding({
     grokTarget: "target",
     codexThreadId: "thread",
-    requestId: "link-a",
+    requestId: "link-scope",
   });
-  assert.equal(binding.accountScope, scopeA);
-  await engineA.close();
-  const engineB = await openRelayEngine({
+  assert.equal(binding.accountScope, scope);
+  const status = await engine.tick();
+  assert.equal(status.state, "running");
+  assert.equal(status.reason, null);
+});
+
+test("an old-format pinned relay directory is Relay profile mismatch, not a paused adoption", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
+  const { fakeAppServer } = await import("./helpers/codex-server.js");
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const scope = "c".repeat(64);
+  const other = "d".repeat(64);
+  const dir = await mkdtemp(join(tmpdir(), "relay-r3-old-"));
+  const fake = await fakeAppServer({
+    initialize: (_, ok) => ok({}),
+    "thread/resume": (p, ok) => ok({
+      thread: { id: p.threadId, cwd: process.cwd(), status: { type: "idle" } },
+      cwd: process.cwd(),
+    }),
+    "thread/turns/list": (_, ok) => ok({ data: [], nextCursor: null }),
+    "thread/items/list": (_, ok) => ok({ data: [], nextCursor: null }),
+  });
+  const gateway = {
+    resolve: async (ref) => ({ id: ref, name: "Fixture" }),
+    tail: async () => ({ entries: [] }),
+    send: async () => ({ delivery: "unknown" }),
+  };
+  const env = {
+    HOME: dir,
+    USERPROFILE: dir,
+    CODEX_HOME: fake.home,
+    GROK_BOT_TEST: "1",
+    GBOT_ACCOUNT_SCOPE: scope,
+    GROK_BOT_RELAY_DIR: dir,
+  };
+  const located = relayLocation({ env });
+  assert.equal(located.stateDir, resolve(dir));
+  assert.equal(located.accountScope, scope);
+  assert.equal(located.profile, relayProfile(located.env, scope));
+  const legacyProfile = "legacy-pinned-profile";
+  assert.notEqual(legacyProfile, located.profile);
+  const legacyEnv = { CODEX_HOME: fake.home, GROK_BOT_TEST: "1" };
+  const legacy = await openRelayEngine({
     stateDir: dir,
-    profile: "fixture-a",
-    env,
+    profile: legacyProfile,
+    env: legacyEnv,
     gateway,
-    accountScope: scopeB,
     clock: () => 1000,
   });
-  t.after(async () => { await engineB.close().catch(() => {}); });
-  await assert.rejects(engineB.tick(), /different Grok Bot account/);
-  const located = relayLocation({
-    stateDir: dir,
-    env: { ...env, GBOT_ACCOUNT_SCOPE: scopeA },
-    accountScope: scopeA,
+  t.after(async () => {
+    await legacy.close().catch(() => {});
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
   });
-  assert.equal(located.accountScope, scopeA);
+  const binding = await legacy.startBinding({
+    grokTarget: "target",
+    codexThreadId: "thread",
+    requestId: "link-old",
+  });
+  assert.equal(binding.accountScope, undefined);
+  await legacy.close();
+  await assert.rejects(
+    openRelayEngine({
+      stateDir: located.stateDir,
+      profile: located.profile,
+      env: located.env,
+      accountScope: located.accountScope,
+      gateway,
+      clock: () => 1000,
+    }),
+    /Relay profile mismatch/,
+  );
+  const unchanged = await openRelayEngine({
+    stateDir: dir,
+    profile: legacyProfile,
+    env: legacyEnv,
+    gateway,
+    clock: () => 1000,
+  });
+  t.after(async () => { await unchanged.close().catch(() => {}); });
+  const status = unchanged.status();
+  assert.equal(status.state, "running");
+  assert.equal(status.reason, null);
+  assert.equal(status.bindings.find((row) => row.id === binding.id).accountScope, undefined);
+  await unchanged.close();
+  const otherLocated = relayLocation({ env: { ...env, GBOT_ACCOUNT_SCOPE: other } });
+  assert.notEqual(otherLocated.profile, located.profile);
+  await assert.rejects(
+    openRelayEngine({
+      stateDir: dir,
+      profile: otherLocated.profile,
+      env: otherLocated.env,
+      accountScope: otherLocated.accountScope,
+      gateway,
+      clock: () => 1000,
+    }),
+    /Relay profile mismatch/,
+  );
 });
 
 test("no account uses the descriptor's single entry when another saved login exists", () => {
@@ -646,4 +763,554 @@ test("an explicit config default that misses does not use another login", () => 
   }, base);
   assert.throws(() => resolveGrokBotLogin(base), (error) => error.code === "UNKNOWN_ACCOUNT");
   assert.throws(() => setDefaultAccount({ ...base, name: "toString" }), (error) => error.exitCode === 2);
+});
+
+function sealedDescriptor(payload, platform = process.platform) {
+  return { encrypted: encryptForPlatform(JSON.stringify(payload), platform) };
+}
+
+test("a rewritten descriptor is used on the next connectGateway", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async () => {
+  const platform = process.platform;
+  const scope = scopeFor("user_synthetic_r2_rewrite");
+  const home = homeWith({
+    descriptor: {
+      version: 2,
+      entries: {
+        [scope]: {
+          ...sealedDescriptor({
+            baseUrl: "http://127.0.0.1:1341",
+            token: "descriptor-token-old",
+            headers: {},
+            name: "Desk",
+          }, platform),
+          savedAtMs: 1,
+        },
+      },
+    },
+  }, platform);
+  const path = grokBotGatewayDescriptorPath(home, platform, {});
+  await withEnv(gatewayEnv(home, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const first = await connectGateway();
+    assert.equal(first.gatewayToken, "descriptor-token-old");
+    writeFileSync(path, JSON.stringify({
+      version: 2,
+      entries: {
+        [scope]: {
+          ...sealedDescriptor({
+            baseUrl: "http://127.0.0.1:1341",
+            token: "descriptor-token-new",
+            headers: {},
+            name: "Desk",
+          }, platform),
+          savedAtMs: 2,
+        },
+      },
+    }));
+    const second = await connectGateway();
+    assert.equal(second.gatewayToken, "descriptor-token-new");
+  });
+});
+
+test("a saved-login session is rebuilt once after 401", async (t) => {
+  const sub = "user_synthetic_r2_refresh";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "refresh@example.com"),
+    }, scope),
+  }, process.platform);
+  const ensured = [];
+  let gatewayCalls = 0;
+  let failFresh = false;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      const token = ensured.length === 1 ? "gateway-stale" : ensured.length === 2 ? "gateway-fresh" : "gateway-again";
+      return new Response(JSON.stringify({
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
+        gatewayUrl: "http://127.0.0.1:1410",
+        gatewayToken: token,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    gatewayCalls += 1;
+    const bearer = String(init?.headers?.authorization ?? "");
+    if (bearer.includes("gateway-stale") || (failFresh && bearer.includes("gateway-fresh")) || bearer.includes("gateway-again")) {
+      return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+    }
+    if (bearer.includes("could-not-route")) {
+      return new Response("request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
+    }
+    return new Response(JSON.stringify({ agents: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "gateway-stale");
+    const agents = await listAgents(session);
+    assert.deepEqual(agents, []);
+    assert.equal(session.gatewayToken, "gateway-fresh");
+    assert.equal(ensured.length, 2);
+    assert.equal(gatewayCalls, 2);
+    failFresh = true;
+    await assert.rejects(listAgents(session), (error) => error.status === 401 && error.kind === "auth");
+    assert.equal(ensured.length, 3);
+    assert.equal(gatewayCalls, 4);
+    assert.equal(session.gatewayToken, "gateway-again");
+  });
+});
+
+test("a saved-login session is rebuilt once after a routing failure", async (t) => {
+  const sub = "user_synthetic_r2_route";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "route@example.com"),
+    }, scope),
+  }, process.platform);
+  const ensured = [];
+  let gatewayCalls = 0;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({
+        runState: "SAND_BOX_RUN_STATE_RUNNING",
+        gatewayUrl: "http://127.0.0.1:1411",
+        gatewayToken: ensured.length === 1 ? "gateway-moved" : "gateway-moved-ok",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    gatewayCalls += 1;
+    const bearer = String(init?.headers?.authorization ?? "");
+    if (bearer.includes("gateway-moved-ok")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    return new Response("the request could not be routed", {
+      status: 404,
+      headers: { "content-type": "text/plain" },
+    });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    const agents = await listAgents(session);
+    assert.equal(agents.length, 1);
+    assert.equal(session.gatewayToken, "gateway-moved-ok");
+    assert.equal(ensured.length, 2);
+    assert.equal(gatewayCalls, 2);
+  });
+});
+
+function savedLoginHome(sub, email) {
+  return homeWith({
+    secrets: accountsDoc({
+      [scopeFor(sub)]: savedEntry(jwt(sub), email),
+    }, scopeFor(sub)),
+  }, process.platform);
+}
+
+function runningSandbox(token, port) {
+  return new Response(JSON.stringify({
+    runState: "SAND_BOX_RUN_STATE_RUNNING",
+    gatewayUrl: `http://127.0.0.1:${port}`,
+    gatewayToken: token,
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot send", async (t) => {
+  const sub = "user_synthetic_r3_send_reject";
+  const home = savedLoginHome(sub, "reject@example.com");
+  const ensured = [];
+  const prompts = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      if (ensured.length === 1) return runningSandbox("gateway-stale-send", 1420);
+      return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    prompts.push(body);
+    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    await assert.rejects(sendPrompt(session, "Bot", "hello", { clientNonce: "nonce-reject" }), (error) => {
+      const outcome = outcomeFromError(error);
+      assert.equal(error.status, 401);
+      assert.equal(error.kind, "auth");
+      assert.equal(error.delivery, "rejected");
+      assert.equal(outcome.delivery, "rejected");
+      assert.equal(error.clientNonce, "nonce-reject");
+      assert.doesNotMatch(error.message, /delivery unknown/);
+      assert.equal(error.rebuildError, undefined);
+      assert.ok(error.cause instanceof Error);
+      assert.equal(outcome.rebuildError, undefined);
+      assert.doesNotMatch(error.message, /synthetic-r2-token-do-not-leak/);
+      assert.doesNotMatch(JSON.stringify(outcome), /synthetic-r2-token-do-not-leak/);
+      return true;
+    });
+  });
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].clientNonce, "nonce-reject");
+  assert.equal(ensured.length, 2);
+});
+
+test("a saved-login sendPrompt rebuild retries once with the same client nonce", async (t) => {
+  const sub = "user_synthetic_r3_send_retry";
+  const home = savedLoginHome(sub, "retry@example.com");
+  const ensured = [];
+  const prompts = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      return runningSandbox(ensured.length === 1 ? "gateway-send-stale" : "gateway-send-fresh", 1421);
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    const bearer = String(init?.headers?.authorization ?? "");
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    prompts.push({ body, bearer });
+    if (bearer.includes("gateway-send-fresh")) {
+      return new Response(JSON.stringify({ accepted: true }), { status: 200 });
+    }
+    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    const sent = await sendPrompt(session, "Bot", "hello", { clientNonce: "nonce-retry" });
+    assert.equal(sent.delivery, "accepted");
+    assert.equal(sent.clientNonce, "nonce-retry");
+  });
+  assert.equal(ensured.length, 2);
+  assert.equal(prompts.length, 2);
+  assert.equal(prompts[0].body.clientNonce, "nonce-retry");
+  assert.equal(prompts[1].body.clientNonce, "nonce-retry");
+  assert.match(prompts[1].bearer, /gateway-send-fresh/);
+});
+
+test("a sendPrompt 5xx is not rebuilt or resent", async (t) => {
+  const sub = "user_synthetic_r3_send_5xx";
+  const home = savedLoginHome(sub, "five@example.com");
+  const ensured = [];
+  const prompts = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      return runningSandbox("gateway-send-5xx", 1422);
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    prompts.push(body);
+    return new Response("unavailable", { status: 503, headers: { "content-type": "text/plain" } });
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    await assert.rejects(sendPrompt(session, "Bot", "hello", { clientNonce: "nonce-5xx" }), (error) => {
+      assert.equal(error.delivery, "unknown");
+      assert.equal(error.status, 503);
+      return true;
+    });
+  });
+  assert.equal(prompts.length, 1);
+  assert.equal(ensured.length, 1);
+});
+
+test("a relay records delivery rejected when a 401 rebuild fails", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
+  const { fakeAppServer } = await import("./helpers/codex-server.js");
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const sub = "user_synthetic_r3_relay_reject";
+  const home = savedLoginHome(sub, "relay-reject@example.com");
+  const dir = await mkdtemp(join(tmpdir(), "relay-r3-reject-"));
+  const ensured = [];
+  const prompts = [];
+  const fake = await fakeAppServer({
+    initialize: (_, ok) => ok({}),
+    "thread/resume": (p, ok) => ok({
+      thread: { id: p.threadId, cwd: process.cwd(), status: { type: "idle" } },
+      cwd: process.cwd(),
+    }),
+    "thread/turns/list": (_, ok) => ok({ data: [], nextCursor: null }),
+    "thread/items/list": (_, ok) => ok({ data: [], nextCursor: null }),
+  });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      if (ensured.length === 1) return runningSandbox("gateway-relay-stale", 1423);
+      return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    prompts.push(body);
+    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  });
+  const gateway = {
+    resolve: async (ref) => ({ id: ref, name: "Fixture" }),
+    tail: async () => ({ entries: [] }),
+    send: (id, text, extra) => sendPrompt(extra.session, id, text, extra),
+  };
+  let engine;
+  t.after(async () => {
+    await engine?.close().catch(() => {});
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  await withEnv(gatewayEnv(home, { CODEX_HOME: fake.home }), async () => {
+    const session = await connectGateway();
+    gateway.send = (id, text, extra) => sendPrompt(session, id, text, extra);
+    engine = await openRelayEngine({
+      stateDir: dir,
+      profile: "relay-r3-reject",
+      env: { CODEX_HOME: fake.home, GROK_BOT_TEST: "1" },
+      gateway,
+      clock: () => 1000,
+    });
+    const binding = await engine.startBinding({
+      grokTarget: "bot-1",
+      codexThreadId: "thread",
+      requestId: "link-reject",
+    });
+    const receipt = await engine.sendToGrok({
+      bindingId: binding.id,
+      message: "hello",
+      requestId: "send-reject",
+    });
+    assert.equal(receipt.delivery, "rejected");
+    assert.notEqual(receipt.reason, "delivery-unknown");
+  });
+  assert.equal(prompts.length, 1);
+  assert.equal(ensured.length, 2);
+});
+
+test("a later relay send stays rejected when saved-login rebuild keeps failing", {
+  skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
+}, async (t) => {
+  const { fakeAppServer } = await import("./helpers/codex-server.js");
+  const { openRelayEngine } = await import("../src/core/relay/engine.js");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const sub = "user_synthetic_r4_relay_repeat";
+  const home = savedLoginHome(sub, "relay-repeat@example.com");
+  const dir = await mkdtemp(join(tmpdir(), "relay-r4-repeat-"));
+  const ensured = [];
+  const prompts = [];
+  const fake = await fakeAppServer({
+    initialize: (_, ok) => ok({}),
+    "thread/resume": (p, ok) => ok({
+      thread: { id: p.threadId, cwd: process.cwd(), status: { type: "idle" } },
+      cwd: process.cwd(),
+    }),
+    "thread/turns/list": (_, ok) => ok({ data: [], nextCursor: null }),
+    "thread/items/list": (_, ok) => ok({ data: [], nextCursor: null }),
+  });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      if (ensured.length === 1) return runningSandbox("gateway-relay-repeat", 1424);
+      return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
+    }
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (target.endsWith("/api/listAgents")) {
+      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    }
+    if (target.endsWith("/api/getAgentTranscriptTail")) {
+      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
+    }
+    prompts.push(body);
+    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  });
+  let engine;
+  t.after(async () => {
+    await engine?.close().catch(() => {});
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  await withEnv(gatewayEnv(home, { CODEX_HOME: fake.home }), async () => {
+    engine = await openRelayEngine({
+      stateDir: dir,
+      profile: "relay-r4-repeat",
+      env: { CODEX_HOME: fake.home, GROK_BOT_TEST: "1", HOME: home, USERPROFILE: home },
+      accountScope: scopeFor(sub),
+      clock: () => 1000,
+    });
+    const binding = await engine.startBinding({
+      grokTarget: "bot-1",
+      codexThreadId: "thread",
+      requestId: "link-repeat",
+    });
+    const first = await engine.sendToGrok({
+      bindingId: binding.id,
+      message: "hello",
+      requestId: "send-repeat-1",
+    });
+    const second = await engine.sendToGrok({
+      bindingId: binding.id,
+      message: "again",
+      requestId: "send-repeat-2",
+    });
+    assert.equal(first.delivery, "rejected");
+    assert.equal(second.delivery, "rejected");
+    assert.notEqual(first.reason, "delivery-unknown");
+    assert.notEqual(second.reason, "delivery-unknown");
+    assert.equal(JSON.stringify([first, second]).includes("synthetic-r2-token-do-not-leak"), false);
+  });
+  assert.equal(prompts.length, 1);
+  assert.equal(ensured.length, 3);
+});
+
+test("a v1 descriptor that contradicts the only saved login is not merged", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async (t) => {
+  const platform = process.platform;
+  const savedSub = "user_synthetic_r2_contradict";
+  const savedScope = scopeFor(savedSub);
+  const otherScope = "e".repeat(64);
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("descriptor session must not call EnsureSandBox");
+  });
+  const emailHome = homeWith({
+    secrets: accountsDoc({
+      [savedScope]: savedEntry(jwt(savedSub), "saved@example.com"),
+    }, savedScope),
+    descriptor: {
+      version: 1,
+      ...sealedDescriptor({
+        baseUrl: "http://127.0.0.1:1341",
+        token: "descriptor-email-token",
+        headers: {},
+        name: "Legacy",
+        email: "other@example.com",
+      }, platform),
+    },
+  }, platform);
+  const emailRows = listLoginCatalog(options(emailHome, { platform }));
+  assert.equal(emailRows.length, 2);
+  const emailDescriptor = emailRows.find((row) => row.id === "default");
+  const emailSaved = emailRows.find((row) => row.id === savedScope);
+  assert.equal(emailDescriptor.scope, null);
+  assert.equal(emailSaved.scope, savedScope);
+  await withEnv(gatewayEnv(emailHome, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "descriptor-email-token");
+    assert.equal(session.accountScope, undefined);
+  });
+
+  const scopeHome = homeWith({
+    secrets: accountsDoc({
+      [savedScope]: savedEntry(jwt(savedSub), "saved@example.com"),
+    }, savedScope),
+    descriptor: {
+      version: 1,
+      ...sealedDescriptor({
+        baseUrl: "http://127.0.0.1:1341",
+        token: "descriptor-scope-token",
+        headers: {},
+        name: "Legacy",
+        accountScope: otherScope,
+      }, platform),
+    },
+  }, platform);
+  const scopeRows = listLoginCatalog(options(scopeHome, { platform }));
+  assert.equal(scopeRows.length, 2);
+  assert.equal(scopeRows.find((row) => row.id === "default").scope, otherScope);
+  assert.equal(scopeRows.find((row) => row.id === savedScope).scope, savedScope);
+  await withEnv(gatewayEnv(scopeHome, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "descriptor-scope-token");
+    assert.equal(session.accountScope, otherScope);
+    assert.notEqual(session.accountScope, savedScope);
+  });
+});
+
+test("a descriptor scope that matches another login's email is not merged or attached", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async (t) => {
+  const platform = process.platform;
+  const savedSub = "user_synthetic_r3_same_email";
+  const savedScope = scopeFor(savedSub);
+  const ownScope = "f".repeat(64);
+  const email = "same@example.com";
+  let ensured = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (!String(url).includes("EnsureSandBox")) throw new Error(`unexpected ${url}`);
+    ensured += 1;
+    return runningSandbox("saved-login-gateway", 1424);
+  });
+  const home = homeWith({
+    secrets: accountsDoc({
+      [savedScope]: savedEntry(jwt(savedSub), email),
+    }, savedScope),
+    descriptor: {
+      version: 1,
+      ...sealedDescriptor({
+        baseUrl: "http://127.0.0.1:1341",
+        token: "descriptor-own-token",
+        headers: {},
+        name: "Legacy",
+        email,
+        accountScope: ownScope,
+      }, platform),
+    },
+  }, platform);
+  const rows = listLoginCatalog(options(home, { platform }));
+  assert.equal(rows.length, 2);
+  const described = rows.find((row) => row.id === "default");
+  const saved = rows.find((row) => row.id === savedScope);
+  assert.equal(described.scope, ownScope);
+  assert.notEqual(described.scope, savedScope);
+  assert.equal(saved.scope, savedScope);
+  assert.equal(saved.email, email);
+  await withEnv(gatewayEnv(home, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const implicit = await connectGateway();
+    assert.equal(implicit.gatewayToken, "descriptor-own-token");
+    assert.equal(implicit.accountScope, ownScope);
+    assert.notEqual(implicit.accountScope, savedScope);
+    const selected = await connectGateway({ account: savedScope });
+    assert.equal(selected.gatewayToken, "saved-login-gateway");
+    assert.equal(selected.accountScope, savedScope);
+  });
+  assert.equal(ensured, 1);
+});
+
+test("GBOT_ACCOUNT_SCOPE accepts only 64 lowercase hex characters", async () => {
+  const sub = "user_synthetic_r2_scopepin";
+  const scope = scopeFor(sub);
+  const home = homeWith({
+    secrets: accountsDoc({
+      [scope]: savedEntry(jwt(sub), "pin@example.com"),
+    }, scope),
+  }, process.platform);
+  await withEnv(gatewayEnv(home, { GBOT_ACCOUNT_SCOPE: "not-a-scope" }), async () => {
+    await assert.rejects(connectGateway({ account: scope }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  });
+  assert.equal(workerAccountScope({ GBOT_ACCOUNT_SCOPE: scope }), scope);
+  assert.throws(() => workerAccountScope({ GBOT_ACCOUNT_SCOPE: "A".repeat(64) }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  assert.throws(() => workerAccountScope({ GBOT_ACCOUNT_SCOPE: `${scope} ` }), (error) => error.code === "INVALID_ACCOUNT_SCOPE");
+  assert.equal(workerAccountScope({}), "");
+});
+
+test("relay account resolution fails closed on an unexpected login error", () => {
+  const home = homeWith({
+    descriptor: { version: 99, encrypted: "not-used" },
+  }, process.platform);
+  assert.throws(() => resolveRelayAccountScope({
+    HOME: home,
+    USERPROFILE: home,
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  }), (error) => error.code === "UNSUPPORTED_VERSION");
 });
