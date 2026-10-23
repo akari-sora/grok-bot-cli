@@ -66,7 +66,14 @@ export function relayRequest(
         const reply = JSON.parse(buffer.slice(0, end));
         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId)
           throw Error("Relay protocol identity mismatch");
-        if (reply.error) throw Error(reply.error);
+        if (reply.error) {
+          // An older worker replies with only this sentence. The calling
+          // process still has to show the upgrade steps.
+          if (typeof reply.error === "string" && reply.error.startsWith("Relay profile mismatch")) {
+            throw relayProfileMismatchError();
+          }
+          throw Error(reply.error);
+        }
         if (reply.profile !== profile) throw relayProfileMismatchError();
         finish(null, reply.result);
       } catch (error) {

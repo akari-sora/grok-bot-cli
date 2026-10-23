@@ -9,6 +9,7 @@ import * as __rspack_external_node_os_4f3c9d58 from "node:os";
 import * as __rspack_external_node_path_806ed179 from "node:path";
 import * as __rspack_external_node_sqlite_cecf0237 from "node:sqlite";
 import * as __rspack_external_node_string_decoder_69b9bd04 from "node:string_decoder";
+import * as __rspack_external_node_url_3991086a from "node:url";
 var __webpack_modules__ = {
     "./src/scripts/gbot-relay.ts" (module, __unused_rspack___webpack_exports__, __webpack_require__) {
         __webpack_require__.a(module, async function(__rspack_load_async_deps, __rspack_async_done) {
@@ -81,6 +82,9 @@ var __webpack_modules__ = {
     },
     "node:string_decoder" (module) {
         module.exports = __rspack_external_node_string_decoder_69b9bd04;
+    },
+    "node:url" (module) {
+        module.exports = __rspack_external_node_url_3991086a;
     },
     "./node_modules/@agent-bundle/runtime/dist/158.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var _65_js__rspack_import_0 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/65.js");
@@ -26352,10 +26356,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     try {
                         fresh = await sessionFromSavedLogin(session.accountScope, options.signal);
                     } catch (rebuildError) {
-                        const detail = (0, _url_policy_js__rspack_import_8.fp)(rebuildError instanceof Error ? rebuildError.message : String(rebuildError)).slice(0, 300);
-                        if (error && typeof error === "object") {
-                            error.rebuildError = detail;
-                            if (error.cause === undefined && rebuildError instanceof Error) error.cause = rebuildError;
+                        if (error && typeof error === "object" && error.cause === undefined && rebuildError instanceof Error) {
+                            error.cause = rebuildError;
                         }
                         throw error;
                     }
@@ -28120,7 +28122,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     try {
                         const reply = JSON.parse(buffer.slice(0, end));
                         if (reply.version !== RELAY_PROTOCOL || reply.requestId !== requestId) throw Error("Relay protocol identity mismatch");
-                        if (reply.error) throw Error(reply.error);
+                        if (reply.error) {
+                            if (typeof reply.error === "string" && reply.error.startsWith("Relay profile mismatch")) {
+                                throw relayProfileMismatchError();
+                            }
+                            throw Error(reply.error);
+                        }
                         if (reply.profile !== profile) throw relayProfileMismatchError();
                         finish(null, reply.result);
                     } catch (error) {
@@ -28990,6 +28997,29 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             ]));
         }
         const PROFILE_FILE = "profile";
+        const PROFILE_TEMP = /^profile\.\d+\.[0-9a-f]{8}\.tmp$/;
+        async function removeStaleProfileTemps(dir) {
+            let names;
+            try {
+                names = await (0, node_fs_promises__rspack_import_1.readdir)(dir);
+            } catch (error) {
+                if (error.code === "ENOENT") return;
+                throw error;
+            }
+            for (const name of names){
+                if (!PROFILE_TEMP.test(name)) continue;
+                const tempPath = (0, node_path__rspack_import_3.join)(dir, name);
+                let info;
+                try {
+                    info = await (0, node_fs_promises__rspack_import_1.lstat)(tempPath);
+                } catch (error) {
+                    if (error.code === "ENOENT") continue;
+                    throw error;
+                }
+                if (info.isDirectory()) continue;
+                await (0, node_fs_promises__rspack_import_1.unlink)(tempPath);
+            }
+        }
         function assertProfileText(profile) {
             if (typeof profile !== "string" || profile.length < 1 || profile.length > 512 || /[\0\r\n]/.test(profile)) {
                 throw new Error("Relay profile file is invalid");
@@ -29020,17 +29050,18 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             assertProfileText(profile);
             const { path, stat } = await profileFileStat(dir);
             ownedProfileFile(stat);
+            await removeStaleProfileTemps(dir);
             const temp = `${path}.${process.pid}.${(0, node_crypto__rspack_import_0.randomBytes)(4).toString("hex")}.tmp`;
             const file = await (0, node_fs_promises__rspack_import_1.open)(temp, "wx", 384);
             try {
                 await file.write(profile, 0, "utf8");
                 await file.sync();
-            } catch (error) {
                 await file.close();
+            } catch (error) {
+                await file.close().catch(()=>{});
                 await (0, node_fs_promises__rspack_import_1.unlink)(temp).catch(()=>{});
                 throw error;
             }
-            await file.close();
             try {
                 await (0, node_fs_promises__rspack_import_1.rename)(temp, path);
             } catch (error) {
@@ -29068,6 +29099,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
+            St: ()=>removeStaleProfileTemps,
             hQ: ()=>relayLocation1,
             kr: ()=>writeRelayProfileFile
         });
@@ -29320,7 +29352,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             bindings: 100,
             records: 1000,
             stateBytes: 8 * 1024 * 1024,
-            diskBytes: 64 * 1024 * 1024
+            diskBytes: _stored_profile_js__rspack_import_3.EY
         };
         async function protectRelayDirectory(dir, maxBytes = DEFAULTS.diskBytes) {
             await (0, node_fs_promises__rspack_import_0.mkdir)(dir, {
@@ -29352,7 +29384,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 await (0, node_fs_promises__rspack_import_0.chmod)(path, 384);
             }
         }
-        async function openRelayState({ dir, profile, limits: overrides = {} }) {
+        async function openRelayState({ dir, profile, limits: overrides = {}, busyTimeoutMs } = {}) {
             const limits = {
                 ...DEFAULTS,
                 ...overrides
@@ -29361,7 +29393,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             relayId.parse(profile);
             dir = (0, node_path__rspack_import_1.resolve)(dir);
             await protectRelayDirectory(dir, limits.diskBytes);
-            const previous = await (0, _stored_profile_js__rspack_import_3.EN)(dir);
+            const previous = await (0, _stored_profile_js__rspack_import_3.EN)(dir, {
+                maxBytes: limits.diskBytes,
+                ...busyTimeoutMs === undefined ? {} : {
+                    busyTimeoutMs
+                }
+            });
             if (previous && previous !== profile) throw (0, _stored_profile_js__rspack_import_3.Xm)();
             const schema = zod__rspack_import_4.rej({
                 version: zod__rspack_import_4.euz(1),
@@ -29485,40 +29522,121 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/relay/stored-profile.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_fs_promises__rspack_import_0 = __webpack_require__("node:fs/promises");
         var node_path__rspack_import_1 = __webpack_require__("node:path");
-        const MAX_STORED_PROFILE_BYTES = 64 * 1024 * 1024;
-        function relayProfileMismatchError1() {
-            return new Error("Relay profile mismatch. This directory was written for a different profile and old bindings are not adopted. With the old version, run `gbot codex bridge stop --worker` before upgrading; that version's `bridge status` includes worker.pid. A pinned GROK_BOT_RELAY_DIR keeps the same socket path, so a still-running old worker is reached on that socket and rejects this hello. Stop the process that has the directory's control.sock or worker.lock open (for example `lsof -t <dir>/worker.lock`), then move or rename the directory, or choose a new GROK_BOT_RELAY_DIR, and bind again. Only the default directory's socket path changes, because it is derived from the profile hash; its old state stays in ~/.grok-bot-cli/relay/<old hash>.");
-        }
-        function lastStoredProfile(bytes) {
-            const text = Buffer.from(bytes).toString("latin1");
-            let last = null;
-            for (const match of text.matchAll(/"profile":"([^"\\]{1,512})"/g))last = match[1];
-            return last;
-        }
-        async function readStoredRelayProfile(dir) {
-            let profile = null;
-            for (const name of [
-                "relay.sqlite",
-                "relay.sqlite-wal"
-            ]){
-                const file = (0, node_path__rspack_import_1.join)(dir, name);
-                let info;
-                try {
-                    info = await (0, node_fs_promises__rspack_import_0.lstat)(file);
-                } catch (error) {
-                    if (error.code === "ENOENT") continue;
-                    throw error;
-                }
-                if (!info.isFile() || info.isSymbolicLink()) continue;
-                if (info.size > MAX_STORED_PROFILE_BYTES) throw new Error("Relay storage capacity exceeded");
-                const found = lastStoredProfile(await (0, node_fs_promises__rspack_import_0.readFile)(file));
-                if (found) profile = found;
+        var node_url__rspack_import_2 = __webpack_require__("node:url");
+        const RELAY_DISK_BYTES = 64 * 1024 * 1024;
+        const STORAGE_NAMES = [
+            "relay.sqlite",
+            "relay.sqlite-wal",
+            "relay.sqlite-shm",
+            "worker.lock",
+            "profile"
+        ];
+        const SQLITE_BUSY = 5;
+        const SQLITE_LOCKED = 6;
+        class RelayStorageError extends Error {
+            constructor(code, message, options){
+                super(message, options);
+                this.name = "RelayStorageError";
+                this.code = code;
             }
-            return profile;
+        }
+        function relayProfileMismatchError1() {
+            return new Error("Relay profile mismatch. This directory was written for a different account or environment, or by an older version of gbot, and old bindings are not adopted. The stored profile includes the account, gateway and token settings, thread limits, and the DISPLAY or DBUS session, so a profile can change for reasons other than an upgrade. Run again with the same account and environment to keep this directory. If an older version wrote it, upgrade in this order: with the old version, run `gbot codex bridge stop --worker` before upgrading; that version's `bridge status` includes worker.pid. A pinned GROK_BOT_RELAY_DIR keeps the same socket path. If a still-running old worker is reached on that socket, it rejects this hello and does not stop. Stop the process that has the directory's control.sock or worker.lock open (for example `lsof -t <dir>/worker.lock`), then move or rename the directory, or choose a new GROK_BOT_RELAY_DIR, and bind again. Only the default directory's socket path changes, because it is derived from the profile hash; its old state stays in ~/.grok-bot-cli/relay/<old hash>.");
+        }
+        function sqlitePrimaryCode(error) {
+            const errcode = error?.errcode;
+            return typeof errcode === "number" ? errcode & 0xff : undefined;
+        }
+        function asStorageError(error) {
+            if (error instanceof RelayStorageError) return error;
+            const code = sqlitePrimaryCode(error);
+            const message = String(error?.message ?? "");
+            if (code === SQLITE_BUSY || code === SQLITE_LOCKED || /database is locked|sqlite_busy|sqlite_locked/i.test(message)) {
+                return new RelayStorageError("locked", "Relay state is locked", {
+                    cause: error
+                });
+            }
+            if (code !== undefined || typeof error?.code === "string" && error.code.startsWith("ERR_SQLITE")) {
+                return new RelayStorageError("corrupt", "Relay state is corrupt", {
+                    cause: error
+                });
+            }
+            return error;
+        }
+        async function fileInfo(path) {
+            try {
+                return await (0, node_fs_promises__rspack_import_0.lstat)(path);
+            } catch (error) {
+                if (error.code === "ENOENT") return null;
+                throw error;
+            }
+        }
+        async function assertStorageBudget(dir, maxBytes) {
+            let total = 0;
+            for (const name of STORAGE_NAMES){
+                const info = await fileInfo((0, node_path__rspack_import_1.join)(dir, name));
+                if (!info) continue;
+                if (!info.isFile() || info.isSymbolicLink()) {
+                    throw new RelayStorageError("corrupt", "Relay storage must be an owned regular file, never a symlink");
+                }
+                total += info.size;
+                if (total > maxBytes) {
+                    throw new RelayStorageError("capacity", "Relay storage capacity exceeded");
+                }
+            }
+        }
+        async function readStoredRelayProfile(dir, { busyTimeoutMs = 5000, maxBytes = RELAY_DISK_BYTES } = {}) {
+            if (!Number.isInteger(busyTimeoutMs) || busyTimeoutMs < 1) {
+                throw new Error("Invalid relay busy timeout");
+            }
+            if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+                throw new RelayStorageError("capacity", "Relay storage capacity exceeded");
+            }
+            const info = await fileInfo((0, node_path__rspack_import_1.join)(dir, "relay.sqlite"));
+            if (info && (!info.isFile() || info.isSymbolicLink())) {
+                throw new RelayStorageError("corrupt", "Relay storage must be an owned regular file, never a symlink");
+            }
+            await assertStorageBudget(dir, maxBytes);
+            if (!info) return null;
+            let db;
+            try {
+                const { DatabaseSync } = await import("node:sqlite");
+                const wal = await fileInfo((0, node_path__rspack_import_1.join)(dir, "relay.sqlite-wal"));
+                const location = wal ? (0, node_path__rspack_import_1.join)(dir, "relay.sqlite") : `${(0, node_url__rspack_import_2.pathToFileURL)((0, node_path__rspack_import_1.join)(dir, "relay.sqlite")).href}?immutable=1`;
+                db = new DatabaseSync(location, {
+                    readOnly: true,
+                    timeout: busyTimeoutMs
+                });
+                const row = db.prepare("SELECT state FROM agent_state_head WHERE id = 1").get();
+                if (!row || typeof row.state !== "string") {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt");
+                }
+                let parsed;
+                try {
+                    parsed = JSON.parse(row.state);
+                } catch (cause) {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt", {
+                        cause
+                    });
+                }
+                const profile = parsed?.profile;
+                if (typeof profile !== "string" || profile.length < 1) {
+                    throw new RelayStorageError("corrupt", "Relay state is corrupt");
+                }
+                return profile;
+            } catch (error) {
+                throw asStorageError(error);
+            } finally{
+                try {
+                    db?.close();
+                } catch  {}
+            }
         }
         __webpack_require__.d(__webpack_exports__, {
             EN: ()=>readStoredRelayProfile,
             Xm: ()=>relayProfileMismatchError1
+        }, {
+            EY: RELAY_DISK_BYTES
         });
     },
     "./src/core/relay/worker.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -29534,6 +29652,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         async function runRelayWorker(options = {}) {
             const location = (0, _profile_js__rspack_import_4.hQ)(options);
             const release = await (0, _ownership_js__rspack_import_6.x)(location);
+            await (0, _profile_js__rspack_import_4.St)(location.stateDir);
             let engine, server, timer, closing = false, inFlight = 0, ownsSocket = false;
             const clients = new Set();
             let done;

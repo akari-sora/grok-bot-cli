@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import test from "./helpers/win32-test.js";
 import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
-import { relayProfile } from "../src/core/relay/profile.js";
+import { relayLocation, relayProfile } from "../src/core/relay/profile.js";
 import { runRelayWorker } from "../src/core/relay/worker.js";
 import { relayRequest } from "../src/core/relay/control.js";
 import { managedOperation } from "../src/core/relay/managed.js";
@@ -333,6 +334,8 @@ test("managed status and start surface Relay profile mismatch for a stopped pinn
   try {
     await assert.rejects(managedOperation("status", {}, { env }), (error) => {
       assert.match(error.message, /^Relay profile mismatch/);
+      assert.match(error.message, /other than an upgrade/);
+      assert.match(error.message, /account or environment/);
       assert.match(error.message, /gbot codex bridge stop --worker/);
       assert.match(error.message, /worker\.pid/);
       assert.match(error.message, /same socket path/);
@@ -348,6 +351,66 @@ test("managed status and start surface Relay profile mismatch for a stopped pinn
   } finally {
     await rm(home, { recursive: true, force: true });
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a still-running worker that replies Relay profile mismatch shows the upgrade steps", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "relay-old-worker-"));
+  const profile = "e".repeat(64);
+  const caller = { HOME: dir, USERPROFILE: dir, CODEX_HOME: join(dir, "codex"), GROK_BOT_TEST: "1" };
+  const location = relayLocation({ stateDir: dir, profile, env: caller });
+  await mkdir(dirname(location.socketPath), { recursive: true });
+  const server = createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const end = buffer.indexOf("\n");
+      if (end < 0) return;
+      const request = JSON.parse(buffer.slice(0, end));
+      socket.end(JSON.stringify({
+        version: 1,
+        profile,
+        requestId: request.requestId,
+        error: "Relay profile mismatch",
+      }) + "\n");
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(location.socketPath, resolve);
+  });
+  try {
+    await assert.rejects(relayRequest({ stateDir: dir, profile, env: caller }, "hello", {}), (error) => {
+      assert.match(error.message, /^Relay profile mismatch/);
+      assert.match(error.message, /other than an upgrade/);
+      assert.match(error.message, /gbot codex bridge stop --worker/);
+      assert.match(error.message, /lsof -t <dir>\/worker\.lock/);
+      assert.notEqual(error.message, "Relay profile mismatch");
+      return true;
+    });
+  } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+    if (location.socketDir !== dir) await rm(location.socketDir, { recursive: true, force: true });
+  }
+});
+
+test("worker start removes a leftover profile temp before the engine opens", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "relay-profile-tmp-"));
+  const stale = join(stateDir, "profile.4242.deadbeef.tmp");
+  await writeFile(stale, "stale");
+  try {
+    await assert.rejects(runRelayWorker({
+      stateDir,
+      profile: "f".repeat(64),
+      env,
+      openEngine: async () => {
+        throw new Error("synthetic engine failure");
+      },
+    }), /synthetic engine failure/);
+    await assert.rejects(access(stale), (error) => error.code === "ENOENT");
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
   }
 });
 
@@ -404,8 +467,41 @@ test("one unreadable relay directory does not fail the status list", async () =>
   }
 });
 
-test("a state file over the scan cap is unreadable and is not loaded", async () => {
-  const scanCap = 64 * 1024 * 1024;
+test("relay files that together exceed the storage cap are unreadable", async () => {
+  const cap = 64 * 1024 * 1024;
+  const part = Math.floor(cap / 2) + 1;
+  const home = await mkdtemp(join(tmpdir(), "relay-sum-cap-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const dir = join(home, ".grok-bot-cli", "relay", "split");
+  await mkdir(dir, { recursive: true });
+  for (const name of ["relay.sqlite", "relay.sqlite-wal"]) {
+    const handle = await open(join(dir, name), "w");
+    await handle.truncate(part);
+    await handle.close();
+  }
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  };
+  try {
+    const listed = await managedOperation("status", {}, { env });
+    const row = listed.directories.find((item) => item.stateDir === dir);
+    assert.equal(row.worker.state, "unreadable");
+    assert.match(row.reason, /capacity/);
+    assert.doesNotMatch(row.reason, /mismatch/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a state file over the storage cap is unreadable and is not loaded", async () => {
+  const { RELAY_DISK_BYTES } = await import("../src/core/relay/stored-profile.js");
+  const scanCap = RELAY_DISK_BYTES;
   const home = await mkdtemp(join(tmpdir(), "relay-huge-"));
   const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
   await mkdir(dirname(descriptor), { recursive: true });
@@ -432,7 +528,34 @@ test("a state file over the scan cap is unreadable and is not loaded", async () 
   }
 });
 
-test("status reads the profile from state bytes when the profile file is absent", async () => {
+test("a corrupt state file is listed as unreadable and is not treated as a profile", async () => {
+  const home = await mkdtemp(join(tmpdir(), "relay-corrupt-list-"));
+  const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+  await mkdir(dirname(descriptor), { recursive: true });
+  await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: "not-used" }));
+  const dir = join(home, ".grok-bot-cli", "relay", "bad");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "relay.sqlite"), Buffer.from(`noise "profile":"${"ab".repeat(32)}"`));
+  const env = {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, "codex"),
+    GROK_BOT_TEST: "1",
+    GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password",
+  };
+  try {
+    const listed = await managedOperation("status", {}, { env });
+    const row = listed.directories.find((item) => item.stateDir === dir);
+    assert.equal(row.worker.state, "unreadable");
+    assert.match(row.reason, /corrupt/);
+    assert.doesNotMatch(row.reason, /mismatch/);
+    assert.equal(row.profile, null);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("status reads the stored profile from sqlite when the profile file is absent", async () => {
   const { openRelayEngine } = await import("../src/core/relay/engine.js");
   const { access } = await import("node:fs/promises");
   const home = await mkdtemp(join(tmpdir(), "relay-sqlite-profile-"));

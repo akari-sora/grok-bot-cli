@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, lstat, open, readFile, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, open, readdir, readFile, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { codexSocketPath } from "../codex-bridge.js";
@@ -62,6 +62,31 @@ export function relayProfile(env = process.env, accountScope = "") {
   );
 }
 const PROFILE_FILE = "profile";
+const PROFILE_TEMP = /^profile\.\d+\.[0-9a-f]{8}\.tmp$/;
+
+/** Drop profile.<pid>.<hex>.tmp left behind when a write dies before rename. */
+export async function removeStaleProfileTemps(dir) {
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const name of names) {
+    if (!PROFILE_TEMP.test(name)) continue;
+    const tempPath = join(dir, name);
+    let info;
+    try {
+      info = await lstat(tempPath);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    if (info.isDirectory()) continue;
+    await unlink(tempPath);
+  }
+}
 
 function assertProfileText(profile) {
   if (typeof profile !== "string" || profile.length < 1 || profile.length > 512 || /[\0\r\n]/.test(profile)) {
@@ -96,6 +121,7 @@ export async function writeRelayProfileFile(dir, profile) {
   assertProfileText(profile);
   const { path, stat } = await profileFileStat(dir);
   ownedProfileFile(stat);
+  await removeStaleProfileTemps(dir);
   // Temp file plus rename. Truncating the destination first leaves an empty
   // file if the process dies before the write, and that empty file fails every
   // later status list.
@@ -104,12 +130,12 @@ export async function writeRelayProfileFile(dir, profile) {
   try {
     await file.write(profile, 0, "utf8");
     await file.sync();
-  } catch (error) {
     await file.close();
+  } catch (error) {
+    await file.close().catch(() => {});
     await unlink(temp).catch(() => {});
     throw error;
   }
-  await file.close();
   try {
     await rename(temp, path);
   } catch (error) {

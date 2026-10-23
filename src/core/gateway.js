@@ -819,10 +819,8 @@ async function gatewayCall(session, method, body = {}, options = {}) {
       } catch (rebuildError) {
         // The gateway already refused this call. A failed rebuild must not replace that
         // rejection, or sendPrompt records a definite miss as delivery unknown.
-        const detail = redactSecrets(rebuildError instanceof Error ? rebuildError.message : String(rebuildError)).slice(0, 300);
-        if (error && typeof error === "object") {
-          error.rebuildError = detail;
-          if (error.cause === undefined && rebuildError instanceof Error) error.cause = rebuildError;
+        if (error && typeof error === "object" && error.cause === undefined && rebuildError instanceof Error) {
+          error.cause = rebuildError;
         }
         throw error;
       }

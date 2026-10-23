@@ -77,6 +77,7 @@ describe('explicit relay directory CLI and MCP results', () => {
       const status = await invokeCli(['codex', 'bridge', 'status', '--json']);
       expect(status.exitCode).toBe(1);
       expect(status.stdout).toContain('Relay profile mismatch');
+      expect(status.stdout).toContain('other than an upgrade');
       expect(status.stdout).toContain('gbot codex bridge stop --worker');
       expect(status.stdout).not.toContain('startup failed or timed out');
       expect(status.stdout).not.toContain('Worker is not running');

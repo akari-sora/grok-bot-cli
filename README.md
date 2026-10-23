@@ -199,9 +199,12 @@ amendments remain in the owning Codex UI.
 
 State lives in the user-owned `~/.grok-bot-cli/relay/` directory, or
 `GROK_BOT_RELAY_DIR`, outside plugin caches. Profile mismatches fail visibly. A pinned
-directory written by an older profile refuses to start with `Relay profile mismatch`.
-Managed commands report that error in the calling process, including when the worker
-is already stopped, and the message includes the upgrade steps.
+directory whose stored profile does not match this process refuses to start with
+`Relay profile mismatch`. The profile includes the account, gateway and token settings,
+thread limits, and the DISPLAY or DBUS session, so a profile can change for reasons
+other than an upgrade. Managed commands report that error in the calling process,
+including when the worker is already stopped and when a still-running worker only
+replies `Relay profile mismatch`, and the message includes the upgrade steps.
 Gateway overrides and thread restrictions cannot reuse a differently authorized worker.
 Authentication failures use bounded retries (1..30 seconds) from the saved cursor;
 restored credentials do not reset coverage or resend uncertain submissions.

@@ -946,7 +946,11 @@ test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot sen
       assert.equal(outcome.delivery, "rejected");
       assert.equal(error.clientNonce, "nonce-reject");
       assert.doesNotMatch(error.message, /delivery unknown/);
-      assert.equal(error.rebuildError.includes("synthetic-r2-token-do-not-leak"), false);
+      assert.equal(error.rebuildError, undefined);
+      assert.ok(error.cause instanceof Error);
+      assert.equal(outcome.rebuildError, undefined);
+      assert.doesNotMatch(error.message, /synthetic-r2-token-do-not-leak/);
+      assert.doesNotMatch(JSON.stringify(outcome), /synthetic-r2-token-do-not-leak/);
       return true;
     });
   });
