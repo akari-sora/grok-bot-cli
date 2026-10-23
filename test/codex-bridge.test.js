@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
