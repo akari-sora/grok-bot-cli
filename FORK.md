@@ -19,7 +19,7 @@ Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and lea
 macOS or Linux:
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/e64ed2f40a543961b4656176b3b16275/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell:
 
 ```powershell
-irm "https://gitlab.com" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/e64ed2f40a543961b4656176b3b16275/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -348,7 +348,7 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/e64ed2f40a543961b4656176b3b16275/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -356,7 +356,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/e64ed2f40a543961b4656176b3b16275/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
