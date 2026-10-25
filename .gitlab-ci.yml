@@ -22,6 +22,9 @@ unit:
   tags: [$LINUX_RUNNER_TAG]
   image: node:22-slim
   script:
+    # node:22-slim ships without git; the install-fork tests check out
+    # branch and tag refs with a real git binary.
+    - apt-get update -qq && apt-get install -y -qq git
     - npm ci
     - npm run build
     # Run the tests as the image's unprivileged user: root ignores the
