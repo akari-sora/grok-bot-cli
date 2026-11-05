@@ -21,6 +21,8 @@ export function summarize(rec) {
     ...(rec.hiddenFromSidebar !== undefined ? { hiddenFromSidebar: rec.hiddenFromSidebar } : {}),
     kind: rec.isGroup ? "group" : "bot",
     members: rec.isGroup ? rec.memberIds : undefined,
+    // The server roster is off for this login, so this record came from the box roster.
+    ...(rec.roster === "box" ? { roster: "box" } : {}),
   };
 }
 

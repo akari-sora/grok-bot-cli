@@ -41,7 +41,7 @@ function readBody(req) {
   });
 }
 
-async function fixture(handler, { gatewayOnServer = false } = {}) {
+async function fixture(handler, { gatewayOnServer = false, savedToken = true } = {}) {
   const server = createServer(handler);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -63,15 +63,17 @@ async function fixture(handler, { gatewayOnServer = false } = {}) {
       },
     },
   }));
-  writeFileSync(join(dirname(descriptorPath), "sand-secrets.json"), JSON.stringify({
-    version: 1,
-    "cursor-accounts": JSON.stringify({
-      active: SCOPE,
-      accounts: {
-        [SCOPE]: { "cursor-access-token": `plaintext:v1:${jwt(Math.floor(Date.now() / 1000) + 3600)}` },
-      },
-    }),
-  }));
+  if (savedToken) {
+    writeFileSync(join(dirname(descriptorPath), "sand-secrets.json"), JSON.stringify({
+      version: 1,
+      "cursor-accounts": JSON.stringify({
+        active: SCOPE,
+        accounts: {
+          [SCOPE]: { "cursor-access-token": `plaintext:v1:${jwt(Math.floor(Date.now() / 1000) + 3600)}` },
+        },
+      }),
+    }));
+  }
   const env = { ...process.env, HOME: home, USERPROFILE: home, GROK_BOT_TEST: "1", GBOT_TEST_KEYCHAIN_PASSWORD: SECRETS.password };
   delete env.GBOT_ACCOUNT;
   delete env.NODE_ENV;
@@ -385,11 +387,15 @@ test("gbot wake exits 4 when the wake budget runs out before the box answers", {
   }
 });
 
+// A descriptor login with no saved access token is gateway-only: its send goes to the box, and the box
+// cannot be woken without that token. With the token, the send goes to the backend (next test).
 test("gbot send --json includes wake and failureReason when auto wake fails", {
   skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
 }, async () => {
+  const urls = [];
   const fx = await fixture(async (req, res) => {
     const url = String(req.url);
+    urls.push(url);
     await readBody(req);
     if (url.includes("EnsureSandBox")) {
       res.statusCode = 500;
@@ -405,13 +411,60 @@ test("gbot send --json includes wake and failureReason when auto wake fails", {
     res.statusCode = 417;
     res.setHeader("x-anyrun-failure-reason", "pod_hibernated");
     res.end();
-  }, { gatewayOnServer: true });
+  }, { gatewayOnServer: true, savedToken: false });
   try {
     const result = await run(["send", "General", "hello", "--json"], fx.env);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.failureReason, "pod_hibernated");
-    assert.deepEqual(payload.wake, { attempted: true, error: "WAKE_FAILED" });
+    assert.deepEqual(payload.wake, { attempted: true, error: "NO_SECRETS_FILE" });
+    assert.deepEqual(urls, ["/api/listAgents", "/api/sendPrompt"]);
+    assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("gbot send --json with a saved access token sends through SendGrokBotUserMessage", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  const seen = [];
+  const fx = await fixture(async (req, res) => {
+    const url = String(req.url);
+    const body = await readBody(req);
+    seen.push({ url, body });
+    res.setHeader("content-type", "application/json");
+    if (url.endsWith("/GetGrokBotRuntimeCapabilities")) {
+      res.end(JSON.stringify({ capabilities: { durableIdentityEnabled: true } }));
+      return;
+    }
+    if (url.endsWith("/ListGrokBotAgents")) {
+      res.end(JSON.stringify({ agents: [{ id: "101", agentId: "bot-1", name: "General", harness: "temporal", kind: "GROK_BOT_AGENT_KIND_AGENT" }] }));
+      return;
+    }
+    if (url.endsWith("/SendGrokBotUserMessage")) {
+      res.end(JSON.stringify({ dispatched: true, mode: "GROK_BOT_TEMPORAL_HARNESS_MODE_LIVE", delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" }));
+      return;
+    }
+    if (url === "/api/listAgents") {
+      res.end(JSON.stringify({ agents: [] }));
+      return;
+    }
+    res.statusCode = 502;
+    res.end(JSON.stringify({ message: "A Sand box session is not permitted on this endpoint." }));
+  }, { gatewayOnServer: true });
+  try {
+    const result = await run(["send", "General", "hello", "--json"], fx.env);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.delivery, "accepted");
+    assert.equal(payload.id, "bot-1");
+    assert.equal(payload.result.delivery, "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL");
+    const sent = seen.filter((call) => call.url.endsWith("/SendGrokBotUserMessage"));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].body.messageId, payload.clientNonce);
+    assert.equal(sent[0].body.text, "hello");
+    assert.equal(seen.some((call) => call.url === "/api/sendPrompt"), false);
     assertNoSecrets(result);
   } finally {
     await fx.close();
@@ -458,6 +511,65 @@ test("gbot wake --check keeps the resolved scope when the descriptor session has
     assert.deepEqual(bodies, [{ wake: false }]);
     assert.doesNotMatch(result.stdout + result.stderr, /no account scope/);
     assertNoSecrets(result);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("gbot reconcile reports a pending or rejected backend send status instead of not found", {
+  skip: process.platform === "win32" && "fixture descriptors are not DPAPI-shaped",
+}, async () => {
+  let status = { status: "GROK_BOT_SEND_STATUS_PENDING" };
+  const seen = [];
+  const fx = await fixture(async (req, res) => {
+    const url = String(req.url);
+    const body = await readBody(req);
+    seen.push({ url, body });
+    res.setHeader("content-type", "application/json");
+    if (url.endsWith("/GetGrokBotRuntimeCapabilities")) {
+      res.end(JSON.stringify({ capabilities: { durableIdentityEnabled: true } }));
+      return;
+    }
+    if (url.endsWith("/ListGrokBotAgents")) {
+      res.end(JSON.stringify({ agents: [{ id: "101", agentId: "bot-1", name: "General", harness: "temporal", kind: "GROK_BOT_AGENT_KIND_AGENT" }] }));
+      return;
+    }
+    if (url.endsWith("/GetGrokBotSendStatus")) {
+      if (status === null) res.statusCode = 500;
+      res.end(JSON.stringify(status ?? { code: "internal", message: "boom" }));
+      return;
+    }
+    if (url === "/api/listAgents") {
+      res.end(JSON.stringify({ agents: [] }));
+      return;
+    }
+    if (url === "/api/getAgentTranscriptTail") {
+      res.end(JSON.stringify({ entries: [] }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ message: "unexpected " + url }));
+  }, { gatewayOnServer: true });
+  try {
+    const pending = await run(["reconcile", "General", "--nonce", "nonce-cli", "--json"], fx.env);
+    assert.equal(pending.status, 0, pending.stdout + pending.stderr);
+    const payload = JSON.parse(pending.stdout);
+    assert.equal(payload.status, "pending");
+    assert.equal(payload.sendStatus, "PENDING");
+    const text = await run(["reconcile", "General", "--nonce", "nonce-cli"], fx.env);
+    assert.match(text.stdout, /the server says PENDING: it may still land\. Do not resend\./);
+    status = { status: "GROK_BOT_SEND_STATUS_REJECTED", rejectionCode: "send/blocked" };
+    const rejected = JSON.parse((await run(["reconcile", "General", "--nonce", "nonce-cli", "--json"], fx.env)).stdout);
+    assert.deepEqual({ status: rejected.status, sendStatus: rejected.sendStatus, rejectionCode: rejected.rejectionCode }, {
+      status: "rejected", sendStatus: "REJECTED", rejectionCode: "send/blocked",
+    });
+    const rejectedText = await run(["reconcile", "General", "--nonce", "nonce-cli"], fx.env);
+    assert.match(rejectedText.stdout, /The server rejected nonce nonce-cli for bot General \(bot-1\) \(send\/blocked\)\. It was not delivered\./);
+    status = null;
+    const unread = await run(["reconcile", "General", "--nonce", "nonce-cli"], fx.env);
+    assert.match(unread.stdout, /its send status could not be read: it may still land\. Do not resend\./);
+    assert.equal(seen.some((call) => call.url.endsWith("/SendGrokBotUserMessage") || call.url === "/api/sendPrompt"), false);
+    assertNoSecrets(pending);
   } finally {
     await fx.close();
   }

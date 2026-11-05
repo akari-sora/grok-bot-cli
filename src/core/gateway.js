@@ -235,12 +235,25 @@ async function sessionFromSavedLogin(scope, signal) {
       throw scrubOutbound(error, [loaded.token, described?.gatewayToken]);
     }
   }
-  return rememberSession({
+  return attachBackend(rememberSession({
     gatewayUrl: sandbox.gatewayUrl,
     gatewayToken: sandbox.gatewayToken,
     gatewayHeaders: sandbox.gatewayHeaders,
     accountScope: scope,
-  });
+  }), { scope, token: loaded.token, expiresAt: loaded.expiresAt });
+}
+
+// A descriptor login carries a box gateway token only. When its scope is known and the app saved an
+// access token for it, the session also gets the backend. Without one it stays gateway-only, as before.
+function withScopedBackend(session) {
+  if (!session || typeof session.accountScope !== "string" || !SCOPE_RE.test(session.accountScope)) return session;
+  try {
+    const loaded = loadAppAccessToken({ scope: session.accountScope, home: homedir(), env: process.env, ...secretStoreOptions() });
+    return attachBackend(session, { scope: session.accountScope, token: loaded.token, expiresAt: loaded.expiresAt });
+  } catch (error) {
+    debug("no backend access token for this login (" + (error?.code || "unreadable") + "); using the box gateway only");
+    return session;
+  }
 }
 
 // Precedence: gateway URL+token override, then --account, GBOT_ACCOUNT_SCOPE, GBOT_ACCOUNT,
@@ -261,7 +274,7 @@ async function sessionFromApp(account, signal) {
   }
   if (!choice) {
     try {
-      return descriptorSession(account);
+      return withScopedBackend(descriptorSession(account));
     } catch (error) {
       if (implicitAuthFallback(error)) return null;
       throw scrubOutbound(toGatewayError(error), []);
@@ -275,7 +288,7 @@ async function sessionFromApp(account, signal) {
       }
       // choice.scope is set only when the descriptor's own scope or email proves the account.
       if (choice.scope && !session.accountScope) session = { ...session, accountScope: choice.scope };
-      return session;
+      return withScopedBackend(session);
     }
     return await sessionFromSavedLogin(choice.scope, signal);
   } catch (error) {
@@ -619,7 +632,10 @@ export async function connectGateway({ signal, account } = {}) {
     }
     throw error;
   }
-  return { gatewayUrl: sandbox.gatewayUrl, gatewayToken: sandbox.gatewayToken, gatewayHeaders: sandbox.gatewayHeaders };
+  return attachBackend(
+    { gatewayUrl: sandbox.gatewayUrl, gatewayToken: sandbox.gatewayToken, gatewayHeaders: sandbox.gatewayHeaders },
+    { env: true },
+  );
 }
 
 function redactDetail(detail, session) {
@@ -908,6 +924,456 @@ async function performGatewayCall(session, method, body = {}, { signal } = {}) {
   return data;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Backend RPCs (Grok Bot 0.78.x).
+//
+// Since the 0.78.4 desktop app (2026-11-03) every bot of a login is server-hosted (`harness:
+// "temporal"`). The app sends messages, creates and edits rooms, deletes bots and sets sidebar
+// state through aiserver.v1.GrokBotService/<Rpc> (Connect JSON, unary) with the account access
+// token. Live on 2026-11-05 the box gateway answered 502 "A Sand box session is not permitted on
+// this endpoint." to sendPrompt, createGroup and setAgentHiddenFromSidebar; its listAgents kept bots
+// the backend had deleted and showed a room the backend had just created only minutes later;
+// deleteAgent answered 200 and deleted nothing; and updateAgent without `editedFields` changed only
+// the box copy (with it, an avatar edit reached the server and a title edit did not).
+//
+// connectGateway attaches the access token source to the session here. It is kept out of the
+// session object so it never serializes. A session without one (GROK_BOT_GATEWAY_URL + token, or a
+// descriptor login gbot cannot read an access token for) keeps the gateway calls.
+// ---------------------------------------------------------------------------------------------
+const SCOPE_RE = /^[0-9a-f]{64}$/;
+const GROK_BOT_SERVICE = "/aiserver.v1.GrokBotService/";
+const ROOM_TIMEOUT_MS = 45_000;
+const ROOM_MEMBERS_TIMEOUT_MS = 20_000;
+const backendAuths = new WeakMap();
+
+function debug(message) {
+  if (process.env.GBOT_DEBUG) console.error("gbot: " + message);
+}
+
+/** @param {any} session @param {{ scope?: string, token?: string, expiresAt?: number, env?: boolean }} auth */
+function attachBackend(session, auth) {
+  backendAuths.set(session, { ...auth });
+  return session;
+}
+
+/** True when connectGateway gave this session an access token for the backend RPCs. */
+export function hasBackend(session) {
+  return Boolean(session) && typeof session === "object" && backendAuths.has(session);
+}
+
+function backendCredential(session) {
+  const auth = backendAuths.get(session);
+  if (!auth) throw new GatewayError("This session has no Grok Bot access token for the backend.", { code: "NO_ACCESS_TOKEN" });
+  if (auth.env) {
+    const token = accessTokenFromEnv();
+    if (!token) throw new GatewayError("CURSOR_ACCESS_TOKEN is no longer set.", { code: "NO_ACCESS_TOKEN" });
+    return { token, appLogin: false };
+  }
+  // The app refreshes its saved token; read it again when the copy in memory is about to expire.
+  if (!(auth.expiresAt > Date.now() + 60_000)) {
+    let loaded;
+    try {
+      loaded = loadAppAccessToken({ scope: auth.scope, home: homedir(), env: process.env, ...secretStoreOptions() });
+    } catch (error) {
+      throw scrubOutbound(toGatewayError(error), []);
+    }
+    auth.token = loaded.token;
+    auth.expiresAt = loaded.expiresAt;
+  }
+  return { token: auth.token, appLogin: true };
+}
+
+// The access token this session would send, for redacting server text that echoes it.
+function backendSecrets(session) {
+  const auth = backendAuths.get(session);
+  const token = auth?.env ? accessTokenFromEnv() : auth?.token;
+  return typeof token === "string" && token ? [token] : [];
+}
+
+// Server-supplied text for an error: secrets redacted first, then bounded.
+function serverText(text, secrets) {
+  return redactKnownSecrets(String(text ?? ""), secrets).slice(0, 300);
+}
+
+// Connect error bodies say little in `message` ("Error"); the reason is in details[].debug.details.
+function connectDetail(data) {
+  const details = Array.isArray(data?.details) ? data.details : [];
+  for (const item of details) {
+    const text = item?.debug?.details?.detail || item?.debug?.details?.title;
+    if (typeof text === "string" && text) return text;
+  }
+  return undefined;
+}
+
+function backendFailure(rpc, res, data, token) {
+  const code = typeof data?.code === "string" && data.code ? data.code : undefined;
+  // Redact the whole text before cutting it: a cut can split the token and defeat the match.
+  let detail = redactKnownSecrets(String(connectDetail(data) || data?.message || data?.raw || res.statusText || ""), [token]).slice(0, 300);
+  if (res.status === 401 && /no longer supported/i.test(detail)) {
+    detail += ` (gbot sent x-cursor-client-version ${cursorClientVersion()}; set SAND_CLIENT_VERSION to override)`;
+    forgetCachedAppVersion();
+  }
+  const auth = res.status === 401 || res.status === 403 || code === "unauthenticated" || code === "permission_denied";
+  return new GatewayError(rpc + " failed: " + res.status + (code ? " " + code : "") + " " + detail, {
+    status: res.status,
+    method: rpc,
+    kind: auth ? "auth" : res.status >= 500 ? "server" : "client",
+    ...(code ? { code } : {}),
+  });
+}
+
+/**
+ * One unary GrokBotService call. `send` marks a call that may land: the caller's signal stops it only
+ * before transmission, and a timeout or transport loss says the effect is unknown.
+ * @param {any} session
+ * @param {string} rpc
+ * @param {Record<string, unknown>} [body]
+ * @param {{ signal?: AbortSignal, timeoutMs?: number, headers?: Record<string, string>, send?: boolean }} [options]
+ */
+async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false } = {}) {
+  assertGatewayActive(signal);
+  let token, url;
+  try {
+    const credential = backendCredential(session);
+    token = credential.token;
+    // The app login token is an account credential gbot reads itself, like EnsureSandBox.
+    url = assertAllowedCredentialUrl(backendBase(), { kind: "backend", ignoreAllowAny: credential.appLogin }) + GROK_BOT_SERVICE + rpc;
+  } catch (error) {
+    const failed = scrubOutbound(error, token ? [token] : []);
+    // Nothing left the machine.
+    if (send && failed && typeof failed === "object") failed.delivery = "rejected";
+    throw failed;
+  }
+  const deadline = gatewayDeadline(send ? undefined : signal, timeoutMs);
+  assertGatewayActive(signal); // Final synchronous boundary before transmission.
+  let res, data;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      redirect: "error",
+      signal: deadline,
+      headers: { ...ensureSandboxHeaders(token), ...headers },
+      body: JSON.stringify(body),
+    });
+    data = await readJson(res, deadline);
+  } catch (error) {
+    if (!send) assertGatewayActive(signal);
+    if (error instanceof GatewayError) throw scrubOutbound(error, [token]);
+    if (isDeadlineError(error)) {
+      throw new GatewayError(
+        send
+          ? rpc + " timed out after " + timeoutMs + "ms; delivery is unknown. Do not resend automatically."
+          : rpc + " timed out after " + timeoutMs + "ms.",
+        { method: rpc, code: "GATEWAY_TIMEOUT", ...(send ? { effect: "unknown" } : {}) },
+      );
+    }
+    // Fetch failures can echo the request URL. Keep the RPC name and nothing else.
+    throw new GatewayError(rpc + " request failed.", { method: rpc, code: "GATEWAY_REQUEST_FAILED" });
+  }
+  if (!send) assertGatewayActive(signal);
+  if (!res.ok) throw backendFailure(rpc, res, data, token);
+  return data;
+}
+
+const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
+
+/**
+ * A ListGrokBotAgents / CreateGrokBotRoom / UpdateGrokBotAgent agent in gbot's record shape. `agentId`
+ * (uuid) is the id every other call takes; the numeric `id` is kept as `serverId` for UpdateGrokBotAgent.
+ * `client` is a GrokBotAgentClientState: undefined leaves the sidebar fields out, null means the server
+ * has no state for the agent. proto3 JSON leaves false out. Like the app, notify comes from the client
+ * state only once that state has been written (`updatedAtMs` > 0); until then it shows on.
+ */
+function serverRecord(agent, client) {
+  const isGroup = agent.kind === ROOM_KIND;
+  const members = Array.isArray(agent.memberAgentIds) ? agent.memberAgentIds.map(String) : [];
+  const written = Boolean(client) && Number(client.updatedAtMs) > 0;
+  return {
+    id: String(agent.agentId),
+    name: agent.name || "",
+    title: agent.title || "",
+    description: agent.description || "",
+    avatarShape: agent.avatarShape || "",
+    avatarColor: agent.avatarColor || "",
+    ...(client === undefined ? {} : {
+      notifyOnAgentUpdates: written ? client.notifyOnUpdatesEnabled === true : true,
+      hiddenFromSidebar: client ? client.hiddenFromSidebar === true : false,
+    }),
+    isGroup,
+    memberIds: isGroup ? members : [],
+    ...(agent.id ? { serverId: String(agent.id) } : {}),
+    // "temporal" for a server-hosted bot. The app routes some calls (auto-review approvals) by it.
+    harness: String(agent.harness || ""),
+  };
+}
+
+// Box rows the server does not list. resolveFromList prefers a server record over one of these, and
+// sends, edits and deletes for them stay on the box gateway.
+const boxOnlyRecords = new WeakSet();
+// Rosters the server cut short (ListGrokBotAgentsResponse.truncated). A name could match one bot here
+// while the bot meant is past the cut, so resolveFromList matches only ids in them.
+const truncatedRosters = new WeakSet();
+// Rosters read from the box because the server roster is off for this login.
+const boxFallbackRosters = new WeakSet();
+// Every agentId and legacyAgentId the server listed, per roster.
+const serverIdsOf = new WeakMap();
+
+// The box roster, read alongside the server's. It does not retry an asleep box (no 417 wake), and a
+// failure leaves the server roster on its own (GBOT_DEBUG says why). A saved login whose box answers
+// 401/403 or "could not be routed" still rebuilds its session first, and that rebuild can wake the box.
+function boxRows(session, signal) {
+  return gatewayCall(session, "listAgents", {}, { signal, allowWake: false }).then(unwrapList, (error) => {
+    if (signal?.aborted) throw error;
+    debug("box roster unavailable, using the server roster only: " + (error instanceof Error ? error.message : String(error)));
+    return [];
+  });
+}
+
+function boxOnly(rows, listed) {
+  const out = [];
+  for (const row of rows) {
+    const rec = asRecord(row);
+    // A temporal row the server does not list is stale: live, a bot the backend deleted stayed here.
+    if (!rec?.id || listed.has(rec.id) || row?.harness === "temporal") continue;
+    boxOnlyRecords.add(rec);
+    out.push(rec);
+  }
+  return out;
+}
+
+// Notify and hidden for every agent of the login (an empty agentIds list answers all of them). Display
+// only, so a failure leaves those fields out instead of failing the command.
+function clientStates(session, signal) {
+  return backendCall(session, "ListGrokBotAgentStatuses", { agentIds: [] }, { signal }).then((data) => {
+    const clients = new Map();
+    for (const status of Array.isArray(data?.statuses) ? data.statuses : []) {
+      if (status?.agentId) clients.set(String(status.agentId), status.client ?? null);
+    }
+    return clients;
+  }, (error) => {
+    if (signal?.aborted) throw error;
+    debug("ListGrokBotAgentStatuses failed, leaving notify and hidden out: " + (error instanceof Error ? error.message : String(error)));
+    return undefined;
+  });
+}
+
+// Whether the login's server roster is on, decided as the app's isServerRosterEnabled does:
+// GetGrokBotRuntimeCapabilities().capabilities.durableIdentityEnabled === true, with FailedPrecondition
+// from that call meaning off. Any other error from it, and any error from ListGrokBotAgents itself, fails
+// the lookup: a guessed roster could point a send or a delete at the wrong bot. The answer is kept for
+// the session, so it costs one call; an error is not kept.
+const serverRosterModes = new WeakMap();
+const boxRosterNotices = new WeakSet();
+
+function serverRosterOn(session, signal) {
+  let known = serverRosterModes.get(session);
+  if (!known) {
+    known = backendCall(session, "GetGrokBotRuntimeCapabilities", {}, { signal }).then(
+      (data) => data?.capabilities?.durableIdentityEnabled === true,
+      (error) => {
+        if (error instanceof GatewayError && error.code === "failed_precondition") return false;
+        serverRosterModes.delete(session);
+        throw error;
+      },
+    );
+    serverRosterModes.set(session, known);
+  }
+  return known;
+}
+
+function noteBoxRoster(session) {
+  if (boxRosterNotices.has(session)) return;
+  boxRosterNotices.add(session);
+  console.error("gbot: the server roster is off for this login (GetGrokBotRuntimeCapabilities); using the box roster and the box gateway.");
+}
+
+async function gatewayRoster(session, signal) {
+  const data = await gatewayCall(session, "listAgents", {}, { signal });
+  return unwrapList(data).map(asRecord).filter((r) => r && r.id);
+}
+
+/**
+ * The roster. With a backend session the server is the source of truth for every agent it lists
+ * (any harness), and box rows are added only for non-temporal agents the server does not list.
+ * Without one, or when the server roster is off for the login, it is the box gateway's listAgents.
+ * @param {any} session
+ * @param {{ signal?: AbortSignal, clientState?: boolean }} [options]
+ */
+async function roster(session, { signal, clientState = false } = {}) {
+  if (!hasBackend(session)) return gatewayRoster(session, signal);
+  const onRead = serverRosterOn(session, signal);
+  const listRead = backendCall(session, "ListGrokBotAgents", {}, { signal });
+  const statesRead = clientState ? clientStates(session, signal) : Promise.resolve(undefined);
+  const boxRead = boxRows(session, signal);
+  const abandon = () => {
+    for (const read of [listRead, statesRead, boxRead]) read.catch(() => {});
+  };
+  let on;
+  try {
+    on = await onRead;
+  } catch (error) {
+    abandon();
+    throw error;
+  }
+  if (!on) {
+    abandon();
+    noteBoxRoster(session);
+    // The box is the only roster here, so this read may wake it, as before 0.78.x.
+    const records = (await gatewayRoster(session, signal)).map((rec) => ({ ...rec, roster: "box" }));
+    for (const rec of records) boxOnlyRecords.add(rec);
+    boxFallbackRosters.add(records);
+    return records;
+  }
+  let data;
+  try {
+    data = await listRead;
+  } catch (error) {
+    abandon();
+    throw error;
+  }
+  const [clients, box] = await Promise.all([statesRead, boxRead]);
+  const listed = new Set();
+  const records = [];
+  for (const agent of Array.isArray(data?.agents) ? data.agents : []) {
+    // Like the app, a server row without an agentId is not a bot gbot can address.
+    if (!agent || typeof agent.agentId !== "string" || !agent.agentId) continue;
+    listed.add(agent.agentId);
+    if (typeof agent.legacyAgentId === "string" && agent.legacyAgentId) listed.add(agent.legacyAgentId);
+    records.push(serverRecord(agent, clients === undefined ? undefined : (clients.get(agent.agentId) ?? null)));
+  }
+  const truncated = data?.truncated === true;
+  // A cut list cannot tell a box-only bot from a server bot past the cut, so box rows are left out.
+  const all = truncated ? records : [...records, ...boxOnly(box, listed)];
+  serverIdsOf.set(all, listed);
+  if (truncated) {
+    debug("ListGrokBotAgents says truncated; names will not resolve, ids still do, box-only rows are left out");
+    truncatedRosters.add(all);
+  }
+  return all;
+}
+
+async function setClientState(session, agentId, state) {
+  return backendCall(session, "SetGrokBotAgentClientState", { agentId, ...state });
+}
+
+/** A GrokBotSendStatus name ("ACCEPTED", "PENDING", "UNSPECIFIED", ...), or "" when the read failed. */
+async function sendStatus(session, agentId, clientNonce, signal) {
+  try {
+    const data = await backendCall(session, "GetGrokBotSendStatus", { agentId, messageId: clientNonce }, {
+      signal,
+      timeoutMs: SEND_GATEWAY_TIMEOUT_MS,
+    });
+    return {
+      // proto3 JSON leaves the zero value out.
+      status: String(data?.status || "UNSPECIFIED").replace(/^GROK_BOT_SEND_STATUS_/, ""),
+      ...(typeof data?.echoEntryId === "string" && data.echoEntryId ? { echoEntryId: data.echoEntryId } : {}),
+      ...(typeof data?.rejectionCode === "string" && data.rejectionCode ? { rejectionCode: data.rejectionCode } : {}),
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    debug("GetGrokBotSendStatus failed: " + (error instanceof Error ? error.message : String(error)));
+    return { status: "" };
+  }
+}
+
+function deviceTimeZone() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === "string" && /^(UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+)$/.test(zone) ? zone : "";
+  } catch {
+    return "";
+  }
+}
+
+const ACCEPTED_DELIVERIES = new Set([
+  "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_BOX",
+  "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL",
+  // messageId is the idempotency key: the same nonce again is the message already there.
+  "GROK_BOT_USER_MESSAGE_DELIVERY_DUPLICATE",
+]);
+const REFUSED_DELIVERY = "GROK_BOT_USER_MESSAGE_DELIVERY_REFUSED";
+
+function refusedSend(refusal, rec, secrets) {
+  const message = typeof refusal?.message === "string" && refusal.message ? serverText(refusal.message, secrets) : "the message was refused";
+  const failureCode = typeof refusal?.failureCode === "string" && refusal.failureCode ? refusal.failureCode : undefined;
+  const error = new GatewayError("SendGrokBotUserMessage refused: " + message, {
+    method: "SendGrokBotUserMessage",
+    code: "SEND_REFUSED",
+    ...(failureCode ? { failureCode } : {}),
+  });
+  error.delivery = "rejected";
+  error.targetId = rec.id;
+  return error;
+}
+
+// Connect codes that do not prove the server turned the message away: it may have landed.
+const MAYBE_LANDED_CODES = new Set(["canceled", "deadline_exceeded", "unavailable", "unknown", "internal"]);
+
+// SendGrokBotUserMessage, the call the 0.78.x app makes. Same delivery rules as the gateway send:
+// a definite answer is accepted or rejected; a timeout, transport loss, 408, 499 (canceled), 5xx, or a
+// Connect code in MAYBE_LANDED_CODES stays unknown and is never resent. Like the app, an unknown send
+// asks GetGrokBotSendStatus for the same nonce, but only to settle the answer: unlike the app, gbot
+// never resends after NOT_FOUND.
+async function backendSend(session, rec, prompt, extra, clientNonce) {
+  const body = {
+    agentId: rec.id,
+    messageId: clientNonce,
+    text: prompt,
+    sentAtMs: String(Date.now()),
+    source: "GROK_BOT_CLIENT_SURFACE_DESKTOP",
+    initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_USER",
+    sendSource: "GROK_BOT_SEND_SOURCE_CHAT",
+    ...(extra.replyToId ? { replyToId: extra.replyToId } : {}),
+  };
+  const zone = deviceTimeZone();
+  const accepted = (data) => ({
+    target: rec,
+    result: data && typeof data === "object" ? data : {},
+    delivery: "accepted",
+    clientNonce,
+  });
+  let data;
+  try {
+    data = await backendCall(session, "SendGrokBotUserMessage", body, {
+      send: true,
+      signal: extra.signal,
+      timeoutMs: SEND_GATEWAY_TIMEOUT_MS,
+      headers: zone ? { "x-cursor-timezone": zone } : {},
+    });
+  } catch (err) {
+    if (err && typeof err === "object" && err.delivery == null) {
+      // 408, 499, 5xx and the Connect codes above may have landed. Any other 4xx is a rejection.
+      const answeredNo = err instanceof GatewayError && err.status != null && err.status < 500
+        && err.status !== 408 && err.status !== 499 && !MAYBE_LANDED_CODES.has(String(err.code ?? ""));
+      err.delivery = answeredNo ? "rejected" : "unknown";
+    }
+    if (err?.delivery === "unknown" && !extra.signal?.aborted) {
+      const status = await sendStatus(session, rec.id, clientNonce, undefined);
+      if (status.status === "ACCEPTED") {
+        return accepted({ status: "GROK_BOT_SEND_STATUS_ACCEPTED", ...(status.echoEntryId ? { echoEntryId: status.echoEntryId } : {}) });
+      }
+      if (status.status === "REJECTED") {
+        // A fresh error: the transport one says "delivery is unknown" and carries its timeout or 5xx.
+        const rejected = refusedSend({
+          failureCode: status.rejectionCode,
+          message: "GetGrokBotSendStatus says rejected after " + (err.code || (err.status ? "HTTP " + err.status : "a transport failure")),
+        }, rec, backendSecrets(session));
+        rejected.cause = err;
+        throw rejected;
+      }
+    }
+    throw err;
+  }
+  const delivery = String(data?.delivery ?? "");
+  if (ACCEPTED_DELIVERIES.has(delivery)) return accepted(data);
+  if (delivery === REFUSED_DELIVERY) throw refusedSend(data?.refusal, rec, backendSecrets(session));
+  // UNSPECIFIED, or a value this build does not know: the server did not say. Settle it if it can.
+  const status = await sendStatus(session, rec.id, clientNonce, undefined);
+  if (status.status === "ACCEPTED") return accepted(data);
+  if (status.status === "REJECTED") throw refusedSend({ failureCode: status.rejectionCode, message: "GetGrokBotSendStatus says rejected" }, rec, backendSecrets(session));
+  return { target: rec, result: data && typeof data === "object" ? data : {}, delivery: "unknown", clientNonce };
+}
+
 function asRecord(agent) {
   if (!agent) return null;
   const id = agent.id || agent.agentId;
@@ -948,23 +1414,52 @@ function unwrapOne(data) {
   return asRecord(data.agent || data);
 }
 
+/** Every bot and group, with the sidebar settings (notify, hidden). */
 export async function listAgents(session, { signal } = {}) {
-  const data = await gatewayCall(session, "listAgents", {}, { signal });
-  return unwrapList(data).map(asRecord).filter((r) => r && r.id);
+  return roster(session, { signal, clientState: true });
 }
 
 function resolveFromList(records, ref) {
-  const needle = String(ref).trim().toLowerCase();
+  const needle = String(ref ?? "").trim().toLowerCase();
+  if (!needle) throw new GatewayError("A bot or group name or id is required.");
   const byId = records.find((r) => r.id.toLowerCase() === needle);
   if (byId) return byId;
-  const matches = records.filter((r) => r.name.toLowerCase() === needle || r.title.toLowerCase() === needle);
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) throw new GatewayError("No bot or group named \"" + ref + "\"");
-  throw new GatewayError("Ambiguous name \"" + ref + "\"");
+  if (truncatedRosters.has(records)) {
+    throw new GatewayError(
+      "The server sent only part of the bot list (truncated), so \"" + ref + "\" is not matched by name. Use the bot or group id.",
+      { code: "ROSTER_TRUNCATED" },
+    );
+  }
+  const ambiguous = (why) => new GatewayError("Ambiguous name \"" + ref + "\"" + (why ? " (" + why + ")" : "") + ". Use the id.");
+  const one = (found, why) => {
+    if (found.length > 1) throw ambiguous(why);
+    return found[0] ?? null;
+  };
+  const exact = (r) => r.name.toLowerCase() === needle || (r.title !== "" && r.title.toLowerCase() === needle);
+  // ListGrokBotAgents shows a titled bot as "name · title" with no title (live 2026-11-05). The folded
+  // rule matches either half: the plain name, the title (all after the first " · "), or the last title.
+  const folded = (r) => {
+    if (r.title) return false;
+    const parts = r.name.toLowerCase().split(" · ");
+    return parts.length > 1 && (parts[0] === needle || parts.slice(1).join(" · ") === needle || parts.at(-1) === needle);
+  };
+  const server = records.filter((r) => !boxOnlyRecords.has(r));
+  const box = records.filter((r) => boxOnlyRecords.has(r));
+  const serverExact = one(server.filter(exact));
+  if (serverExact) return serverExact;
+  const boxExact = box.filter(exact);
+  const serverFolded = server.filter(folded);
+  // A server bot found only through its folded name and a box-only bot with exactly that name may be
+  // two bots or one: refuse to guess (a delete cannot be undone).
+  if (serverFolded.length > 0 && boxExact.length > 0) throw ambiguous("a server bot and a box-only bot match");
+  const found = one(serverFolded) ?? one(boxExact) ?? one(box.filter(folded));
+  if (found) return found;
+  throw new GatewayError("No bot or group named \"" + ref + "\"");
 }
 
-export async function resolveRef(session, ref, { signal } = {}) {
-  return resolveFromList(await listAgents(session, { signal }), ref);
+/** @param {any} session @param {string} ref @param {{ signal?: AbortSignal, clientState?: boolean }} [options] */
+export async function resolveRef(session, ref, { signal, clientState = false } = {}) {
+  return resolveFromList(await roster(session, { signal, clientState }), ref);
 }
 
 export async function createAgent(session, input) {
@@ -979,32 +1474,83 @@ export async function createAgent(session, input) {
   return unwrapOne(data);
 }
 
-export async function updateAgent(session, ref, patch = {}) {
-  const rec = await resolveRef(session, ref);
+function profileChanges(patch) {
   if (patch.name !== undefined && !String(patch.name).trim()) {
     throw new GatewayError("Name cannot be blank.");
   }
-  const profile = {
-    name: patch.name !== undefined ? String(patch.name).trim() : rec.name,
-    description: patch.description !== undefined ? String(patch.description) : rec.description,
-  };
-  if (patch.title !== undefined) profile.title = String(patch.title);
-  if (patch.avatarShape !== undefined) profile.avatarShape = assertAvatar("shape", patch.avatarShape, AVATAR_SHAPES);
-  if (patch.avatarColor !== undefined) profile.avatarColor = assertAvatar("color", patch.avatarColor, AVATAR_COLORS);
-  await gatewayCall(session, "updateAgent", { id: rec.id, profile });
+  const changes = {};
+  if (patch.name !== undefined) changes.name = String(patch.name).trim();
+  if (patch.description !== undefined) changes.description = String(patch.description);
+  if (patch.title !== undefined) changes.title = String(patch.title);
+  if (patch.avatarShape !== undefined) changes.avatarShape = assertAvatar("shape", patch.avatarShape, AVATAR_SHAPES);
+  if (patch.avatarColor !== undefined) changes.avatarColor = assertAvatar("color", patch.avatarColor, AVATAR_COLORS);
+  return changes;
+}
+
+// The box keeps its own copy of a bot and passes an edit on to the server only for the fields named
+// in `editedFields`, as the app sends them. Live (2026-11-05) an avatar edit arrived about 3 s later;
+// a title edit had not arrived 30 s later. Used only without the backend, or for a box-only bot.
+async function gatewayUpdate(session, rec, patch, changes) {
+  const edited = Object.keys(changes);
+  if (edited.length > 0) {
+    const profile = { name: rec.name, description: rec.description, ...changes };
+    await gatewayCall(session, "updateAgent", { id: rec.id, profile, editedFields: edited });
+  }
   if (patch.notifyOnAgentUpdates !== undefined) {
     await gatewayCall(session, "setAgentNotifyOnUpdates", { id: rec.id, isEnabled: Boolean(patch.notifyOnAgentUpdates) });
   }
   if (patch.hiddenFromSidebar !== undefined) {
     await gatewayCall(session, "setAgentHiddenFromSidebar", { id: rec.id, isHidden: Boolean(patch.hiddenFromSidebar) });
   }
+}
+
+// UpdateGrokBotAgent takes the numeric server id and, with partialUpdate, only the changed fields.
+// It edits a room the server just created (the box listed it only minutes later), it changes the
+// title (the box did not pass that on), and its change is already on the server roster, so the read
+// back below is current. The server shows a bot's title in its name ("name · title"). Notify and
+// hidden are per-viewer client state; the app also mirrors notify to the box, so gbot does too, best
+// effort.
+async function backendUpdate(session, rec, patch, changes) {
+  if (Object.keys(changes).length > 0) {
+    if (!rec.serverId) throw new GatewayError("The server listed no numeric id for \"" + rec.name + "\", so its profile cannot be updated.");
+    await backendCall(session, "UpdateGrokBotAgent", { id: rec.serverId, ...changes, partialUpdate: true });
+  }
+  if (patch.notifyOnAgentUpdates !== undefined) {
+    const isEnabled = Boolean(patch.notifyOnAgentUpdates);
+    await setClientState(session, rec.id, { notifyOnUpdatesEnabled: isEnabled });
+    try {
+      await gatewayCall(session, "setAgentNotifyOnUpdates", { id: rec.id, isEnabled }, { allowWake: false });
+    } catch (error) {
+      debug("box notify mirror failed: " + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+  if (patch.hiddenFromSidebar !== undefined) {
+    await setClientState(session, rec.id, { hiddenFromSidebar: Boolean(patch.hiddenFromSidebar) });
+  }
+}
+
+export async function updateAgent(session, ref, patch = {}) {
+  const rec = await resolveRef(session, ref);
+  const changes = profileChanges(patch);
+  // Notify and hidden need only the uuid; the profile needs the numeric server id.
+  if (hasBackend(session) && !boxOnlyRecords.has(rec)) await backendUpdate(session, rec, patch, changes);
+  else await gatewayUpdate(session, rec, patch, changes);
   const fresh = (await listAgents(session)).find((r) => r.id === rec.id);
   return fresh || rec;
 }
 
 export async function deleteAgent(session, ref) {
   const rec = await resolveRef(session, ref);
-  await gatewayCall(session, "deleteAgent", { id: rec.id });
+  if (!hasBackend(session) || boxOnlyRecords.has(rec)) {
+    await gatewayCall(session, "deleteAgent", { id: rec.id });
+    return rec;
+  }
+  try {
+    await backendCall(session, "DeleteGrokBotAgent", { id: rec.id });
+  } catch (error) {
+    // Like the app: already gone is done. PermissionDenied and the rest stay errors.
+    if (!(error instanceof GatewayError && error.code === "not_found")) throw error;
+  }
   return rec;
 }
 
@@ -1029,8 +1575,17 @@ function asSkills(data) {
   return list.filter((s) => s && s.id).map(asSkill);
 }
 
+// The library is the box's, so the id must be a bot the box knows. With a backend session it must
+// also be one the server lists: the box roster can still hold a bot the server deleted.
 async function anyBotId(session) {
-  const bot = (await listAgents(session)).find((r) => !r.isGroup);
+  const box = unwrapList(await gatewayCall(session, "listAgents", {})).map(asRecord).filter((r) => r && r.id && !r.isGroup);
+  let bot = box[0];
+  if (hasBackend(session)) {
+    // Only ids the server listed (agentId or legacyAgentId), never a box-only row. When the server
+    // roster is off, the box roster is all there is.
+    const listed = serverIdsOf.get(await roster(session));
+    if (listed) bot = box.find((r) => listed.has(r.id));
+  }
   if (!bot) throw new GatewayError("Skills need at least one bot. Run gbot bots create first.");
   return bot.id;
 }
@@ -1096,28 +1651,89 @@ function normalizeMemberIds(records, memberRefs) {
   return [...memberIds];
 }
 
+// CreateGrokBotRoom, as the app creates a server-hosted room. `agentId` is a fresh v4 nonce; the
+// server echoed it live, but the answer's agentId is the one used. The request has no title or
+// avatar, so those go through updateAgent (UpdateGrokBotAgent edits rooms; live 2026-11-05).
+async function createRoom(session, input, memberAgentIds) {
+  let data;
+  try {
+    data = await backendCall(session, "CreateGrokBotRoom", {
+      agentId: randomUUID(),
+      name: input.name,
+      description: input.description || "",
+      memberAgentIds,
+      humanMemberUserIds: [],
+    }, { timeoutMs: ROOM_TIMEOUT_MS });
+  } catch (error) {
+    if (error instanceof GatewayError && (error.code === "GATEWAY_TIMEOUT" || error.code === "GATEWAY_REQUEST_FAILED" || (error.status ?? 0) >= 500)) {
+      error.message += " The group may have been created; run gbot groups list before trying again.";
+    }
+    throw error;
+  }
+  if (!data?.agent || data.agent.kind !== ROOM_KIND) throw new GatewayError("CreateGrokBotRoom did not return a room.");
+  if (typeof data.agent.agentId !== "string" || !data.agent.agentId) {
+    throw new GatewayError("CreateGrokBotRoom returned a room without an id. The group may have been created; run gbot groups list before trying again.");
+  }
+  return serverRecord(data.agent);
+}
+
 export async function createGroup(session, input) {
-  const records = await listAgents(session);
-  const memberAgentIds = normalizeMemberIds(records, input.memberIds || []);
-  const data = await gatewayCall(session, "createGroup", {
-    name: input.name,
-    description: input.description || "",
-    memberAgentIds,
-  });
-  const rec = unwrapOne(data);
+  // Check everything before anything is created.
   const extras = {};
-  if (input.title) extras.title = input.title;
-  if (input.avatarShape) extras.avatarShape = input.avatarShape;
-  if (input.avatarColor) extras.avatarColor = input.avatarColor;
-  if (Object.keys(extras).length && rec?.id) return updateAgent(session, rec.id, extras);
-  return rec;
+  if (input.title) extras.title = String(input.title);
+  const avatarShape = assertAvatar("shape", input.avatarShape, AVATAR_SHAPES);
+  const avatarColor = assertAvatar("color", input.avatarColor, AVATAR_COLORS);
+  if (avatarShape) extras.avatarShape = avatarShape;
+  if (avatarColor) extras.avatarColor = avatarColor;
+  const records = await roster(session);
+  const memberAgentIds = normalizeMemberIds(records, input.memberIds || []);
+  const onBackend = hasBackend(session) && !boxFallbackRosters.has(records);
+  const rec = onBackend
+    ? await createRoom(session, input, memberAgentIds)
+    : unwrapOne(await gatewayCall(session, "createGroup", {
+      name: input.name,
+      description: input.description || "",
+      memberAgentIds,
+    }));
+  if (!Object.keys(extras).length || !rec?.id) return rec;
+  try {
+    if (!onBackend) return await updateAgent(session, rec.id, extras);
+    // The room's numeric id is in the CreateGrokBotRoom answer; no second roster read.
+    if (!rec.serverId) throw new GatewayError("The server returned no numeric id for the new room, so it cannot be updated yet.");
+    const data = await backendCall(session, "UpdateGrokBotAgent", { id: rec.serverId, ...extras, partialUpdate: true });
+    return data?.agent ? serverRecord(data.agent) : { ...rec, ...extras };
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message += " The group was created (id " + rec.id + ") without its title or avatar; set them with gbot groups update " + rec.id + ".";
+    }
+    throw error;
+  }
 }
 
 export async function setGroupMembers(session, groupRef, memberRefs) {
-  const records = await listAgents(session);
+  const records = await roster(session);
   const group = resolveFromList(records, groupRef);
   if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
+  return applyMembers(session, records, group, memberRefs);
+}
+
+async function applyMembers(session, records, group, memberRefs) {
   const memberAgentIds = normalizeMemberIds(records, memberRefs);
+  if (hasBackend(session) && !boxOnlyRecords.has(group)) {
+    const data = await backendCall(session, "SetGrokBotRoomMembers", { agentId: group.id, memberAgentIds }, {
+      timeoutMs: ROOM_MEMBERS_TIMEOUT_MS,
+    });
+    // Like the app: the answer must be the room asked for.
+    const room = data?.agent;
+    if (!room || room.agentId !== group.id || room.kind !== ROOM_KIND) {
+      throw new GatewayError(
+        "SetGrokBotRoomMembers answered " + (room ? "for a different room" : "without the room")
+          + "; the members may have changed. Check gbot groups get " + group.id + ".",
+        { method: "SetGrokBotRoomMembers", code: "ROOM_MISMATCH" },
+      );
+    }
+    return serverRecord(room);
+  }
   const data = await gatewayCall(session, "setGroupMembers", {
     id: group.id,
     memberAgentIds,
@@ -1126,21 +1742,21 @@ export async function setGroupMembers(session, groupRef, memberRefs) {
 }
 
 export async function addGroupMember(session, groupRef, memberRef) {
-  const records = await listAgents(session);
+  const records = await roster(session);
   const group = resolveFromList(records, groupRef);
   if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
   const member = resolveFromList(records, memberRef);
   const next = [...new Set([...group.memberIds, member.id])];
-  return setGroupMembers(session, group.id, next);
+  return applyMembers(session, records, group, next);
 }
 
 export async function removeGroupMember(session, groupRef, memberRef) {
-  const records = await listAgents(session);
+  const records = await roster(session);
   const group = resolveFromList(records, groupRef);
   if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
   const member = resolveFromList(records, memberRef);
   const next = group.memberIds.filter((id) => id !== member.id);
-  return setGroupMembers(session, group.id, next);
+  return applyMembers(session, records, group, next);
 }
 
 // Live hosts answer `{ "accepted": true }` (no messageId); older hosts returned a `messageId`.
@@ -1159,6 +1775,13 @@ function transcriptRows(data) {
   return [];
 }
 
+/**
+ * @param {any} session
+ * @param {string} ref
+ * @param {string} prompt
+ * @param {{ signal?: AbortSignal, clientNonce?: string, replyToId?: string }} [extra]
+ * @returns {Promise<{ target: any, result: Record<string, any>, delivery: "accepted" | "unknown", messageId?: string, clientNonce: string }>}
+ */
 export async function sendPrompt(session, ref, prompt, extra = {}) {
   assertGatewayActive(extra.signal);
   // Keep this roster check. Live (2026-10-10): sendPrompt to an agentId that is not on the roster
@@ -1180,8 +1803,11 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     clientNonce: extra.clientNonce || randomUUID(),
   };
   if (extra.replyToId) body.replyToId = extra.replyToId;
+  // Never fall back to the gateway from here: a backend send that may have landed must not be sent twice.
+  const viaBackend = hasBackend(session) && !boxOnlyRecords.has(rec);
   let data;
   try {
+    if (viaBackend) return await backendSend(session, rec, prompt, extra, body.clientNonce);
     data = await gatewayCall(session, "sendPrompt", body, { signal: extra.signal });
   } catch (err) {
     // Delivery states: the server answered no (rejected) vs the request may have landed (unknown).
@@ -1197,7 +1823,7 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
     if (err && err.targetId == null) err.targetId = rec.id;
     if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
-    if (err instanceof GatewayError && err.delivery === "unknown" && !/delivery unknown/.test(err.message)) {
+    if (err instanceof GatewayError && err.delivery === "unknown" && !/delivery (is )?unknown/.test(err.message)) {
       err.message += " (delivery unknown; check the thread before resending)";
     }
     throw err;
@@ -1215,19 +1841,56 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
   };
 }
 
-export async function getTranscriptTail(session, ref, limit = 40) {
-  const rec = await resolveRef(session, ref);
+async function transcriptTail(session, rec, limit) {
   const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
   const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: bounded });
   return { target: rec, transcript: data };
 }
 
-// Read the transcript tail for the nonce this send used. Never calls sendPrompt.
+export async function getTranscriptTail(session, ref, limit = 40) {
+  return transcriptTail(session, await resolveRef(session, ref), limit);
+}
+
+// Settled by GetGrokBotSendStatus for the nonce (the backend send's messageId), then by the transcript tail.
+// Never sends anything. ACCEPTED is delivered and REJECTED is rejected. When the tail does not show the
+// message either, only NOT_FOUND is "not-found-in-tail". Every other answer (PENDING, UNKNOWN_DURABILITY,
+// UNSPECIFIED, a value newer than this build) and a status read that failed ("UNAVAILABLE") are
+// "pending": the message may still land, so the caller must not resend.
+
 export async function reconcileDelivery(session, ref, clientNonce) {
   if (typeof clientNonce !== "string" || clientNonce.length === 0) {
     throw new GatewayError("A clientNonce is required to reconcile a delivery.");
   }
-  const tail = await getTranscriptTail(session, ref, 200);
+  const rec = await resolveRef(session, ref);
+  let backend = null;
+  if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+    backend = await sendStatus(session, rec.id, clientNonce, undefined);
+    if (backend.status === "ACCEPTED") {
+      return { target: rec, clientNonce, status: "delivered", entryId: backend.echoEntryId ?? "", sendStatus: "ACCEPTED" };
+    }
+    if (backend.status === "REJECTED") {
+      return {
+        target: rec,
+        clientNonce,
+        status: "rejected",
+        sendStatus: "REJECTED",
+        ...(backend.rejectionCode ? { rejectionCode: backend.rejectionCode } : {}),
+      };
+    }
+  }
+  const sendStatusField = backend ? { sendStatus: backend.status || "UNAVAILABLE" } : {};
+  let tail;
+  try {
+    tail = await transcriptTail(session, rec, 200);
+  } catch (error) {
+    // The server has a status for the nonce that is neither ACCEPTED nor REJECTED nor NOT_FOUND, so it
+    // may still land: keep that answer rather than lose it to a box that is asleep or failing. With no
+    // status (none read, or NOT_FOUND) nothing is known, so the error stands.
+    if (!backend?.status || backend.status === "NOT_FOUND") throw error;
+    const code = error instanceof GatewayError && typeof error.code === "string" && error.code ? error.code : "TAIL_READ_FAILED";
+    debug("reconcile: transcript tail failed (" + code + "); keeping the server's " + backend.status);
+    return { target: rec, clientNonce, status: "pending", ...sendStatusField, tailError: code };
+  }
   const entries = transcriptRows(tail?.transcript);
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
@@ -1242,13 +1905,15 @@ export async function reconcileDelivery(session, ref, clientNonce) {
       status: "delivered",
       entryId,
       ...(typeof entry.seq === "number" ? { seq: entry.seq } : {}),
+      ...sendStatusField,
     };
   }
   return {
     target: tail.target,
     clientNonce,
-    status: "not-found-in-tail",
+    status: backend && backend.status !== "NOT_FOUND" ? "pending" : "not-found-in-tail",
     scanned: entries.length,
+    ...sendStatusField,
   };
 }
 
@@ -1258,27 +1923,107 @@ export async function getThread(session, ref, rootId) {
   return { target: rec, thread: data };
 }
 
-export async function listGrokApprovals(session, ref) {
-  const { target, transcript } = await getTranscriptTail(session, ref, 200);
+async function pendingApprovals(session, rec) {
+  const { transcript } = await transcriptTail(session, rec, 200);
   if (!Array.isArray(transcript?.entries) || transcript.entries.length > 200) throw new GatewayError("Invalid approval transcript coverage");
+  return transcript.entries.map(grokApproval).filter(Boolean);
+}
+
+export async function listGrokApprovals(session, ref) {
+  const rec = await resolveRef(session, ref);
   return {
-    target: { id: target.id, name: target.name },
-    approvals: transcript.entries.map(grokApproval).filter(Boolean),
+    target: { id: rec.id, name: rec.name },
+    approvals: await pendingApprovals(session, rec),
     coverage: "Latest 200 transcript entries only; older requests require the owning Grok UI.",
   };
 }
 
+// The 0.78.4 app resolves cards through the backend: its dispatcher maps resolveLocalToolPermission to
+// ResolveGrokBotLocalToolPermission and resolveAutoReviewApproval to ResolveGrokBotAutoReviewApproval
+// (approvalPlatform defaults to "desktop"). Its routing table gives auto-review the "temporal" scope:
+// the backend gets it only for a temporal bot (or a card whose session it knows, which gbot does not
+// track), and other bots go to the box gateway. A local-tool card goes to the backend for any bot, and a
+// non-temporal bot moves on to the box gateway when the backend answers unimplemented. Mapped from the
+// app, not live-tested: a real pending card is needed. gbot grants once or declines only; ALWAYS and
+// NEVER are never sent.
+//
+// Both answers carry `dispatched`. The app treats any answer without a refusal as done; gbot reports
+// `accepted` only when dispatched is true and `unknown` otherwise, so a card left pending is not called
+// accepted.
+async function resolveApprovalOnBackend(session, rec, approval, entryId, requestId, accept) {
+  if (approval.type === "local-tool-permission") {
+    const data = await backendCall(session, "ResolveGrokBotLocalToolPermission", {
+      agentId: rec.id,
+      entryId,
+      requestId,
+      resolution: accept
+        ? "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_ALLOW_ONCE"
+        : "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_DENY",
+    });
+    // Like the app: a refusal is the answer.
+    if (data?.refusal) {
+      const { message, failureCode } = data.refusal;
+      const reason = typeof message === "string" && message ? serverText(message, backendSecrets(session)) : "the card was not resolved";
+      const error = new GatewayError("ResolveGrokBotLocalToolPermission refused: " + reason, {
+        method: "ResolveGrokBotLocalToolPermission",
+        code: "APPROVAL_REFUSED",
+        ...(typeof failureCode === "string" && failureCode ? { failureCode } : {}),
+      });
+      error.delivery = "rejected";
+      throw error;
+    }
+    return data ?? {};
+  }
+  // The auto-review request has no entry id; the app sends only these fields (approvedCommand and
+  // mcpElicitationContent are for edited commands and forms, which gbot does not offer).
+  return (await backendCall(session, "ResolveGrokBotAutoReviewApproval", {
+    agentId: rec.id,
+    requestId,
+    resolution: accept
+      ? "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_APPROVED"
+      : "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_DENIED",
+    approvalPlatform: "desktop",
+  })) ?? {};
+}
+
+/**
+ * @param {any} session
+ * @param {string} ref
+ * @param {{ entryId: string, requestId: string, decision: string }} input
+ * @returns {Promise<Record<string, string | boolean | { id: string, name: string }>>}
+ */
 export async function respondGrokApproval(session, ref, input) {
   const { entryId, requestId, decision } = grokApprovalResponseSchema.parse({ ...input, target: ref });
-  const { target, approvals } = await listGrokApprovals(session, ref);
+  const rec = await resolveRef(session, ref);
+  const approvals = await pendingApprovals(session, rec);
+  const target = { id: rec.id, name: rec.name };
   const matches = approvals.filter(card => card.entryId === entryId && card.requestId === requestId);
   if (matches.length !== 1) throw new GatewayError("Stale, foreign or unsupported Grok approval; refresh pending requests or use the owning Grok UI");
   const approval = matches[0];
   if (decision === "accept" && approval.truncated) throw new GatewayError("Approval details are truncated; acceptance requires the owning Grok UI");
   const local = approval.type === "local-tool-permission";
-  await gatewayCall(session, local ? "resolveLocalToolPermission" : "resolveAutoReviewApproval", {
+  const temporal = rec.harness === "temporal";
+  const onBox = () => gatewayCall(session, local ? "resolveLocalToolPermission" : "resolveAutoReviewApproval", {
     agentId: target.id, entryId, requestId,
     resolution: local ? (decision === "accept" ? "allow-once" : "deny") : (decision === "accept" ? "approved" : "denied"),
   });
-  return { target, entryId, requestId, decision, delivery: "accepted" };
+  if (!hasBackend(session) || boxOnlyRecords.has(rec) || (!local && !temporal)) {
+    await onBox();
+    return { target, entryId, requestId, decision, delivery: "accepted", via: "box" };
+  }
+  let data;
+  try {
+    data = await resolveApprovalOnBackend(session, rec, approval, entryId, requestId, decision === "accept");
+  } catch (error) {
+    // The app's next step for a non-temporal bot: the backend does not handle its card.
+    if (!(local && !temporal && error instanceof GatewayError && error.code === "unimplemented")) throw error;
+    await onBox();
+    return { target, entryId, requestId, decision, delivery: "accepted", via: "box" };
+  }
+  const workflowId = typeof data.workflowId === "string" && data.workflowId ? { workflowId: data.workflowId } : {};
+  if (data.dispatched === true) return { target, entryId, requestId, decision, delivery: "accepted", via: "backend", dispatched: true, ...workflowId };
+  return {
+    target, entryId, requestId, decision, delivery: "unknown", via: "backend", dispatched: false, ...workflowId,
+    note: "The server answered without dispatching it (dispatched: false). Check the card in the Grok Bot app before deciding again.",
+  };
 }

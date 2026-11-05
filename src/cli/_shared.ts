@@ -69,6 +69,7 @@ export const agentSummarySchema = z.object({
   members: z.array(z.string()).optional(),
   name: z.string(),
   notifyOnAgentUpdates: z.boolean().optional(),
+  roster: z.literal('box').optional(),
   title: z.string().optional(),
 }).strict();
 

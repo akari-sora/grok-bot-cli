@@ -6,13 +6,19 @@
 [![release](https://gitlab.com/aa22396584/grok-bot-cli/-/badges/release.svg)](https://gitlab.com/aa22396584/grok-bot-cli/-/releases)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, per-OS setup, privacy, troubleshooting, and the platform matrix are in [FORK.md](FORK.md). Pairing the [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) watch app (`gbot wear pair`) is in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair). The rest of this file is the upstream README.
+This is ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. Install, account selection, stdin send, normalized threads, per-OS setup, privacy, troubleshooting, and the platform matrix are in [FORK.md](FORK.md). Pairing the [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) watch app (`gbot wear pair`) is in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair). Grok Bot 0.78.x hosts bots on the server: gbot sends, lists, edits groups, and deletes through the backend RPCs the app uses, and keeps the box gateway for the rest ([FORK.md](FORK.md#grok-bot-078x-server-hosted-bots)). The rest of this file is the upstream README.
 
 Unofficial: not affiliated with, endorsed by, or supported by xAI, Cursor (Anysphere), or the upstream author. It uses your own Grok Bot login and an undocumented gateway; automated use may be limited by the Grok Bot terms, so use it at your own risk. Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
-這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread、各平台設定、隱私、疑難排解與平台表見 [FORK.md](FORK.md)。配對 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) 手錶 App（`gbot wear pair`）見 FORK.md 的「配對 Wear OS 手錶」。以下是上游 README。
+這是 ImL1s 對 [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli) 的 fork，已同步到上游 0.11.2。安裝、帳號選擇、stdin 送訊、正規化 thread、各平台設定、隱私、疑難排解與平台表見 [FORK.md](FORK.md)。配對 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) 手錶 App（`gbot wear pair`）見 FORK.md 的「配對 Wear OS 手錶」。Grok Bot 0.78.x 把 bot 放到伺服器上執行：gbot 的送訊、列出、修改群組與刪除改走 App 用的後端 RPC，其餘仍走雲端電腦 gateway（見 FORK.md 的「Grok Bot 0.78.x：bot 改在伺服器上執行」）。以下是上游 README。
 
 非官方：與 xAI、Cursor（Anysphere）或上游作者沒有關係，也沒有得到他們的背書或支援。它用你自己的 Grok Bot 登入和未公開的 gateway；自動化使用可能受 Grok Bot 條款限制，風險自負。參與開發見 [CONTRIBUTING.md](CONTRIBUTING.md)，安全問題見 [SECURITY.md](SECURITY.md)。
+
+![gbot on Grok Bot 0.78: create a bot and a group, send, read the reply, delete](https://gitlab.com/aa22396584/grok-bot-cli/-/raw/main/demo/gbot-0784-demo.gif)
+
+Recorded live on 2026-11-05 against Grok Bot 0.78.4 with this fork: create a bot and a group, send a message, read the bot's reply, then delete both. [MP4](https://gitlab.com/aa22396584/grok-bot-cli/-/raw/main/demo/gbot-0784-demo.mp4) · tape: [demo/gbot-0784.tape](demo/gbot-0784.tape) (`vhs demo/gbot-0784.tape`; it uses a real account and deletes what it creates).
+
+2026-11-05 用這個 fork 對 Grok Bot 0.78.4 實際錄製：建立 bot 和群組、送訊息、讀 bot 的回覆，最後把兩個都刪掉。
 
 ## Related projects / 相關專案
 
@@ -432,9 +438,16 @@ is also unknown rather than accepted. Do not resend automatically: read the
 target thread and verify the original message in the Grok Bot app first. A new
 CLI send uses a new client nonce, so invoking it again is not a deduplicated retry.
 The send result includes that `clientNonce`. When delivery is unknown, the CLI prints
-it and `gbot reconcile <bot> --nonce <n>`. Reconcile reads the last 200 transcript
-entries for a user entry with that exact nonce and does not send again. `delivered`
-means the entry is in the tail; `not-found-in-tail` means it was not in those entries.
+it and `gbot reconcile <bot> --nonce <n>`. Reconcile first asks the backend send
+status (when the session has an access token) and returns it as `sendStatus`, then
+reads the last 200 transcript entries for a user entry with that exact nonce. It
+never sends again. `delivered` means the server or the tail has the message;
+`rejected` means the server rejected it (`rejectionCode`); `pending` means the tail
+does not show it and the server did not say NOT_FOUND, or its status could not be
+read (`sendStatus: "UNAVAILABLE"`), or the server has a status but the transcript
+could not be read (`tailError`): it may still land, so do not resend;
+`not-found-in-tail` means it was not in those entries and the server has no record
+of it.
 
 Plain-text transcript output handles both direct content and nested
 `message.content` / `message.text`. Use `--json` when the full structured result is

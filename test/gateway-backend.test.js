@@ -1,0 +1,1432 @@
+// Grok Bot 0.78.x: sends, the roster, rooms, deletes and sidebar state go to aiserver.v1.GrokBotService
+// with the account access token. These sessions come from connectGateway with CURSOR_ACCESS_TOKEN;
+// saved-login and descriptor sessions are covered in accounts-r2.test.js.
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+
+import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
+
+import { outcomeFromError } from "../src/core/codex/contract.js";
+import { summarize } from "../src/core/format.js";
+import {
+  addGroupMember,
+  connectGateway,
+  createGroup,
+  deleteAgent,
+  hasBackend,
+  listAgents,
+  listGrokApprovals,
+  listSkills,
+  reconcileDelivery,
+  removeGroupMember,
+  resolveRef,
+  respondGrokApproval,
+  sendPrompt,
+  setGroupMembers,
+  updateAgent,
+} from "../src/core/gateway.js";
+
+const ACCESS = "synthetic-backend-access-do-not-leak";
+const GATEWAY = "synthetic-box-gateway-do-not-leak";
+const BACKEND = "http://127.0.0.1:1350";
+const BOX = "http://127.0.0.1:1351";
+const SERVICE = BACKEND + "/aiserver.v1.GrokBotService/";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+const bot = (agentId, name, extra = {}) => ({
+  id: String(1000 + Number(agentId.replace(/\D/g, "") || 0)),
+  legacyAgentId: agentId,
+  agentId,
+  name,
+  harness: "temporal",
+  kind: "GROK_BOT_AGENT_KIND_AGENT",
+  createdAtMs: "1",
+  updatedAtMs: "2",
+  ...extra,
+});
+const room = (agentId, name, memberAgentIds, extra = {}) => bot(agentId, name, {
+  kind: "GROK_BOT_AGENT_KIND_ROOM",
+  memberAgentIds,
+  ...extra,
+});
+
+const SERVER = [
+  bot("bot-1", "General", { avatarShape: "pebble", avatarColor: "violet", description: "first" }),
+  // ListGrokBotAgents folds a bot's title into its name and leaves title out.
+  bot("bot-2", "Scout · Night shift"),
+  bot("bot-3", "Box Helper", { harness: "box" }),
+  room("room-1", "Launch", ["bot-1", "bot-2"], { title: "Launch room" }),
+];
+
+// GetGrokBotRuntimeCapabilities as live on 2026-11-05: the server roster is on.
+const CAPS_ON = { capabilities: { durableIdentityEnabled: true, durableIdentityWritesEnabled: true, temporalCreationEnabled: true, serverRoomsEnabled: true } };
+
+function json(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+}
+
+function connectError(code, detail, status) {
+  return json({
+    code,
+    message: "Error",
+    details: [{ type: "aiserver.v1.ErrorDetails", debug: { details: { title: "Bad", detail } } }],
+  }, status);
+}
+
+function envFor(home, extra = {}) {
+  return {
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: join(home, "AppData", "Roaming"),
+    XDG_CONFIG_HOME: join(home, ".config"),
+    GROK_BOT_TEST: "1",
+    CURSOR_API_BASE_URL: BACKEND,
+    CURSOR_ACCESS_TOKEN: ACCESS,
+    GROK_BOT_GATEWAY_URL: null,
+    GROK_BOT_GATEWAY_TOKEN: null,
+    GROK_BOT_GATEWAY_HEADERS: null,
+    GROK_BOT_ALLOW_ANY_GATEWAY: null,
+    GBOT_ACCOUNT: null,
+    GBOT_ACCOUNT_SCOPE: null,
+    GBOT_CONFIG: null,
+    GBOT_AUTO_WAKE: null,
+    GBOT_DEBUG: null,
+    SAND_CLIENT_VERSION: "9.9.9",
+    ...extra,
+  };
+}
+
+function withEnv(values, fn) {
+  const prev = {};
+  for (const key of Object.keys(values)) {
+    prev[key] = process.env[key];
+    if (values[key] == null) delete process.env[key];
+    else process.env[key] = values[key];
+  }
+  const restore = () => {
+    for (const key of Object.keys(values)) {
+      if (prev[key] === undefined) delete process.env[key];
+      else process.env[key] = prev[key];
+    }
+  };
+  return Promise.resolve().then(fn).finally(restore);
+}
+
+/**
+ * Routes every fetch: EnsureSandBox answers a running box, other GrokBotService RPCs go to `rpcs[name]`,
+ * box gateway calls to `box[method]`. A handler returns a value (sent as JSON) or a Response, or throws.
+ */
+function mockApi(t, { rpcs = {}, box = {} } = {}) {
+  const calls = [];
+  const routes = {
+    GetGrokBotRuntimeCapabilities: () => CAPS_ON,
+    ListGrokBotAgents: () => ({ agents: SERVER, slackConnections: [] }),
+    ListGrokBotAgentStatuses: () => ({ statuses: [] }),
+    ...rpcs,
+  };
+  const boxRoutes = { listAgents: () => ({ agents: [] }), ...box };
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    const body = init?.body ? JSON.parse(init.body) : {};
+    const headers = init?.headers ?? {};
+    const rpc = target.startsWith(SERVICE) ? target.slice(SERVICE.length) : null;
+    const method = target.startsWith(BOX + "/api/") ? target.slice((BOX + "/api/").length) : null;
+    calls.push({ target, rpc, method, body, headers });
+    if (rpc === "EnsureSandBox") {
+      return json({ runState: "SAND_BOX_RUN_STATE_RUNNING", gatewayUrl: BOX, gatewayToken: GATEWAY });
+    }
+    const handler = rpc ? routes[rpc] : boxRoutes[method];
+    if (!handler) return json({ code: "unimplemented", message: "no mock for " + target }, 501);
+    const out = await handler(body, headers);
+    return out instanceof Response ? out : json(out);
+  });
+  return calls;
+}
+
+async function backendSession(t, routes, extraEnv = {}) {
+  const home = mkdtempSync(join(tmpdir(), "gbot-backend-"));
+  const calls = mockApi(t, routes);
+  const env = envFor(home, extraEnv);
+  const run = (fn) => withEnv(env, async () => fn(await connectGateway()));
+  return { calls, run };
+}
+
+const rpcCalls = (calls, rpc) => calls.filter((call) => call.rpc === rpc);
+const boxCalls = (calls, method) => calls.filter((call) => call.method === method);
+
+test("a CURSOR_ACCESS_TOKEN session reaches the backend with the access token and the app headers", async (t) => {
+  const { calls, run } = await backendSession(t);
+  await run(async (session) => {
+    assert.equal(hasBackend(session), true);
+    assert.equal(JSON.stringify(session).includes(ACCESS), false, "the access token is not on the session object");
+    await resolveRef(session, "General");
+  });
+  const [listed] = rpcCalls(calls, "ListGrokBotAgents");
+  assert.deepEqual(listed.body, {});
+  assert.equal(listed.headers.authorization, "Bearer " + ACCESS);
+  assert.equal(listed.headers["connect-protocol-version"], "1");
+  assert.equal(listed.headers["x-cursor-client-type"], "sand");
+  assert.equal(listed.headers["x-cursor-client-version"], "9.9.9");
+  assert.equal(rpcCalls(calls, "ListGrokBotAgentStatuses").length, 0, "resolving a ref skips sidebar state");
+});
+
+test("the roster maps server agents, client state, titled names, rooms, and drops stale box rows", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotAgentStatuses: (body) => {
+        assert.deepEqual(body, { agentIds: [] });
+        return {
+          statuses: [
+            // proto3 JSON leaves false out: hidden on, notify absent means off once the state was written.
+            { agentId: "bot-1", client: { agentId: "bot-1", hiddenFromSidebar: true, notificationsEnabled: true, updatedAtMs: "5" } },
+            { agentId: "bot-2", client: { agentId: "bot-2", notifyOnUpdatesEnabled: true, updatedAtMs: "5" } },
+            // Never written (no updatedAtMs): like the app, notify shows on.
+            { agentId: "bot-3", client: { agentId: "bot-3", unreadCount: 1 } },
+            // A status without client state: the app shows notify on, not hidden.
+            { agentId: "room-1", isRunning: false },
+          ],
+        };
+      },
+    },
+    box: {
+      listAgents: () => ({
+        agents: [
+          // Deleted on the backend, still in the box roster (live 2026-11-05): dropped.
+          { id: "ghost-1", name: "gbot-probe-ghost", harness: "temporal" },
+          // A box-harness bot the server does not list: kept, after the server agents.
+          { id: "box-only", name: "Local Box", harness: "box", notifyOnUpdatesEnabled: false },
+          // Listed by the server too: the server record wins.
+          { id: "bot-3", name: "Stale Box Name", harness: "box" },
+        ],
+      }),
+    },
+  });
+  const rows = await run((session) => listAgents(session));
+  assert.deepEqual(rows.map((r) => r.id), ["bot-1", "bot-2", "bot-3", "room-1", "box-only"]);
+  assert.deepEqual(rows[0], {
+    id: "bot-1",
+    name: "General",
+    title: "",
+    description: "first",
+    avatarShape: "pebble",
+    avatarColor: "violet",
+    notifyOnAgentUpdates: false,
+    hiddenFromSidebar: true,
+    isGroup: false,
+    memberIds: [],
+    serverId: "1001",
+    harness: "temporal",
+  });
+  assert.equal(rows[1].name, "Scout · Night shift");
+  assert.equal(rows[1].notifyOnAgentUpdates, true);
+  assert.equal(rows[1].hiddenFromSidebar, false);
+  assert.equal(rows[2].name, "Box Helper");
+  assert.equal(rows[2].notifyOnAgentUpdates, true);
+  assert.equal(rows[2].hiddenFromSidebar, false);
+  assert.deepEqual(
+    { isGroup: rows[3].isGroup, memberIds: rows[3].memberIds, title: rows[3].title, notify: rows[3].notifyOnAgentUpdates, hidden: rows[3].hiddenFromSidebar },
+    { isGroup: true, memberIds: ["bot-1", "bot-2"], title: "Launch room", notify: true, hidden: false },
+  );
+  assert.equal(rows[4].name, "Local Box");
+  assert.equal(rows[4].notifyOnAgentUpdates, false);
+  // One box roster read, and no EnsureSandBox beyond the connect.
+  assert.equal(boxCalls(calls, "listAgents").length, 1);
+  assert.equal(calls.filter((call) => call.rpc === "EnsureSandBox").length, 1);
+});
+
+test("the server roster stands when the box roster cannot be read", async (t) => {
+  const { run } = await backendSession(t, {
+    box: { listAgents: () => new Response("", { status: 417, headers: { "x-anyrun-failure-reason": "pod_hibernated" } }) },
+  });
+  const rows = await run((session) => listAgents(session));
+  assert.deepEqual(rows.map((r) => r.id), ["bot-1", "bot-2", "bot-3", "room-1"]);
+});
+
+test("a titled bot resolves by its plain name, and a box-only row never hides a server agent", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: { ListGrokBotAgents: () => ({ agents: [...SERVER, bot("bot-4", "Scout · Day shift"), bot("bot-5", "Twin")] }) },
+    box: { listAgents: () => ({ agents: [{ id: "box-twin", name: "Twin", harness: "box" }] }) },
+  });
+  await run(async (session) => {
+    assert.equal((await resolveRef(session, "General")).id, "bot-1");
+    assert.equal((await resolveRef(session, "Launch room")).id, "room-1");
+    assert.equal((await resolveRef(session, "Scout · Night shift")).id, "bot-2");
+    await assert.rejects(resolveRef(session, "Scout"), /Ambiguous name "Scout"/);
+    assert.equal((await resolveRef(session, "twin")).id, "bot-5");
+    assert.equal((await resolveRef(session, "box-twin")).id, "box-twin");
+    await assert.rejects(resolveRef(session, "Nobody"), /No bot or group named "Nobody"/);
+  });
+});
+
+test("a plain name that exactly matches is not ambiguous with a titled bot of the same name", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: { ListGrokBotAgents: () => ({ agents: [bot("bot-1", "Scout"), bot("bot-2", "Scout · Night shift")] }) },
+  });
+  await run(async (session) => {
+    assert.equal((await resolveRef(session, "Scout")).id, "bot-1");
+  });
+});
+
+for (const delivery of ["ACCEPTED_BOX", "ACCEPTED_TEMPORAL", "DUPLICATE"]) {
+  test(`SendGrokBotUserMessage ${delivery} is accepted`, async (t) => {
+    const { calls, run } = await backendSession(t, {
+      rpcs: {
+        SendGrokBotUserMessage: () => ({
+          dispatched: true,
+          mode: "GROK_BOT_TEMPORAL_HARNESS_MODE_LIVE",
+          workflowId: "wf-1",
+          delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_" + delivery,
+        }),
+      },
+    });
+    const before = Date.now();
+    const out = await run((session) => sendPrompt(session, "General", "hello there", { clientNonce: "nonce-1", replyToId: "entry-9" }));
+    assert.equal(out.delivery, "accepted");
+    assert.equal(out.clientNonce, "nonce-1");
+    assert.equal(out.target.id, "bot-1");
+    assert.equal(out.messageId, undefined);
+    assert.equal(out.result.workflowId, "wf-1");
+    const [sent] = rpcCalls(calls, "SendGrokBotUserMessage");
+    const { sentAtMs, ...rest } = sent.body;
+    assert.deepEqual(rest, {
+      agentId: "bot-1",
+      messageId: "nonce-1",
+      text: "hello there",
+      source: "GROK_BOT_CLIENT_SURFACE_DESKTOP",
+      initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_USER",
+      sendSource: "GROK_BOT_SEND_SOURCE_CHAT",
+      replyToId: "entry-9",
+    });
+    assert.match(sentAtMs, /^\d+$/);
+    assert.ok(Number(sentAtMs) >= before && Number(sentAtMs) <= Date.now());
+    assert.equal(sent.headers.authorization, "Bearer " + ACCESS);
+    const zone = sent.headers["x-cursor-timezone"];
+    assert.ok(zone === undefined || /\w/.test(zone));
+    assert.equal(boxCalls(calls, "sendPrompt").length, 0, "never the box gateway");
+    assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 0);
+  });
+}
+
+test("a send without a client nonce gets a fresh uuid as messageId", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { SendGrokBotUserMessage: () => ({ dispatched: true, delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" }) },
+  });
+  const out = await run((session) => sendPrompt(session, "General", "hi"));
+  assert.match(out.clientNonce, UUID_V4);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage")[0].body.messageId, out.clientNonce);
+});
+
+test("REFUSED is a definite rejection with the server's failure code and message", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => ({
+        dispatched: false,
+        delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_REFUSED",
+        refusal: { failureCode: "send/agent-unavailable", message: "This bot is not available." },
+      }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-refused" }))
+    .then(() => assert.fail("expected a refusal"), (err) => err);
+  assert.equal(error.name, "GatewayError");
+  assert.equal(error.delivery, "rejected");
+  assert.equal(error.failureCode, "send/agent-unavailable");
+  assert.equal(error.clientNonce, "nonce-refused");
+  assert.equal(error.targetId, "bot-1");
+  assert.match(error.message, /refused: This bot is not available\./);
+  assert.equal(outcomeFromError(error).delivery, "rejected");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+  assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 0);
+});
+
+test("UNSPECIFIED asks GetGrokBotSendStatus: ACCEPTED is accepted, PENDING stays unknown", async (t) => {
+  let status = "GROK_BOT_SEND_STATUS_ACCEPTED";
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => ({ dispatched: true, delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_UNSPECIFIED" }),
+      GetGrokBotSendStatus: () => ({ status, echoEntryId: "t9u" }),
+    },
+  });
+  const accepted = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-a" }));
+  assert.equal(accepted.delivery, "accepted");
+  status = "GROK_BOT_SEND_STATUS_PENDING";
+  const pending = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-b" }));
+  assert.equal(pending.delivery, "unknown");
+  assert.equal(pending.clientNonce, "nonce-b");
+  assert.deepEqual(rpcCalls(calls, "GetGrokBotSendStatus").map((call) => call.body), [
+    { agentId: "bot-1", messageId: "nonce-a" },
+    { agentId: "bot-1", messageId: "nonce-b" },
+  ]);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 2, "one send per prompt, no resend");
+});
+
+test("a 5xx send is delivery unknown, asks the status once, and is never resent", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => connectError("unavailable", "try again", 503),
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-503" }))
+    .then(() => assert.fail("expected unknown"), (err) => err);
+  assert.equal(error.delivery, "unknown");
+  assert.equal(error.effect, "unknown");
+  assert.equal(error.status, 503);
+  assert.equal(error.code, "unavailable");
+  assert.equal(error.clientNonce, "nonce-503");
+  assert.match(error.message, /SendGrokBotUserMessage failed: 503 unavailable try again/);
+  assert.match(error.message, /delivery unknown; check the thread before resending/);
+  assert.equal(outcomeFromError(error).delivery, "unknown");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+  assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 1);
+});
+
+test("a send timeout is delivery unknown and never resent", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+      },
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_UNKNOWN_DURABILITY" }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-timeout" }))
+    .then(() => assert.fail("expected unknown"), (err) => err);
+  assert.equal(error.code, "GATEWAY_TIMEOUT");
+  assert.equal(error.delivery, "unknown");
+  assert.equal(error.effect, "unknown");
+  assert.match(error.message, /SendGrokBotUserMessage timed out after 15000ms; delivery is unknown/);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+});
+
+test("a transport failure settled by GetGrokBotSendStatus is accepted, or rejected without a resend", async (t) => {
+  let status = "GROK_BOT_SEND_STATUS_ACCEPTED";
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => {
+        throw new TypeError("fetch failed " + SERVICE + "SendGrokBotUserMessage");
+      },
+      GetGrokBotSendStatus: () => ({ status, echoEntryId: "t7u", rejectionCode: "send/too-long" }),
+    },
+  });
+  const accepted = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-lost" }));
+  assert.equal(accepted.delivery, "accepted");
+  assert.equal(accepted.result.echoEntryId, "t7u");
+  status = "GROK_BOT_SEND_STATUS_REJECTED";
+  const rejected = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-lost-2" }))
+    .then(() => assert.fail("expected rejected"), (err) => err);
+  assert.equal(rejected.delivery, "rejected");
+  assert.equal(rejected.effect, undefined);
+  assert.equal(rejected.failureCode, "send/too-long");
+  // A fresh rejected error: not the transport error's text or code.
+  assert.equal(rejected.code, "SEND_REFUSED");
+  assert.match(rejected.message, /SendGrokBotUserMessage refused: GetGrokBotSendStatus says rejected after GATEWAY_REQUEST_FAILED/);
+  assert.doesNotMatch(rejected.message, /127\.0\.0\.1|delivery (is )?unknown/);
+  assert.equal(rejected.cause.code, "GATEWAY_REQUEST_FAILED");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 2);
+});
+
+test("a 4xx send is a definite rejection and needs no status read", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { SendGrokBotUserMessage: () => connectError("invalid_argument", "text must not be empty", 400) },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-400" }))
+    .then(() => assert.fail("expected rejected"), (err) => err);
+  assert.equal(error.delivery, "rejected");
+  assert.equal(error.code, "invalid_argument");
+  assert.equal(error.kind, "client");
+  assert.match(error.message, /400 invalid_argument text must not be empty/);
+  assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 0);
+});
+
+test("backend errors never carry the access token", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: (_, headers) => json({ code: "unauthenticated", message: "bad token " + ACCESS + " / " + headers.authorization }, 401),
+      DeleteGrokBotAgent: () => connectError("permission_denied", "token " + ACCESS + " cannot delete this bot", 403),
+    },
+  });
+  const sendError = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-401" }))
+    .then(() => assert.fail("expected rejected"), (err) => err);
+  assert.equal(sendError.delivery, "rejected");
+  assert.equal(sendError.kind, "auth");
+  const deleteError = await run((session) => deleteAgent(session, "General"))
+    .then(() => assert.fail("expected refused"), (err) => err);
+  assert.equal(deleteError.code, "permission_denied");
+  assert.equal(deleteError.kind, "auth");
+  for (const error of [sendError, deleteError]) {
+    assert.doesNotMatch(error.message, new RegExp(ACCESS));
+    assert.doesNotMatch(JSON.stringify(outcomeFromError(error)), new RegExp(ACCESS));
+  }
+});
+
+test("deleteAgent calls DeleteGrokBotAgent with the agent uuid; NotFound counts as deleted", async (t) => {
+  let answer = () => ({});
+  const { calls, run } = await backendSession(t, { rpcs: { DeleteGrokBotAgent: () => answer() } });
+  const deleted = await run((session) => deleteAgent(session, "General"));
+  assert.equal(deleted.id, "bot-1");
+  answer = () => connectError("not_found", "Grok Bot agent not found.", 404);
+  const gone = await run((session) => deleteAgent(session, "room-1"));
+  assert.equal(gone.id, "room-1");
+  assert.deepEqual(rpcCalls(calls, "DeleteGrokBotAgent").map((call) => call.body), [{ id: "bot-1" }, { id: "room-1" }]);
+  assert.equal(boxCalls(calls, "deleteAgent").length, 0, "the box gateway accepts deleteAgent and deletes nothing");
+});
+
+test("createGroup calls CreateGrokBotRoom, keeps the server's id, and sets title and avatar with UpdateGrokBotAgent", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      // The server answers with its own agentId, not necessarily the nonce.
+      CreateGrokBotRoom: (body) => ({ agent: room("room-9", body.name, body.memberAgentIds, { id: "1009", description: body.description }) }),
+      UpdateGrokBotAgent: (body) => ({ agent: room("room-9", "Night", ["bot-1", "bot-2"], { id: body.id, title: body.title, avatarShape: body.avatarShape }) }),
+      ListGrokBotAgents: () => ({ agents: [...SERVER, room("room-9", "Night", ["bot-1", "bot-2"], { id: "1009", title: "Night room", avatarShape: "pebble" })] }),
+    },
+  });
+  const rec = await run((session) => createGroup(session, {
+    name: "Night",
+    description: "after hours",
+    memberIds: ["General", "Scout", "bot-1"],
+    title: "Night room",
+    avatarShape: "pebble",
+  }));
+  const [created] = rpcCalls(calls, "CreateGrokBotRoom");
+  assert.match(created.body.agentId, UUID_V4);
+  assert.deepEqual({ ...created.body, agentId: "<nonce>" }, {
+    agentId: "<nonce>",
+    name: "Night",
+    description: "after hours",
+    memberAgentIds: ["bot-1", "bot-2"],
+    humanMemberUserIds: [],
+  });
+  assert.deepEqual(rpcCalls(calls, "UpdateGrokBotAgent").map((call) => call.body), [
+    { id: "1009", title: "Night room", avatarShape: "pebble", partialUpdate: true },
+  ]);
+  assert.equal(rec.id, "room-9");
+  assert.equal(rec.isGroup, true);
+  assert.equal(rec.title, "Night room");
+  assert.equal(boxCalls(calls, "createGroup").length, 0);
+});
+
+test("a CreateGrokBotRoom timeout says the group may exist", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      CreateGrokBotRoom: () => {
+        throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      },
+    },
+  });
+  await assert.rejects(
+    run((session) => createGroup(session, { name: "Night", memberIds: ["General"] })),
+    /CreateGrokBotRoom timed out after 45000ms\. The group may have been created; run gbot groups list/,
+  );
+  assert.equal(rpcCalls(calls, "CreateGrokBotRoom").length, 1);
+});
+
+test("set, add and remove members call SetGrokBotRoomMembers with the room uuid", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { SetGrokBotRoomMembers: (body) => ({ agent: room(body.agentId, "Launch", body.memberAgentIds, { title: "Launch room" }) }) },
+  });
+  await run(async (session) => {
+    const set = await setGroupMembers(session, "Launch", ["General"]);
+    assert.deepEqual(set.memberIds, ["bot-1"]);
+    const added = await addGroupMember(session, "Launch room", "Box Helper");
+    assert.deepEqual(added.memberIds, ["bot-1", "bot-2", "bot-3"]);
+    const removed = await removeGroupMember(session, "room-1", "General");
+    assert.deepEqual(removed.memberIds, ["bot-2"]);
+  });
+  assert.deepEqual(rpcCalls(calls, "SetGrokBotRoomMembers").map((call) => call.body), [
+    { agentId: "room-1", memberAgentIds: ["bot-1"] },
+    { agentId: "room-1", memberAgentIds: ["bot-1", "bot-2", "bot-3"] },
+    { agentId: "room-1", memberAgentIds: ["bot-2"] },
+  ]);
+  assert.equal(boxCalls(calls, "setGroupMembers").length, 0);
+});
+
+test("updateAgent sends only the changed fields to UpdateGrokBotAgent and sidebar state to SetGrokBotAgentClientState", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      UpdateGrokBotAgent: (body) => ({ agent: bot("bot-2", body.name ?? "Scout", { id: body.id }) }),
+      SetGrokBotAgentClientState: (body) => ({ state: { agentId: body.agentId, ...body, updatedAtMs: "5" } }),
+      ListGrokBotAgentStatuses: () => ({ statuses: [{ agentId: "bot-2", client: { hiddenFromSidebar: true, updatedAtMs: "9" } }] }),
+    },
+    box: { setAgentNotifyOnUpdates: () => ({}) },
+  });
+  const rec = await run((session) => updateAgent(session, "Scout", {
+    title: "Day shift",
+    avatarColor: "green",
+    notifyOnAgentUpdates: false,
+    hiddenFromSidebar: true,
+  }));
+  assert.deepEqual(rpcCalls(calls, "UpdateGrokBotAgent").map((call) => call.body), [
+    { id: "1002", title: "Day shift", avatarColor: "green", partialUpdate: true },
+  ]);
+  assert.deepEqual(rpcCalls(calls, "SetGrokBotAgentClientState").map((call) => call.body), [
+    { agentId: "bot-2", notifyOnUpdatesEnabled: false },
+    { agentId: "bot-2", hiddenFromSidebar: true },
+  ]);
+  // The app mirrors notify to the box; hidden and the profile go to the backend only.
+  assert.deepEqual(boxCalls(calls, "setAgentNotifyOnUpdates").map((call) => call.body), [{ id: "bot-2", isEnabled: false }]);
+  assert.equal(boxCalls(calls, "updateAgent").length, 0);
+  assert.equal(boxCalls(calls, "setAgentHiddenFromSidebar").length, 0);
+  assert.equal(rec.id, "bot-2");
+  assert.equal(rec.hiddenFromSidebar, true);
+  assert.equal(rec.notifyOnAgentUpdates, false);
+});
+
+test("a failed box notify mirror does not fail the update", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { SetGrokBotAgentClientState: () => ({ state: {} }) },
+    box: { setAgentNotifyOnUpdates: () => json({ message: "unknown agent" }, 404) },
+  });
+  const rec = await run((session) => updateAgent(session, "room-1", { notifyOnAgentUpdates: true }));
+  assert.equal(rec.id, "room-1");
+  assert.equal(rpcCalls(calls, "UpdateGrokBotAgent").length, 0, "no profile change, no UpdateGrokBotAgent");
+  assert.equal(boxCalls(calls, "setAgentNotifyOnUpdates").length, 1);
+});
+
+test("reconcile asks GetGrokBotSendStatus first and reads the transcript tail only when it is not accepted", async (t) => {
+  let status = () => ({ status: "GROK_BOT_SEND_STATUS_ACCEPTED", echoEntryId: "t106u", acceptedAtMs: "1" });
+  const { calls, run } = await backendSession(t, {
+    rpcs: { GetGrokBotSendStatus: () => status() },
+    box: {
+      getAgentTranscriptTail: () => ({ entries: [{ id: "t5u", role: "user", clientNonce: "nonce-r", seq: 5 }] }),
+    },
+  });
+  const viaStatus = await run((session) => reconcileDelivery(session, "General", "nonce-r"));
+  assert.deepEqual({ ...viaStatus, target: viaStatus.target.id }, { target: "bot-1", clientNonce: "nonce-r", status: "delivered", entryId: "t106u", sendStatus: "ACCEPTED" });
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  status = () => ({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" });
+  const viaTail = await run((session) => reconcileDelivery(session, "General", "nonce-r"));
+  assert.equal(viaTail.status, "delivered");
+  assert.equal(viaTail.entryId, "t5u");
+  assert.equal(viaTail.seq, 5);
+  status = () => connectError("internal", "boom", 500);
+  const afterError = await run((session) => reconcileDelivery(session, "General", "nonce-missing"));
+  // A failed status read proves nothing: the message may still land.
+  assert.equal(afterError.status, "pending");
+  assert.equal(afterError.scanned, 1);
+  assert.equal(afterError.sendStatus, "UNAVAILABLE");
+  assert.deepEqual(rpcCalls(calls, "GetGrokBotSendStatus").map((call) => call.body.messageId), ["nonce-r", "nonce-r", "nonce-missing"]);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0, "reconcile never sends");
+});
+
+test("a GROK_BOT_GATEWAY_URL override stays on the box gateway even with CURSOR_ACCESS_TOKEN set", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "gbot-backend-override-"));
+  const calls = mockApi(t, {
+    box: {
+      listAgents: () => ({ agents: [{ id: "bot-1", name: "General", isGroup: false }] }),
+      sendPrompt: () => ({ accepted: true }),
+    },
+  });
+  const out = await withEnv(envFor(home, { GROK_BOT_GATEWAY_URL: BOX, GROK_BOT_GATEWAY_TOKEN: GATEWAY }), async () => {
+    const session = await connectGateway();
+    assert.equal(hasBackend(session), false);
+    return sendPrompt(session, "General", "hi", { clientNonce: "nonce-override" });
+  });
+  assert.equal(out.delivery, "accepted");
+  assert.deepEqual(calls.map((call) => call.method ?? call.rpc), ["listAgents", "sendPrompt"]);
+  assert.equal(calls[1].body.clientNonce, "nonce-override");
+});
+
+// Approval responses: mapped from the 0.78.4 app (ResolveGrokBot* RPCs), not live-tested.
+function approvalCards() {
+  return [
+    { id: "card-review", kind: "send-message", message: { type: "auto-review-approval", approval: { requestId: "ask-review", status: "pending", command: "npm publish" } } },
+    { id: "card-local", kind: "send-message", message: { type: "local-tool-permission", ask: { requestId: "ask-local", status: "pending", action: "run-command", target: "rm ./out.txt" } } },
+  ];
+}
+
+test("approval responses use ResolveGrokBotAutoReviewApproval and ResolveGrokBotLocalToolPermission, once or decline", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ResolveGrokBotAutoReviewApproval: () => ({ dispatched: true, workflowId: "wf-review" }),
+      ResolveGrokBotLocalToolPermission: () => ({ dispatched: true, workflowId: "wf-local" }),
+    },
+    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
+  });
+  await run(async (session) => {
+    const listed = await listGrokApprovals(session, "General");
+    assert.deepEqual(listed.target, { id: "bot-1", name: "General" });
+    assert.deepEqual(listed.approvals.map((card) => card.requestId), ["ask-review", "ask-local"]);
+    for (const [entryId, requestId, decision] of [
+      ["card-review", "ask-review", "accept"],
+      ["card-review", "ask-review", "decline"],
+      ["card-local", "ask-local", "accept"],
+      ["card-local", "ask-local", "decline"],
+    ]) {
+      const out = await respondGrokApproval(session, "General", { entryId, requestId, decision });
+      const workflowId = entryId === "card-review" ? "wf-review" : "wf-local";
+      assert.deepEqual(out, { target: { id: "bot-1", name: "General" }, entryId, requestId, decision, delivery: "accepted", via: "backend", dispatched: true, workflowId });
+    }
+  });
+  assert.deepEqual(rpcCalls(calls, "ResolveGrokBotAutoReviewApproval").map((call) => call.body), [
+    { agentId: "bot-1", requestId: "ask-review", resolution: "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_APPROVED", approvalPlatform: "desktop" },
+    { agentId: "bot-1", requestId: "ask-review", resolution: "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_DENIED", approvalPlatform: "desktop" },
+  ]);
+  assert.deepEqual(rpcCalls(calls, "ResolveGrokBotLocalToolPermission").map((call) => call.body), [
+    { agentId: "bot-1", entryId: "card-local", requestId: "ask-local", resolution: "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_ALLOW_ONCE" },
+    { agentId: "bot-1", entryId: "card-local", requestId: "ask-local", resolution: "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_DENY" },
+  ]);
+  for (const call of [...rpcCalls(calls, "ResolveGrokBotAutoReviewApproval"), ...rpcCalls(calls, "ResolveGrokBotLocalToolPermission")]) {
+    assert.equal(call.headers.authorization, "Bearer " + ACCESS);
+  }
+  assert.deepEqual(calls.filter((call) => /^resolve/.test(call.method ?? "")), [], "never the box gateway");
+});
+
+test("approval responses refuse a persistent grant, a stale card, and a truncated accept before any resolve call", async (t) => {
+  const cards = approvalCards();
+  const { calls, run } = await backendSession(t, { box: { getAgentTranscriptTail: () => ({ entries: cards }) } });
+  await run(async (session) => {
+    await assert.rejects(respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "always" }));
+    await assert.rejects(respondGrokApproval(session, "General", { entryId: "card-review", requestId: "ask-review", decision: "never" }));
+    await assert.rejects(
+      respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-review", decision: "accept" }),
+      /Stale, foreign or unsupported Grok approval/,
+    );
+    cards[1].message.ask.target = "x".repeat(3000);
+    await assert.rejects(
+      respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "accept" }),
+      /truncated/,
+    );
+  });
+  assert.deepEqual(calls.filter((call) => /^ResolveGrokBot/.test(call.rpc ?? "") || /^resolve/.test(call.method ?? "")), []);
+});
+
+test("an approval refusal is a definite rejection with the server's failure code", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ResolveGrokBotLocalToolPermission: () => ({
+        dispatched: false,
+        refusal: { failureCode: "approval/expired", message: "This request already timed out." },
+      }),
+    },
+    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
+  });
+  const error = await run((session) => respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "decline" }))
+    .then(() => assert.fail("expected a refusal"), (err) => err);
+  assert.equal(error.name, "GatewayError");
+  assert.equal(error.code, "APPROVAL_REFUSED");
+  assert.equal(error.failureCode, "approval/expired");
+  assert.equal(error.delivery, "rejected");
+  assert.match(error.message, /ResolveGrokBotLocalToolPermission refused: This request already timed out\./);
+  assert.equal(rpcCalls(calls, "ResolveGrokBotLocalToolPermission").length, 1);
+});
+
+test("an approval RPC error keeps the Connect code and never carries the access token", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: {
+      ResolveGrokBotAutoReviewApproval: () => connectError("permission_denied", "token " + ACCESS + " may not resolve this card", 403),
+      ResolveGrokBotLocalToolPermission: () => connectError("failed_precondition", "the machine is offline", 400),
+    },
+    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
+  });
+  const denied = await run((session) => respondGrokApproval(session, "General", { entryId: "card-review", requestId: "ask-review", decision: "accept" }))
+    .then(() => assert.fail("expected an error"), (err) => err);
+  assert.equal(denied.code, "permission_denied");
+  assert.equal(denied.kind, "auth");
+  assert.equal(denied.status, 403);
+  assert.match(denied.message, /ResolveGrokBotAutoReviewApproval failed: 403 permission_denied/);
+  assert.doesNotMatch(denied.message, new RegExp(ACCESS));
+  const offline = await run((session) => respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "accept" }))
+    .then(() => assert.fail("expected an error"), (err) => err);
+  assert.equal(offline.code, "failed_precondition");
+  assert.equal(offline.kind, "client");
+  assert.match(offline.message, /400 failed_precondition the machine is offline/);
+});
+
+test("a session without an access token still resolves approvals on the box gateway", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "gbot-backend-approval-override-"));
+  const calls = mockApi(t, {
+    box: {
+      listAgents: () => ({ agents: [{ id: "bot-1", name: "General", isGroup: false }] }),
+      getAgentTranscriptTail: () => ({ entries: approvalCards() }),
+      resolveLocalToolPermission: () => ({}),
+    },
+  });
+  await withEnv(envFor(home, { GROK_BOT_GATEWAY_URL: BOX, GROK_BOT_GATEWAY_TOKEN: GATEWAY }), async () => {
+    const session = await connectGateway();
+    await respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "accept" });
+  });
+  assert.deepEqual(boxCalls(calls, "resolveLocalToolPermission").map((call) => call.body), [
+    { agentId: "bot-1", entryId: "card-local", requestId: "ask-local", resolution: "allow-once" },
+  ]);
+  assert.equal(calls.filter((call) => call.rpc).length, 0);
+});
+
+// --- Review fixes (Opus, 2026-11-05) ---------------------------------------------------------------
+
+test("reconcile reports PENDING and UNKNOWN_DURABILITY as pending, never as not found", async (t) => {
+  let status = "GROK_BOT_SEND_STATUS_PENDING";
+  let entries = [];
+  const { calls, run } = await backendSession(t, {
+    rpcs: { GetGrokBotSendStatus: () => (status ? { status } : {}) },
+    box: { getAgentTranscriptTail: () => ({ entries }) },
+  });
+  for (const [answer, name] of [
+    ["GROK_BOT_SEND_STATUS_PENDING", "PENDING"],
+    ["GROK_BOT_SEND_STATUS_UNKNOWN_DURABILITY", "UNKNOWN_DURABILITY"],
+    // proto3 JSON leaves UNSPECIFIED out; the app reads it as unknown durability.
+    ["", "UNSPECIFIED"],
+  ]) {
+    status = answer;
+    const out = await run((session) => reconcileDelivery(session, "General", "nonce-p"));
+    assert.equal(out.status, "pending", name);
+    assert.equal(out.sendStatus, name);
+    assert.equal(out.scanned, 0);
+  }
+  // The tail still wins when it already shows the message.
+  status = "GROK_BOT_SEND_STATUS_PENDING";
+  entries = [{ id: "t8u", role: "user", clientNonce: "nonce-p" }];
+  const landed = await run((session) => reconcileDelivery(session, "General", "nonce-p"));
+  assert.deepEqual({ status: landed.status, entryId: landed.entryId, sendStatus: landed.sendStatus }, { status: "delivered", entryId: "t8u", sendStatus: "PENDING" });
+  status = "GROK_BOT_SEND_STATUS_NOT_FOUND";
+  entries = [];
+  const missing = await run((session) => reconcileDelivery(session, "General", "nonce-p"));
+  assert.deepEqual({ status: missing.status, sendStatus: missing.sendStatus }, { status: "not-found-in-tail", sendStatus: "NOT_FOUND" });
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0);
+});
+
+test("reconcile reports REJECTED as rejected, with the rejection code, without reading the tail", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_REJECTED", rejectionCode: "send/too-long" }) },
+    box: { getAgentTranscriptTail: () => ({ entries: [] }) },
+  });
+  const out = await run((session) => reconcileDelivery(session, "General", "nonce-x"));
+  assert.deepEqual({ ...out, target: out.target.id }, {
+    target: "bot-1", clientNonce: "nonce-x", status: "rejected", sendStatus: "REJECTED", rejectionCode: "send/too-long",
+  });
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+});
+
+test("a truncated server roster resolves ids only, so no send, delete, update or member change hits the wrong bot", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      // The exact "Scout" may be past the cut; only "Scout · Night" came back.
+      ListGrokBotAgents: () => ({ agents: [bot("bot-2", "Scout · Night"), bot("bot-1", "General")], truncated: true }),
+      SendGrokBotUserMessage: () => ({ delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" }),
+    },
+  });
+  await run(async (session) => {
+    const truncated = { code: "ROSTER_TRUNCATED", message: /only part of the bot list \(truncated\), so "Scout" is not matched by name\. Use the bot or group id\./ };
+    await assert.rejects(resolveRef(session, "Scout"), truncated);
+    const send = await sendPrompt(session, "Scout", "hi", { clientNonce: "nonce-t" }).then(() => assert.fail("expected refusal"), (err) => err);
+    assert.equal(send.code, "ROSTER_TRUNCATED");
+    assert.equal(send.delivery, "rejected");
+    await assert.rejects(deleteAgent(session, "General"), { code: "ROSTER_TRUNCATED" });
+    await assert.rejects(updateAgent(session, "Scout · Night", { title: "x" }), { code: "ROSTER_TRUNCATED" });
+    await assert.rejects(createGroup(session, { name: "Night", memberIds: ["General"] }), { code: "ROSTER_TRUNCATED" });
+    await assert.rejects(resolveRef(session, "bot-404"), { code: "ROSTER_TRUNCATED" });
+    // An id still resolves.
+    const out = await sendPrompt(session, "bot-2", "hi", { clientNonce: "nonce-id" });
+    assert.equal(out.delivery, "accepted");
+  });
+  for (const rpc of ["DeleteGrokBotAgent", "UpdateGrokBotAgent", "CreateGrokBotRoom"]) assert.equal(rpcCalls(calls, rpc).length, 0, rpc);
+  assert.deepEqual(rpcCalls(calls, "SendGrokBotUserMessage").map((call) => call.body.agentId), ["bot-2"]);
+});
+
+test("an empty or whitespace-only ref is refused, never matched to an untitled bot", async (t) => {
+  const { calls, run } = await backendSession(t, { rpcs: { ListGrokBotAgents: () => ({ agents: [bot("bot-1", "General")] }) } });
+  await run(async (session) => {
+    for (const ref of ["", "   ", "\t"]) {
+      await assert.rejects(resolveRef(session, ref), /A bot or group name or id is required\./);
+      await assert.rejects(deleteAgent(session, ref), /A bot or group name or id is required\./);
+    }
+  });
+  assert.equal(rpcCalls(calls, "DeleteGrokBotAgent").length, 0);
+});
+
+for (const [label, caps] of [
+  ["durableIdentityEnabled false", () => ({ capabilities: { temporalCreationEnabled: true } })],
+  ["no capabilities", () => ({})],
+  ["failed_precondition from GetGrokBotRuntimeCapabilities", () => connectError("failed_precondition", "not enabled", 400)],
+]) {
+  test(`server roster off (${label}): the box roster and the box gateway, said on stderr and in the records`, async (t) => {
+    const errors = [];
+    t.mock.method(console, "error", (...args) => { errors.push(args.join(" ")); });
+    const { calls, run } = await backendSession(t, {
+      rpcs: { GetGrokBotRuntimeCapabilities: caps },
+      box: {
+        listAgents: () => ({ agents: [{ id: "bot-1", name: "General", harness: "temporal" }, { id: "bot-2", name: "Scout" }] }),
+        sendPrompt: () => ({ accepted: true }),
+        createGroup: (body) => ({ id: "grp-1", name: body.name, isGroup: true, memberIds: body.memberAgentIds }),
+      },
+    });
+    await run(async (session) => {
+      const rows = await listAgents(session);
+      assert.deepEqual(rows.map((r) => [r.id, r.roster]), [["bot-1", "box"], ["bot-2", "box"]]);
+      const sent = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-box" });
+      assert.equal(sent.delivery, "accepted");
+      assert.equal(sent.target.roster, "box");
+      const group = await createGroup(session, { name: "Box group", memberIds: ["General", "Scout"] });
+      assert.equal(group.id, "grp-1");
+    });
+    assert.deepEqual(boxCalls(calls, "sendPrompt").map((call) => call.body.clientNonce), ["nonce-box"]);
+    assert.deepEqual(boxCalls(calls, "createGroup").map((call) => call.body.memberAgentIds), [["bot-1", "bot-2"]]);
+    for (const rpc of ["SendGrokBotUserMessage", "CreateGrokBotRoom"]) assert.equal(rpcCalls(calls, rpc).length, 0, rpc);
+    // One capability call for the session, and one stderr notice.
+    assert.equal(rpcCalls(calls, "GetGrokBotRuntimeCapabilities").length, 1);
+    assert.equal(errors.filter((line) => /server roster is off for this login/.test(line)).length, 1);
+  });
+}
+
+test("the capability answer is asked once per session while the server roster is on", async (t) => {
+  const { calls, run } = await backendSession(t);
+  await run(async (session) => {
+    await listAgents(session);
+    await resolveRef(session, "General");
+    await resolveRef(session, "Launch");
+  });
+  assert.equal(rpcCalls(calls, "GetGrokBotRuntimeCapabilities").length, 1);
+  assert.equal(rpcCalls(calls, "ListGrokBotAgents").length, 3);
+});
+
+for (const [label, rpcs] of [
+  ["ListGrokBotAgents failed_precondition with the server roster on", { ListGrokBotAgents: () => connectError("failed_precondition", "nope", 400) }],
+  ["ListGrokBotAgents unimplemented", { ListGrokBotAgents: () => connectError("unimplemented", "nope", 404) }],
+  ["GetGrokBotRuntimeCapabilities 503", { GetGrokBotRuntimeCapabilities: () => connectError("unavailable", "down", 503) }],
+  ["GetGrokBotRuntimeCapabilities permission_denied", { GetGrokBotRuntimeCapabilities: () => connectError("permission_denied", "no", 403) }],
+]) {
+  test(`${label} fails closed: no box roster, nothing sent`, async (t) => {
+    const { calls, run } = await backendSession(t, {
+      rpcs,
+      box: { listAgents: () => ({ agents: [{ id: "bot-1", name: "General" }] }), sendPrompt: () => ({ accepted: true }) },
+    });
+    const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-closed" }))
+      .then(() => assert.fail("expected a failure"), (err) => err);
+    assert.equal(error.delivery, "rejected");
+    assert.equal(boxCalls(calls, "sendPrompt").length, 0);
+    assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0);
+  });
+}
+
+for (const [label, answer] of [
+  ["permission_denied", () => connectError("permission_denied", "not yours", 403)],
+  ["a 503", () => connectError("unavailable", "down", 503)],
+  ["a transport failure", () => { throw new TypeError("fetch failed"); }],
+]) {
+  test(`a server roster failure of ${label} does not fall back to the box roster`, async (t) => {
+    const { calls, run } = await backendSession(t, {
+      rpcs: { ListGrokBotAgents: answer },
+      box: { listAgents: () => ({ agents: [{ id: "bot-1", name: "General" }] }), sendPrompt: () => ({ accepted: true }) },
+    });
+    const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-no" }))
+      .then(() => assert.fail("expected a failure"), (err) => err);
+    assert.equal(error.delivery, "rejected", "nothing was sent");
+    assert.equal(boxCalls(calls, "sendPrompt").length, 0);
+    assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0);
+  });
+}
+
+test("a failed ListGrokBotAgentStatuses leaves notify and hidden out instead of failing the list", async (t) => {
+  const { run } = await backendSession(t, { rpcs: { ListGrokBotAgentStatuses: () => connectError("internal", "boom", 500) } });
+  const rows = await run((session) => listAgents(session));
+  assert.deepEqual(rows.map((r) => r.id), ["bot-1", "bot-2", "bot-3", "room-1"]);
+  for (const row of rows) {
+    assert.equal("notifyOnAgentUpdates" in row, false);
+    assert.equal("hiddenFromSidebar" in row, false);
+  }
+});
+
+test("the box merge dedups on legacyAgentId and skips server rows without an agentId", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotAgents: () => ({
+        agents: [
+          bot("uuid-new", "Legacy Bot", { legacyAgentId: "box-old" }),
+          // No agentId: the app drops it, and so does gbot (DeleteGrokBotAgent would get the wrong id).
+          { id: "77", legacyAgentId: "legacy-only", name: "No Agent Id", harness: "temporal", kind: "GROK_BOT_AGENT_KIND_AGENT" },
+        ],
+      }),
+    },
+    box: { listAgents: () => ({ agents: [{ id: "box-old", name: "Legacy Bot", harness: "box" }, { id: "legacy-only", name: "No Agent Id", harness: "box" }] }) },
+  });
+  const rows = await run((session) => listAgents(session));
+  // "legacy-only" is not on the server as an addressable bot, so its box row stays a box-only row.
+  assert.deepEqual(rows.map((r) => [r.id, r.name]), [["uuid-new", "Legacy Bot"], ["legacy-only", "No Agent Id"]]);
+  await run(async (session) => {
+    assert.equal((await resolveRef(session, "Legacy Bot")).id, "uuid-new");
+  });
+  assert.equal(boxCalls(calls, "listAgents").length, 2);
+});
+
+test("SetGrokBotRoomMembers must answer with the room that was asked for", async (t) => {
+  let answer = (body) => ({ agent: room("room-other", "Other", body.memberAgentIds) });
+  const { calls, run } = await backendSession(t, { rpcs: { SetGrokBotRoomMembers: (body) => answer(body) } });
+  await run(async (session) => {
+    await assert.rejects(setGroupMembers(session, "Launch", ["General"]), {
+      code: "ROOM_MISMATCH",
+      message: /answered for a different room; the members may have changed\. Check gbot groups get room-1\./,
+    });
+    answer = () => ({});
+    await assert.rejects(setGroupMembers(session, "Launch", ["General"]), { code: "ROOM_MISMATCH", message: /without the room/ });
+    answer = (body) => ({ agent: bot("room-1", "Launch", { memberAgentIds: body.memberAgentIds }) });
+    await assert.rejects(setGroupMembers(session, "Launch", ["General"]), { code: "ROOM_MISMATCH" });
+  });
+  assert.equal(rpcCalls(calls, "SetGrokBotRoomMembers").length, 3);
+});
+
+test("a backend 408 on send is delivery unknown and asks the status once", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => connectError("deadline_exceeded", "slow", 408),
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_PENDING" }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-408" }))
+    .then(() => assert.fail("expected unknown"), (err) => err);
+  assert.equal(error.status, 408);
+  assert.equal(error.delivery, "unknown");
+  assert.equal(error.effect, "unknown");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+  assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 1);
+});
+
+test("UNSPECIFIED followed by a REJECTED status is a definite rejection", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => ({ dispatched: false }),
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_REJECTED", rejectionCode: "send/blocked" }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-u" }))
+    .then(() => assert.fail("expected rejected"), (err) => err);
+  assert.equal(error.delivery, "rejected");
+  assert.equal(error.failureCode, "send/blocked");
+  assert.equal(error.code, "SEND_REFUSED");
+  assert.equal(error.clientNonce, "nonce-u");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+});
+
+test("an abort after the send was transmitted keeps the send's own answer and skips the status read", async (t) => {
+  const controller = new AbortController();
+  let answer = () => connectError("unavailable", "down", 503);
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => {
+        controller.abort();
+        return answer();
+      },
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_ACCEPTED" }),
+    },
+  });
+  const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-abort", signal: controller.signal }))
+    .then(() => assert.fail("expected unknown"), (err) => err);
+  assert.equal(error.delivery, "unknown");
+  assert.equal(error.effect, "unknown");
+  assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 0);
+  const second = new AbortController();
+  answer = () => {
+    second.abort();
+    return json({ dispatched: true, delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" });
+  };
+  const accepted = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-abort-2", signal: second.signal }));
+  assert.equal(accepted.delivery, "accepted");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 2);
+});
+
+// --- Review fixes (agy, 2026-11-05) ----------------------------------------------------------------
+
+test("a box-only row never shadows a titled server bot: an exact box match next to a folded server match is ambiguous", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotAgents: () => ({ agents: [bot("bot-2", "Scout · Night"), bot("bot-1", "General"), bot("bot-3", "Ranger · Day")] }),
+      SendGrokBotUserMessage: () => ({ delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" }),
+      DeleteGrokBotAgent: () => ({}),
+    },
+    box: {
+      listAgents: () => ({
+        agents: [
+          // A box-harness row the server does not list, named like the server bot's plain name.
+          { id: "box-scout", name: "Scout", title: "Night", harness: "box" },
+          { id: "box-only", name: "Local Only", harness: "box" },
+        ],
+      }),
+    },
+  });
+  await run(async (session) => {
+    // The server bot matches only by its folded name, the box row exactly: two bots or one, so refuse.
+    for (const ref of ["Scout", "Night"]) {
+      await assert.rejects(resolveRef(session, ref), new RegExp(`Ambiguous name "${ref}" \\(a server bot and a box-only bot match\\)\\. Use the id\\.`));
+      await assert.rejects(deleteAgent(session, ref), /Ambiguous name/);
+    }
+    // The folded rule matches both halves of a server bot's "name · title".
+    assert.equal((await resolveRef(session, "Ranger")).id, "bot-3");
+    assert.equal((await resolveRef(session, "Day")).id, "bot-3");
+    assert.equal((await resolveRef(session, "Local Only")).id, "box-only");
+    const sent = await sendPrompt(session, "bot-2", "hi", { clientNonce: "nonce-shadow" });
+    assert.equal(sent.target.id, "bot-2");
+    await deleteAgent(session, "Ranger");
+  });
+  assert.deepEqual(rpcCalls(calls, "SendGrokBotUserMessage").map((call) => call.body.agentId), ["bot-2"]);
+  assert.deepEqual(rpcCalls(calls, "DeleteGrokBotAgent").map((call) => call.body), [{ id: "bot-3" }]);
+  assert.equal(boxCalls(calls, "sendPrompt").length + boxCalls(calls, "deleteAgent").length, 0);
+});
+
+test("a box row listed under the server bot's legacyAgentId is not merged, so it cannot shadow the server bot", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: { ListGrokBotAgents: () => ({ agents: [bot("uuid-new", "Bot · Title", { legacyAgentId: "box-old" })] }) },
+    box: { listAgents: () => ({ agents: [{ id: "box-old", name: "Bot", title: "Title", harness: "box" }] }) },
+  });
+  await run(async (session) => {
+    const rows = await listAgents(session);
+    assert.deepEqual(rows.map((r) => r.id), ["uuid-new"]);
+    assert.equal((await resolveRef(session, "Bot")).id, "uuid-new");
+    assert.equal((await resolveRef(session, "Title")).id, "uuid-new");
+  });
+});
+
+test("skills pick a bot the server lists (agentId or legacyAgentId), never a box-only row", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { ListGrokBotAgents: () => ({ agents: [bot("uuid-new", "Server Bot", { legacyAgentId: "box-old" })] }) },
+    box: {
+      listAgents: () => ({
+        agents: [
+          { id: "box-only", name: "Local Only", harness: "box" },
+          { id: "ghost", name: "Deleted", harness: "temporal" },
+          { id: "box-old", name: "Server Bot", harness: "box" },
+        ],
+      }),
+      getAgentWorkflows: () => ({ workflows: [{ id: "w1", name: "Skill" }] }),
+    },
+  });
+  const skills = await run((session) => listSkills(session));
+  assert.deepEqual(skills.map((skill) => skill.id), ["w1"]);
+  assert.deepEqual(boxCalls(calls, "getAgentWorkflows").map((call) => call.body), [{ id: "box-old" }]);
+});
+
+for (const [label, answer] of [
+  ["Connect canceled (HTTP 499)", () => connectError("canceled", "client went away", 499)],
+  ["deadline_exceeded on a 4xx", () => connectError("deadline_exceeded", "slow", 400)],
+  ["unavailable on a 4xx", () => connectError("unavailable", "busy", 429)],
+  ["unknown", () => connectError("unknown", "?", 400)],
+  ["internal", () => connectError("internal", "boom", 400)],
+]) {
+  test(`a send answered with ${label} may have landed: unknown, after one status read`, async (t) => {
+    const { calls, run } = await backendSession(t, {
+      rpcs: { SendGrokBotUserMessage: answer, GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" }) },
+    });
+    const error = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-maybe" }))
+      .then(() => assert.fail("expected unknown"), (err) => err);
+    assert.equal(error.delivery, "unknown");
+    assert.equal(error.effect, "unknown");
+    assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 1);
+    assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1);
+  });
+}
+
+test("a timed-out send settled as REJECTED is a fresh rejection, and an unknown one says so once", async (t) => {
+  let status = "GROK_BOT_SEND_STATUS_REJECTED";
+  const { run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => {
+        throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      },
+      GetGrokBotSendStatus: () => ({ status, rejectionCode: "send/expired" }),
+    },
+  });
+  const rejected = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-tr" }))
+    .then(() => assert.fail("expected rejected"), (err) => err);
+  assert.equal(rejected.delivery, "rejected");
+  assert.equal(rejected.code, "SEND_REFUSED");
+  assert.equal(rejected.status, undefined);
+  assert.equal(rejected.effect, undefined);
+  assert.equal(rejected.failureCode, "send/expired");
+  assert.equal(rejected.clientNonce, "nonce-tr");
+  assert.match(rejected.message, /rejected after GATEWAY_TIMEOUT/);
+  assert.doesNotMatch(rejected.message, /delivery (is )?unknown/);
+  assert.equal(outcomeFromError(rejected).delivery, "rejected");
+  status = "GROK_BOT_SEND_STATUS_PENDING";
+  const unknown = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-tu" }))
+    .then(() => assert.fail("expected unknown"), (err) => err);
+  assert.equal(unknown.delivery, "unknown");
+  assert.equal(unknown.code, "GATEWAY_TIMEOUT");
+  assert.equal(unknown.message.match(/delivery (is )?unknown/g).length, 1, unknown.message);
+});
+
+test("server text is redacted before it is cut, in errors and in refusals", async (t) => {
+  const pad = "x".repeat(290);
+  const { run } = await backendSession(t, {
+    rpcs: {
+      // The token straddles character 300 of the detail.
+      DeleteGrokBotAgent: () => connectError("permission_denied", pad + ACCESS, 403),
+      SendGrokBotUserMessage: () => ({
+        delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_REFUSED",
+        refusal: { failureCode: "send/blocked", message: "blocked for " + ACCESS + " " + "y".repeat(600) },
+      }),
+    },
+  });
+  const deleted = await run((session) => deleteAgent(session, "General")).then(() => assert.fail("expected an error"), (err) => err);
+  const refused = await run((session) => sendPrompt(session, "General", "hi", { clientNonce: "nonce-red" })).then(() => assert.fail("expected refusal"), (err) => err);
+  for (const error of [deleted, refused]) {
+    assert.doesNotMatch(error.message, /synthetic-backend|access-do-not|ACCESS/);
+    assert.match(error.message, /<redacted>/);
+  }
+  assert.ok(deleted.message.length < 400, "bounded");
+  assert.ok(refused.message.length < 400, "bounded");
+});
+
+test("createGroup checks the avatar before creating, reuses the server id, and names the room when the follow-up fails", async (t) => {
+  let update = (body) => ({ agent: room("room-9", "Night", ["bot-1"], { id: body.id, title: body.title }) });
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      CreateGrokBotRoom: (body) => ({ agent: room("room-9", body.name, body.memberAgentIds, { id: "1009" }) }),
+      UpdateGrokBotAgent: (body) => update(body),
+    },
+  });
+  await run(async (session) => {
+    await assert.rejects(createGroup(session, { name: "Night", memberIds: ["General"], avatarShape: "triangle" }), /Unknown avatar shape "triangle"/);
+    await assert.rejects(createGroup(session, { name: "Night", memberIds: ["General"], avatarColor: "plaid" }), /Unknown avatar color "plaid"/);
+    assert.equal(rpcCalls(calls, "CreateGrokBotRoom").length, 0, "nothing created for a bad avatar");
+    const listsBefore = rpcCalls(calls, "ListGrokBotAgents").length;
+    const rec = await createGroup(session, { name: "Night", memberIds: ["General"], title: "Night room" });
+    assert.equal(rec.id, "room-9");
+    assert.equal(rec.title, "Night room");
+    assert.deepEqual(rpcCalls(calls, "UpdateGrokBotAgent").map((call) => call.body), [{ id: "1009", title: "Night room", partialUpdate: true }]);
+    assert.equal(rpcCalls(calls, "ListGrokBotAgents").length - listsBefore, 1, "one roster read for the members, none after");
+    update = () => connectError("unavailable", "down", 503);
+    await assert.rejects(
+      createGroup(session, { name: "Night", memberIds: ["General"], avatarColor: "red" }),
+      /UpdateGrokBotAgent failed: 503 unavailable down The group was created \(id room-9\) without its title or avatar; set them with gbot groups update room-9\./,
+    );
+  });
+});
+
+test("updateAgent sets notify and hidden on a server bot without a numeric id, and refuses only a profile edit", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotAgents: () => ({ agents: [{ ...bot("bot-1", "General"), id: "" }] }),
+      SetGrokBotAgentClientState: () => ({ state: {} }),
+    },
+    box: { setAgentNotifyOnUpdates: () => ({}) },
+  });
+  await run(async (session) => {
+    await updateAgent(session, "General", { hiddenFromSidebar: true });
+    await assert.rejects(updateAgent(session, "General", { title: "x" }), /no numeric id for "General"/);
+  });
+  assert.deepEqual(rpcCalls(calls, "SetGrokBotAgentClientState").map((call) => call.body), [{ agentId: "bot-1", hiddenFromSidebar: true }]);
+  assert.equal(boxCalls(calls, "setAgentHiddenFromSidebar").length, 0);
+  assert.equal(boxCalls(calls, "updateAgent").length, 0);
+  assert.equal(rpcCalls(calls, "UpdateGrokBotAgent").length, 0);
+});
+
+test("add and remove member read the roster once", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { SetGrokBotRoomMembers: (body) => ({ agent: room(body.agentId, "Launch", body.memberAgentIds) }) },
+  });
+  await run(async (session) => {
+    const before = rpcCalls(calls, "ListGrokBotAgents").length;
+    await addGroupMember(session, "Launch", "Box Helper");
+    await removeGroupMember(session, "Launch", "General");
+    assert.equal(rpcCalls(calls, "ListGrokBotAgents").length - before, 2);
+  });
+});
+
+// Test mode allows any loopback backend and returns before the ALLOW_ANY branch, so this runs with test
+// mode off, fetch fully mocked, and plaintext saved tokens (no OS secret store).
+test("outside test mode an app login token never reaches a non-Cursor backend, even with GROK_BOT_ALLOW_ANY_GATEWAY", {
+  skip: process.platform === "win32" ? "POSIX app data paths" : false,
+}, async (t) => {
+  const sub = "user_synthetic_allow_any_backend";
+  const scope = crypto.createHash("sha256").update(sub).digest("hex");
+  const part = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const appToken = `${part({ alg: "none" })}.${part({ sub, exp: Math.floor(Date.now() / 1000) + 3600, iss: "https://authentication.cursor.sh" })}.sig`;
+  const home = mkdtempSync(join(tmpdir(), "gbot-backend-allowany-"));
+  const env = envFor(home, {
+    GROK_BOT_TEST: null,
+    NODE_ENV: null,
+    CURSOR_ACCESS_TOKEN: null,
+    CURSOR_API_BASE_URL: "https://api2.cursor.sh",
+    GROK_BOT_ALLOW_ANY_GATEWAY: "1",
+    GBOT_CONFIG: join(home, "gbot-config.json"),
+  });
+  const secrets = join(dirname(grokBotGatewayDescriptorPath(home, process.platform, env)), "sand-secrets.json");
+  mkdirSync(dirname(secrets), { recursive: true });
+  writeFileSync(secrets, JSON.stringify({
+    version: 1,
+    "cursor-accounts": JSON.stringify({ active: scope, accounts: { [scope]: { "cursor-access-token": `plaintext:v1:${appToken}` } } }),
+  }));
+  const urls = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const target = String(url);
+    urls.push(target);
+    if (target.endsWith("/EnsureSandBox")) {
+      return json({ runState: "SAND_BOX_RUN_STATE_RUNNING", gatewayUrl: "https://box-test.cursorvm.com", gatewayToken: GATEWAY });
+    }
+    if (target.endsWith("/GetGrokBotRuntimeCapabilities")) return json(CAPS_ON);
+    if (target.endsWith("/ListGrokBotAgents")) return json({ agents: SERVER });
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
+    return new Response("unexpected", { status: 599 });
+  });
+  await withEnv(env, async () => {
+    const session = await connectGateway();
+    assert.equal(hasBackend(session), true);
+    assert.equal((await resolveRef(session, "General")).id, "bot-1");
+    assert.ok(urls.includes("https://api2.cursor.sh/aiserver.v1.GrokBotService/ListGrokBotAgents"));
+    process.env.CURSOR_API_BASE_URL = "https://evil.example";
+    const error = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-evil" })
+      .then(() => assert.fail("expected a refusal"), (err) => err);
+    assert.match(error.message, /Rejected backend URL host "evil\.example"\. Expected \*\.cursor\.sh \/ \*\.cursor\.com\. An app login token is only sent to https Cursor API hosts\./);
+    assert.equal(error.delivery, "rejected");
+  });
+  assert.equal(urls.some((url) => url.includes("evil.example")), false);
+
+  // A user-supplied CURSOR_ACCESS_TOKEN still follows GROK_BOT_ALLOW_ANY_GATEWAY.
+  urls.length = 0;
+  const bare = mkdtempSync(join(tmpdir(), "gbot-backend-allowany-env-"));
+  await withEnv(envFor(bare, {
+    GROK_BOT_TEST: null,
+    NODE_ENV: null,
+    CURSOR_ACCESS_TOKEN: ACCESS,
+    CURSOR_API_BASE_URL: "https://evil.example",
+    GROK_BOT_ALLOW_ANY_GATEWAY: "1",
+    GBOT_CONFIG: join(bare, "gbot-config.json"),
+  }), async () => {
+    const session = await connectGateway();
+    assert.equal((await resolveRef(session, "General")).id, "bot-1");
+  });
+  assert.ok(urls.includes("https://evil.example/aiserver.v1.GrokBotService/ListGrokBotAgents"));
+});
+
+// --- Round 2 review fixes (Opus, 2026-11-05) ---------------------------------------------------------
+
+test("auto-review cards of a non-temporal bot go to the box gateway; local-tool cards try the backend first", async (t) => {
+  let local = () => ({ dispatched: true });
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotAgents: () => ({ agents: [bot("bot-1", "General"), bot("bot-9", "Old Box", { harness: "box" })] }),
+      ResolveGrokBotAutoReviewApproval: () => ({ dispatched: true }),
+      ResolveGrokBotLocalToolPermission: () => local(),
+    },
+    box: {
+      getAgentTranscriptTail: () => ({ entries: approvalCards() }),
+      resolveAutoReviewApproval: () => ({}),
+      resolveLocalToolPermission: () => ({}),
+    },
+  });
+  await run(async (session) => {
+    const review = await respondGrokApproval(session, "Old Box", { entryId: "card-review", requestId: "ask-review", decision: "accept" });
+    assert.deepEqual({ delivery: review.delivery, via: review.via }, { delivery: "accepted", via: "box" });
+    const viaBackend = await respondGrokApproval(session, "Old Box", { entryId: "card-local", requestId: "ask-local", decision: "accept" });
+    assert.deepEqual({ delivery: viaBackend.delivery, via: viaBackend.via }, { delivery: "accepted", via: "backend" });
+    // The app's next step for a non-temporal bot when the backend does not handle the card.
+    local = () => connectError("unimplemented", "not for box bots", 404);
+    const onBox = await respondGrokApproval(session, "Old Box", { entryId: "card-local", requestId: "ask-local", decision: "decline" });
+    assert.equal(onBox.via, "box");
+    // A temporal bot never moves on to the box.
+    await assert.rejects(
+      respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "decline" }),
+      { code: "unimplemented" },
+    );
+  });
+  assert.deepEqual(rpcCalls(calls, "ResolveGrokBotAutoReviewApproval").length, 0, "the non-temporal auto-review card never reaches the backend");
+  assert.deepEqual(boxCalls(calls, "resolveAutoReviewApproval").map((call) => call.body), [
+    { agentId: "bot-9", entryId: "card-review", requestId: "ask-review", resolution: "approved" },
+  ]);
+  assert.deepEqual(boxCalls(calls, "resolveLocalToolPermission").map((call) => call.body.resolution), ["deny"]);
+  assert.equal(rpcCalls(calls, "ResolveGrokBotLocalToolPermission").length, 3);
+});
+
+test("an approval answer with dispatched false is reported as unknown, not accepted", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: {
+      ResolveGrokBotAutoReviewApproval: () => ({ dispatched: false }),
+      ResolveGrokBotLocalToolPermission: () => ({}),
+    },
+    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
+  });
+  await run(async (session) => {
+    for (const [entryId, requestId] of [["card-review", "ask-review"], ["card-local", "ask-local"]]) {
+      const out = await respondGrokApproval(session, "General", { entryId, requestId, decision: "accept" });
+      assert.equal(out.delivery, "unknown");
+      assert.equal(out.dispatched, false);
+      assert.match(out.note, /dispatched: false/);
+    }
+  });
+});
+
+test("a truncated roster leaves box-only rows out, so an id past the cut is refused, not sent to the box", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { ListGrokBotAgents: () => ({ agents: [bot("bot-1", "General")], truncated: true }) },
+    box: { listAgents: () => ({ agents: [{ id: "bot-9", name: "Past The Cut", harness: "box" }] }), deleteAgent: () => ({}) },
+  });
+  await run(async (session) => {
+    assert.deepEqual((await listAgents(session)).map((r) => r.id), ["bot-1"]);
+    await assert.rejects(deleteAgent(session, "bot-9"), { code: "ROSTER_TRUNCATED" });
+  });
+  assert.equal(boxCalls(calls, "deleteAgent").length, 0);
+  assert.equal(rpcCalls(calls, "DeleteGrokBotAgent").length, 0);
+});
+
+test("reconcile reads a send status newer than this build as pending", async (t) => {
+  const { run } = await backendSession(t, {
+    rpcs: { GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_QUEUED_FOR_REVIEW" }) },
+    box: { getAgentTranscriptTail: () => ({ entries: [] }) },
+  });
+  const out = await run((session) => reconcileDelivery(session, "General", "nonce-new"));
+  assert.deepEqual({ status: out.status, sendStatus: out.sendStatus }, { status: "pending", sendStatus: "QUEUED_FOR_REVIEW" });
+});
+
+test("reconcile keeps a known send status when the transcript tail cannot be read", async (t) => {
+  let status = "GROK_BOT_SEND_STATUS_PENDING";
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      GetGrokBotSendStatus: () => (status === null ? connectError("unavailable", "down", 503) : { status }),
+    },
+    box: { getAgentTranscriptTail: () => json({ error: "box down" }, 502) },
+  });
+  for (const [answer, name] of [
+    ["GROK_BOT_SEND_STATUS_PENDING", "PENDING"],
+    ["GROK_BOT_SEND_STATUS_UNKNOWN_DURABILITY", "UNKNOWN_DURABILITY"],
+    ["", "UNSPECIFIED"],
+  ]) {
+    status = answer;
+    const out = await run((session) => reconcileDelivery(session, "General", "nonce-t"));
+    assert.equal(out.status, "pending", name);
+    assert.equal(out.sendStatus, name);
+    assert.equal(typeof out.tailError, "string");
+    assert.ok(out.tailError.length > 0);
+    assert.equal("scanned" in out, false, "nothing was scanned");
+  }
+  // With NOT_FOUND, or no status at all, nothing is known, so the box error stands.
+  status = "GROK_BOT_SEND_STATUS_NOT_FOUND";
+  await assert.rejects(run((session) => reconcileDelivery(session, "General", "nonce-t")));
+  status = null;
+  await assert.rejects(run((session) => reconcileDelivery(session, "General", "nonce-t")));
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0, "reconcile never sends");
+});
+
+test("createGroup refuses a room answer without an agentId, and a room without a numeric id names the created room", async (t) => {
+  let created = (body) => ({ agent: room("room-9", body.name, body.memberAgentIds, { agentId: "" }) });
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      CreateGrokBotRoom: (body) => created(body),
+      UpdateGrokBotAgent: () => ({}),
+    },
+  });
+  await run(async (session) => {
+    await assert.rejects(
+      createGroup(session, { name: "Night", memberIds: ["General"], title: "Night room" }),
+      /CreateGrokBotRoom returned a room without an id\. The group may have been created; run gbot groups list/,
+    );
+    created = (body) => ({ agent: room("room-9", body.name, body.memberAgentIds, { id: "" }) });
+    await assert.rejects(
+      createGroup(session, { name: "Night", memberIds: ["General"], title: "Night room" }),
+      /no numeric id for the new room.*The group was created \(id room-9\) without its title or avatar; set them with gbot groups update room-9\./,
+    );
+    // Without a title or avatar there is nothing to update, so the missing numeric id does not matter.
+    const rec = await createGroup(session, { name: "Night", memberIds: ["General"] });
+    assert.equal(rec.id, "room-9");
+  });
+  assert.equal(rpcCalls(calls, "CreateGrokBotRoom").length, 3);
+  assert.equal(rpcCalls(calls, "UpdateGrokBotAgent").length, 0);
+});
+
+test("summarize marks a record from the box roster, and only then", () => {
+  const base = { id: "bot-1", name: "General", title: "", description: "", avatarShape: "", avatarColor: "", isGroup: false, memberIds: [] };
+  assert.equal(summarize({ ...base, roster: "box" }).roster, "box");
+  assert.equal("roster" in summarize(base), false);
+  assert.equal("harness" in summarize({ ...base, harness: "temporal", serverId: "1" }), false);
+});

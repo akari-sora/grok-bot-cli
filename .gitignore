@@ -12,3 +12,7 @@ tmp-agents/
 
 # Local plugin checkout is not part of the shipped source snapshot.
 /plugin/
+
+# Local agent session state (oh-my-claudecode, Octopus) is not part of the shipped source snapshot.
+/.omc/
+/.octo-continue.md

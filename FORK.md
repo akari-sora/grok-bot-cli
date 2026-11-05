@@ -170,6 +170,51 @@ gbot wake --check
 
 `--json` prints those fields and `exitCode`. A failure also has `error`.
 
+### Grok Bot 0.78.x: server-hosted bots
+
+Grok Bot 0.78.4 (2026-11-03) hosts every bot on the server (`harness: "temporal"`). The app now calls `aiserver.v1.GrokBotService/<Rpc>` (Connect JSON) on the Cursor API host with the account access token for sends, rooms, deletes, and sidebar settings. On 2026-11-05 the box gateway (`/api/<method>` with the box gateway token) behaved like this:
+
+| Gateway call | Result |
+| --- | --- |
+| `sendPrompt`, `createGroup`, `setAgentHiddenFromSidebar` | 502 `A Sand box session is not permitted on this endpoint.` |
+| `listAgents` | 200, but stale: it kept bots the backend had deleted, and a room the backend had just created showed up only minutes later. |
+| `deleteAgent` | 200, and nothing was deleted. |
+| `updateAgent` | 200. Without `editedFields` only the box copy changed. With `editedFields` (what the app sends) the box passed an avatar edit to the server about 3 seconds later; a title edit had still not reached the server 30 seconds later. |
+| `setAgentNotifyOnUpdates` | 200. The server's client state did not change. |
+| `createAgent` | 200. The bot, its title, and its avatar appeared on the server. |
+| `getAgentTranscriptTail`, `getAgentThread`, `getAgentWorkflows` | 200 and current. |
+
+When the session has an access token, gbot uses these backend RPCs:
+
+| Command | RPC |
+| --- | --- |
+| `send` | `SendGrokBotUserMessage` |
+| `reconcile` | `GetGrokBotSendStatus`, then the transcript tail |
+| `bots list`, `groups list`, `get`, and every name lookup | `ListGrokBotAgents`; notify and hidden from `ListGrokBotAgentStatuses` |
+| `groups create` | `CreateGrokBotRoom`, then `UpdateGrokBotAgent` for `--title` and the avatar |
+| `groups set`, `add`, `remove` | `SetGrokBotRoomMembers` |
+| `bots update`, `groups update` | `UpdateGrokBotAgent` (numeric server id, only the changed fields); `--notify` and `--hidden` with `SetGrokBotAgentClientState` |
+| `bots delete`, `groups delete` | `DeleteGrokBotAgent` (not found counts as deleted) |
+| `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested) |
+
+`bots create`, `thread`, `skills`, and `approvals list` stay on the box gateway (`approvals list` and `approvals respond` read the pending cards from the transcript tail). `bots create` stays there because the box registered the new bot on the server with its title and avatar (checked live).
+
+A session has an access token when it comes from a saved app login (gbot already reads that token for EnsureSandBox), from a descriptor login whose account also has a saved access token, or from `CURSOR_ACCESS_TOKEN` when there is no app login. The token is sent only to `CURSOR_API_BASE_URL` (default `https://api2.cursor.sh`), with the same headers as EnsureSandBox (`SAND_CLIENT_VERSION` and `SAND_BOX_NAMESPACE` still apply). An app login token goes only to an https Cursor API host, and `GROK_BOT_ALLOW_ANY_GATEWAY` does not apply to it. `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`, and a descriptor login without a saved access token, have no access token and keep the gateway calls. On a 0.78.x host their sends get the 502 above.
+
+Send delivery: `ACCEPTED_BOX`, `ACCEPTED_TEMPORAL`, and `DUPLICATE` (the same nonce again) are `accepted`. `REFUSED` is `rejected` with the server's `failureCode`. A 4xx is `rejected`, except 408, 499 (Connect `canceled`), and any answer whose Connect code is `canceled`, `deadline_exceeded`, `unavailable`, `unknown`, or `internal`: those may have landed. Those, a timeout, a transport failure, a 5xx, or `UNSPECIFIED` ask `GetGrokBotSendStatus` for the same nonce once: `ACCEPTED` makes it `accepted`, `REJECTED` makes it a new `rejected` error (`SEND_REFUSED`, the server's rejection code as `failureCode`), and anything else stays `unknown`. Server text in errors is redacted before it is cut to 300 characters. gbot never resends, and never sends through the gateway after a backend send was tried. The nonce is the backend `messageId`. `reconcile` asks `GetGrokBotSendStatus` first and returns its answer as `sendStatus`. `ACCEPTED` is `delivered` (`entryId` is the echoed entry). `REJECTED` is `rejected`, with `rejectionCode` when the server gives one. Otherwise gbot reads the last 200 transcript entries as before: the nonce there is `delivered`. When it is not there, only `NOT_FOUND` is `not-found-in-tail`. Every other answer (`PENDING`, `UNKNOWN_DURABILITY`, `UNSPECIFIED`, or a value newer than this build) is `pending`, and so is a status read that failed (`sendStatus: "UNAVAILABLE"`): the message may still land, so do not resend. When the server has such a status but the transcript cannot be read (the box is asleep or failing), the result is still `pending`, with `tailError`; with no status, or `NOT_FOUND`, the read error stands.
+
+Roster: the server is the source of truth for every agent it lists, and `ListGrokBotAgents` also returns box-harness bots. gbot reads the box roster too, and adds a bot only when the server does not list it and its harness is not `temporal`. A `temporal` box row the server does not list is stale and is dropped. That read does not retry an asleep box (no wake on 417). On a saved login, a box answer of 401, 403, or "could not be routed" still rebuilds the session first, as for any box call, and that rebuild can wake the box. If the box roster cannot be read, the server roster stands alone (`GBOT_DEBUG` says why). A name is matched against the server's bots first by exact name or title. Then the folded rule matches either half of a server bot's `name · title`: the plain name or the title. If a server bot matches only by the folded rule while a box-only row matches exactly, gbot refuses with `Ambiguous name … Use the id.`, because they may be one bot or two. Box-only rows are used only when no server bot matches. A server row with no `agentId` is skipped, as the app does, and a box row whose id is a server bot's `agentId` or `legacyAgentId` is not added again.
+
+Whether the server roster is on is decided as the app decides it: `GetGrokBotRuntimeCapabilities` with `capabilities.durableIdentityEnabled` true. It is off when that is false or missing, or when that call answers `failed_precondition`. gbot asks once per session. With the roster off, gbot uses the box roster, prints `gbot: the server roster is off for this login …` on stderr, marks each record `roster: "box"` in `--json` (bots and groups, `send`, `reconcile`), and sends, edits, deletes, and creates groups through the box gateway as before 0.78.x. Any other error from that call, and any error from `ListGrokBotAgents` itself, fails the command: a guessed roster could point a send or a delete at the wrong bot. If the server marks its list `truncated`, names do not resolve, because the bot meant may be past the cut, and box-only rows are left out; give the bot or group id instead. An empty or whitespace-only name is refused. `ListGrokBotAgents` shows a bot with a title as `name · title` with no title (rooms keep their title); the plain name still resolves when nothing matches exactly. A bot the box created with a title already has ` · title` in its stored name, so `bots update --title` alone adds a second one (live: `name · old · new`). Give `--name` and `--title` together to replace both. Notify and hidden come from `ListGrokBotAgentStatuses`. Like the app, gbot takes notify from a client state only once that state was written (`updatedAtMs` above 0); before that, and with no client state, it shows notify on and not hidden. If that read fails, the list leaves notify and hidden out instead of failing.
+
+Rooms: `CreateGrokBotRoom` gets a fresh v4 uuid as `agentId`, and gbot keeps the id in the answer. After a timeout or a 5xx the group may exist; run `gbot groups list` before trying again. `UpdateGrokBotAgent` edits a room's name, description, title, and avatar (checked live). `groups create` checks `--avatar-shape` and `--avatar-color` before it creates anything, and sets the title and avatar with the room's server id from the answer. If that second step fails, the error gives the new group's id. The `SetGrokBotRoomMembers` answer must be the room asked for; any other answer is an error (`ROOM_MISMATCH`) that says the members may have changed.
+
+`--notify` is also sent to the box (`setAgentNotifyOnUpdates`), as the app does. A failure there is ignored (`GBOT_DEBUG` says why).
+
+Approvals: `approvals respond` follows the app's dispatcher. An auto-review card goes to `ResolveGrokBotAutoReviewApproval` with `agentId`, `requestId`, `resolution` (`GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_APPROVED` or `_DENIED`), and `approvalPlatform: "desktop"`; that request has no entry id. A local tool card goes to `ResolveGrokBotLocalToolPermission` with `agentId`, `entryId`, `requestId`, and `resolution` (`GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_ALLOW_ONCE` or `_DENY`). A `refusal` in that answer is an error with `code: "APPROVAL_REFUSED"`, the server's `failureCode`, and `delivery: "rejected"`. gbot still grants once or declines only: the app's ALWAYS and NEVER are never sent, and a stale, foreign, or truncated card is refused before any call. This is mapped from the app and not live-tested: a real pending card is needed, and `approvals respond` refuses a made-up card before any network call. A session without an access token still resolves cards on the box. Like the app, an auto-review card of a bot whose harness is not `temporal` goes to the box gateway, and a local tool card of such a bot moves on to the box gateway when the backend answers `unimplemented`. The answer carries `via` (`backend` or `box`). A backend answer is `delivery: "accepted"` only with `dispatched: true`; otherwise it is `delivery: "unknown"` with a note to check the card in the app. The app itself treats any answer without a refusal as done.
+
+`connectGateway` still runs EnsureSandBox, and may wake the box, before a command that only needs the backend.
+
 ### Fork commands
 
 `--stdin` (default `false`):
@@ -186,7 +231,7 @@ node -e "process.stdout.write('Exact UTF-8 message')" | gbot send Researcher --s
 
 Do not combine `--stdin` with a positional message. The text must be non-empty UTF-8, at most 64 KiB, with no NUL and no surrounding whitespace. A UTF-8 BOM or a UTF-16 BOM is accepted and removed. A trailing CR, LF, or CRLF is surrounding whitespace and is rejected. A CR LF between lines is kept.
 
-Success JSON includes `delivery` (`accepted` or `unknown`), `kind` (`bot` or `group`), `exitCode: 0`, and `result`. `delivery: "accepted"` means the gateway confirmed the send (`{"accepted": true}` or a message id). `delivery: "unknown"` means the CLI cannot prove the send landed (timeout, network failure, HTTP 408 or 5xx, or a response with neither). Do not send again. The result carries the `clientNonce` it posted: `gbot reconcile <bot> --nonce <clientNonce>` looks for it in the last 200 transcript entries (`delivered` or `not-found-in-tail`) and never resends.
+Success JSON includes `delivery` (`accepted` or `unknown`), `kind` (`bot` or `group`), `exitCode: 0`, and `result`. `delivery: "accepted"` means the backend confirmed the send (see Grok Bot 0.78.x above), or, for a session without an access token, the gateway did (`{"accepted": true}` or a message id). `delivery: "unknown"` means the CLI cannot prove the send landed (timeout, network failure, HTTP 408 or 5xx, or a response with neither). Do not send again. The result carries the `clientNonce` it posted: `gbot reconcile <bot> --nonce <clientNonce>` looks for it in the last 200 transcript entries (`delivered` or `not-found-in-tail`) and never resends.
 
 Sends use a 15 second deadline that includes the response body. Reads use 30 seconds. There is no automatic retry, except one retry of the same request after waking an asleep box. A `sendPrompt` retries only when the 417 carries sleep evidence (`pod_hibernated`, or a `failureCode` that matches sleep or hibernation). A failure JSON document includes `wake` and `failureReason` when the error has them. Redirects are rejected.
 
@@ -499,6 +544,51 @@ gbot wake --check
 
 `--json` 印出這些欄位和 `exitCode`。失敗時還有 `error`。
 
+### Grok Bot 0.78.x：bot 改在伺服器上執行
+
+Grok Bot 0.78.4（2026-11-03）把每個 bot 都放到伺服器上執行（`harness: "temporal"`）。App 現在送訊、建立與修改群組、刪除，以及側欄設定，都用帳號的 access token 呼叫 Cursor API 主機上的 `aiserver.v1.GrokBotService/<Rpc>`（Connect JSON）。2026-11-05 實測，雲端電腦 gateway（帶 gateway token 的 `/api/<method>`）的情況如下：
+
+| Gateway 呼叫 | 結果 |
+| --- | --- |
+| `sendPrompt`、`createGroup`、`setAgentHiddenFromSidebar` | 502 `A Sand box session is not permitted on this endpoint.` |
+| `listAgents` | 200，但是舊資料：後端已刪除的 bot 還在，後端剛建立的群組幾分鐘後才出現。 |
+| `deleteAgent` | 200，但什麼都沒刪。 |
+| `updateAgent` | 200。沒有 `editedFields` 時只改到雲端電腦上的副本。帶 `editedFields`（App 會帶）時，頭像的修改約 3 秒後轉到伺服器；title 的修改 30 秒後仍未到伺服器。 |
+| `setAgentNotifyOnUpdates` | 200。伺服器上的 client state 沒有變。 |
+| `createAgent` | 200。bot 連同 title 與頭像出現在伺服器上。 |
+| `getAgentTranscriptTail`、`getAgentThread`、`getAgentWorkflows` | 200，資料是最新的。 |
+
+Session 有 access token 時，gbot 改用這些後端 RPC：
+
+| 命令 | RPC |
+| --- | --- |
+| `send` | `SendGrokBotUserMessage` |
+| `reconcile` | 先 `GetGrokBotSendStatus`，再讀 transcript 尾端 |
+| `bots list`、`groups list`、`get` 與所有名稱查詢 | `ListGrokBotAgents`；notify 與 hidden 來自 `ListGrokBotAgentStatuses` |
+| `groups create` | `CreateGrokBotRoom`，`--title` 與頭像再用 `UpdateGrokBotAgent` |
+| `groups set`、`add`、`remove` | `SetGrokBotRoomMembers` |
+| `bots update`、`groups update` | `UpdateGrokBotAgent`（數字的伺服器 id，只送有改的欄位）；`--notify` 與 `--hidden` 用 `SetGrokBotAgentClientState` |
+| `bots delete`、`groups delete` | `DeleteGrokBotAgent`（找不到視為已刪除） |
+| `approvals respond` | `ResolveGrokBotAutoReviewApproval` 或 `ResolveGrokBotLocalToolPermission`（照 App 對應，沒有實測） |
+
+`bots create`、`thread`、`skills` 與 `approvals list` 仍走雲端電腦 gateway（`approvals list` 與 `approvals respond` 都從 transcript 尾端讀待處理的卡片）。`bots create` 留在 gateway，是因為實測雲端電腦會把新 bot 連同 title 與頭像登記到伺服器上。
+
+以下 session 有 access token：已存的 App 登入（gbot 本來就為 EnsureSandBox 讀這個 token）、該帳號另外存有 access token 的 descriptor 登入，以及沒有 App 登入時的 `CURSOR_ACCESS_TOKEN`。Token 只送到 `CURSOR_API_BASE_URL`（預設 `https://api2.cursor.sh`），header 與 EnsureSandBox 相同（`SAND_CLIENT_VERSION` 與 `SAND_BOX_NAMESPACE` 照樣適用）。App 登入的 token 只送到 https 的 Cursor API 主機，`GROK_BOT_ALLOW_ANY_GATEWAY` 對它無效。`GROK_BOT_GATEWAY_URL` 加 `GROK_BOT_GATEWAY_TOKEN`，以及沒有存 access token 的 descriptor 登入，都沒有 access token，照舊走 gateway。在 0.78.x 上它們的送訊會得到上面的 502。
+
+送達狀態：`ACCEPTED_BOX`、`ACCEPTED_TEMPORAL` 與 `DUPLICATE`（同一個 nonce 再送一次）是 `accepted`。`REFUSED` 是 `rejected`，帶伺服器的 `failureCode`。4xx 是 `rejected`，但 408、499（Connect `canceled`），以及 Connect 代碼為 `canceled`、`deadline_exceeded`、`unavailable`、`unknown` 或 `internal` 的回應除外：這些可能已經送達。這些情況，加上逾時、傳輸失敗、5xx 或 `UNSPECIFIED`，會用同一個 nonce 問一次 `GetGrokBotSendStatus`：`ACCEPTED` 變成 `accepted`，`REJECTED` 變成新的 `rejected` 錯誤（`SEND_REFUSED`，伺服器的拒絕代碼放在 `failureCode`），其他維持 `unknown`。錯誤裡的伺服器文字會先遮蔽機密，再截到 300 字。gbot 絕不重送，試過後端送訊之後也絕不改走 gateway 送。Nonce 就是後端的 `messageId`。`reconcile` 先問 `GetGrokBotSendStatus`，回報的狀態放在 `sendStatus`。`ACCEPTED` 是 `delivered`（`entryId` 是回報的 entry）。`REJECTED` 是 `rejected`，伺服器有給時帶 `rejectionCode`。其他情況照舊讀最後 200 筆 transcript：找到 nonce 就是 `delivered`。找不到時，只有 `NOT_FOUND` 是 `not-found-in-tail`。其他回答（`PENDING`、`UNKNOWN_DURABILITY`、`UNSPECIFIED`，或比這個版本新的值）都是 `pending`，狀態讀取失敗也是（`sendStatus: "UNAVAILABLE"`）：訊息仍可能送達，不要重送。伺服器有這類狀態、但讀不到對話紀錄（雲端電腦睡著或出錯）時，結果仍是 `pending`，並附 `tailError`；沒有狀態或是 `NOT_FOUND` 時，照樣回報讀取錯誤。
+
+名單：伺服器列出的每個 agent 都以伺服器為準，`ListGrokBotAgents` 也會列出 box harness 的 bot。gbot 也讀雲端電腦的名單，只在伺服器沒列出、且 harness 不是 `temporal` 時才加進來。伺服器沒列出的 `temporal` 列是舊資料，會丟掉。這次讀取遇到睡眠中的雲端電腦不會重試（417 不喚醒）。但已存的登入若遇到雲端電腦回 401、403 或「could not be routed」，仍會像其他雲端電腦呼叫一樣先重建 session，而重建可能喚醒雲端電腦。讀不到雲端電腦名單時只用伺服器名單（`GBOT_DEBUG` 會說原因）。名稱先以完整名稱或 title 比對伺服器的 bot，接著用折疊規則比對伺服器 bot 的 `name · title` 任一半：原名稱或 title。如果伺服器的 bot 只靠折疊規則符合，而只在雲端電腦上的列完全相同，gbot 會以 `Ambiguous name … Use the id.` 拒絕，因為兩者可能是同一個或兩個 bot。只有伺服器沒有符合的 bot 時，才用只在雲端電腦上的列。沒有 `agentId` 的伺服器列會照 App 的做法略過；id 等於某個伺服器 bot 的 `agentId` 或 `legacyAgentId` 的雲端電腦列不會重複加入。
+
+伺服器名單是否開啟，照 App 的判斷方式：`GetGrokBotRuntimeCapabilities` 的 `capabilities.durableIdentityEnabled` 為 true。這個值為 false 或沒有，或這個呼叫回 `failed_precondition` 時，就是關閉。gbot 每個 session 只問一次。名單關閉時，gbot 改用雲端電腦名單，在 stderr 印出 `gbot: the server roster is off for this login …`，在 `--json` 的每筆記錄標上 `roster: "box"`（bot 與群組、`send`、`reconcile`），送訊、修改、刪除與建立群組都像 0.78.x 之前一樣走雲端電腦 gateway。這個呼叫的其他錯誤，以及 `ListGrokBotAgents` 本身的任何錯誤，都會讓命令失敗：猜出來的名單可能讓送訊或刪除打到錯的 bot。伺服器把名單標成 `truncated` 時不比對名稱，因為要找的 bot 可能在截斷之後，也不加入只在雲端電腦上的列；請改給 bot 或群組的 id。空白或只有空白字元的名稱會被拒絕。`ListGrokBotAgents` 把有 title 的 bot 顯示成 `name · title`、title 欄空白（群組保留 title）；沒有完全相同的名稱時，原本的名稱仍然查得到。雲端電腦建立時就帶 title 的 bot，存放的名稱裡已經有 ` · title`，所以只給 `bots update --title` 會再多一段（實測：`name · old · new`）。要換掉兩者就同時給 `--name` 與 `--title`。Notify 與 hidden 來自 `ListGrokBotAgentStatuses`。gbot 跟 App 一樣，client state 寫入過（`updatedAtMs` 大於 0）才採用其中的 notify；在那之前，以及沒有 client state 時，都顯示 notify 開、不隱藏。這個讀取失敗時，列表會省略 notify 與 hidden，而不是整個失敗。
+
+群組：`CreateGrokBotRoom` 的 `agentId` 是新的 v4 uuid，gbot 用回應裡的 id。逾時或 5xx 之後群組可能已經建立；再試之前先跑 `gbot groups list`。`UpdateGrokBotAgent` 可以改群組的名稱、說明、title 與頭像（已實測）。`groups create` 會在建立任何東西之前先檢查 `--avatar-shape` 與 `--avatar-color`，並用回應裡的伺服器 id 設定 title 與頭像。第二步失敗時，錯誤會給出新群組的 id。`SetGrokBotRoomMembers` 回應的必須是要求的那個群組，否則是錯誤（`ROOM_MISMATCH`），並說明成員可能已經改變。
+
+`--notify` 也會照 App 的做法送到雲端電腦（`setAgentNotifyOnUpdates`）。那邊失敗會被忽略（`GBOT_DEBUG` 會說原因）。
+
+審批：`approvals respond` 照 App 的分派方式。auto-review 卡片送 `ResolveGrokBotAutoReviewApproval`，帶 `agentId`、`requestId`、`resolution`（`GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_APPROVED` 或 `_DENIED`）與 `approvalPlatform: "desktop"`；這個請求沒有 entry id。本機工具卡片送 `ResolveGrokBotLocalToolPermission`，帶 `agentId`、`entryId`、`requestId` 與 `resolution`（`GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_ALLOW_ONCE` 或 `_DENY`）。回應裡有 `refusal` 時是錯誤，帶 `code: "APPROVAL_REFUSED"`、伺服器的 `failureCode` 與 `delivery: "rejected"`。gbot 仍然只允許一次或拒絕：App 的 ALWAYS 與 NEVER 絕不送出，過期、別人的或被截斷的卡片在任何呼叫之前就會被拒絕。這是照 App 對應的，沒有實測：需要一張真的待處理卡片，而 `approvals respond` 對假卡片在任何網路呼叫之前就會拒絕。沒有 access token 的 session 仍在雲端電腦上處理卡片。跟 App 一樣，harness 不是 `temporal` 的 bot 的 auto-review 卡片走雲端電腦 gateway；這種 bot 的本機工具卡片在後端回 `unimplemented` 時改走雲端電腦 gateway。回應帶 `via`（`backend` 或 `box`）。後端的回應只有在 `dispatched: true` 時才是 `delivery: "accepted"`，否則是 `delivery: "unknown"`，並提醒到 App 裡確認卡片。App 本身把沒有 refusal 的回應都當成完成。
+
+`connectGateway` 在只需要後端的命令之前，仍會先跑 EnsureSandBox，可能喚醒雲端電腦。
+
 ### Fork 命令
 
 `--stdin`（預設 `false`）：
@@ -515,7 +605,7 @@ node -e "process.stdout.write('Exact UTF-8 message')" | gbot send Researcher --s
 
 不要同時給 `--stdin` 和位置參數訊息。內容必須是非空 UTF-8、最多 64 KiB、沒有 NUL、兩端沒有空白。UTF-8 BOM 或 UTF-16 BOM 會被接受並去掉。結尾的 CR、LF 或 CRLF 算兩端空白，會被拒絕。行與行之間的 CR LF 會保留。
 
-成功的 JSON 含 `delivery`（`accepted` 或 `unknown`）、`kind`（`bot` 或 `group`）、`exitCode: 0` 與 `result`。`accepted` 表示 gateway 確認收到（`{"accepted": true}` 或 message id）。`unknown` 表示 CLI 無法證明送出已落地（逾時、網路失敗、HTTP 408 或 5xx，或回應兩者都沒有）。不要再送一次。結果帶有這次送出的 `clientNonce`：`gbot reconcile <bot> --nonce <clientNonce>` 在最後 200 筆 transcript 裡找它（`delivered` 或 `not-found-in-tail`），不會重送。
+成功的 JSON 含 `delivery`（`accepted` 或 `unknown`）、`kind`（`bot` 或 `group`）、`exitCode: 0` 與 `result`。`accepted` 表示後端確認收到（見上面的 Grok Bot 0.78.x），沒有 access token 的 session 則是 gateway 確認收到（`{"accepted": true}` 或 message id）。`unknown` 表示 CLI 無法證明送出已落地（逾時、網路失敗、HTTP 408 或 5xx，或回應兩者都沒有）。不要再送一次。結果帶有這次送出的 `clientNonce`：`gbot reconcile <bot> --nonce <clientNonce>` 在最後 200 筆 transcript 裡找它（`delivered` 或 `not-found-in-tail`），不會重送。
 
 送出期限 15 秒，含讀取回應本文。讀取期限 30 秒。不會自動重試，唯一的例外是喚醒睡眠中的雲端電腦後，把同一個請求重試一次。`sendPrompt` 只有在 417 帶有睡眠證據時才重試（`pod_hibernated`，或 `failureCode` 符合 sleep／hibernat）。失敗的 JSON 在錯誤帶有 `wake` 與 `failureReason` 時會包含它們。重新導向會被拒絕。
 

@@ -108,6 +108,7 @@ const receiptSchema = z
     name: z.string(),
     replyTo: z.string().optional(),
     result: z.record(z.string(), z.json()),
+    roster: z.literal('box').optional(),
   })
   .strict();
 
@@ -167,6 +168,7 @@ const deliver = async (
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     hop: envelope.hop,
     maxHops: envelope.maxHops,
+    ...(out.target.roster === 'box' ? { roster: 'box' as const } : {}),
     exitCode: 0 as const,
   };
 };
