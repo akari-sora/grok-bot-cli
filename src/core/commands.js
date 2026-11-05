@@ -33,7 +33,7 @@ export async function openBackend(opts) {
       kind,
       session,
       list: () => gw.listAgents(session),
-      resolve: (ref) => gw.resolveRef(session, ref),
+      resolve: (ref) => gw.resolveRef(session, ref, { clientState: true }),
       createAgent: (input) => gw.createAgent(session, input),
       updateAgent: (ref, patch) => gw.updateAgent(session, ref, patch),
       deleteAgent: (ref) => gw.deleteAgent(session, ref),

@@ -8146,6 +8146,7 @@ var __webpack_modules__ = {
             members: zod__rspack_import_3.YOg(zod__rspack_import_3.YjP()).optional(),
             name: zod__rspack_import_3.YjP(),
             notifyOnAgentUpdates: zod__rspack_import_3.zMY().optional(),
+            roster: zod__rspack_import_3.euz('box').optional(),
             title: zod__rspack_import_3.YjP().optional()
         }).strict();
         const skillSchema = zod__rspack_import_3.Ikc({
@@ -11326,7 +11327,7 @@ var __webpack_modules__ = {
         var zod__rspack_import_2 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _shared_js__rspack_import_1 = __webpack_require__("./src/cli/_shared.ts");
         const config = {
-            description: "Check whether a send client nonce is in the live transcript tail. Does not resend.",
+            description: "Check whether a send client nonce landed: the backend send status, then the live transcript tail. Does not resend.",
             inputJsonSchema: {
                 additionalProperties: false,
                 properties: {
@@ -11379,24 +11380,40 @@ var __webpack_modules__ = {
             ]),
             name: zod__rspack_import_2.YjP(),
             scanned: zod__rspack_import_2.aig().int().nonnegative().optional(),
+            rejectionCode: zod__rspack_import_2.YjP().optional(),
+            roster: zod__rspack_import_2.euz('box').optional(),
+            sendStatus: zod__rspack_import_2.YjP().optional(),
             seq: zod__rspack_import_2.aig().optional(),
             status: zod__rspack_import_2.k5n([
                 'delivered',
+                'pending',
+                'rejected',
                 'not-found-in-tail'
-            ])
+            ]),
+            tailError: zod__rspack_import_2.YjP().optional()
         }).strict();
+        const STATUSES = [
+            'delivered',
+            'pending',
+            'rejected',
+            'not-found-in-tail'
+        ];
+        const asStatus = (status)=>STATUSES.includes(status) ? status : 'not-found-in-tail';
         async function reconcile({ input }) {
             const backend = await (0, _shared_js__rspack_import_1.FS)(input);
             const found = await backend.reconcile(input.target, input.nonce);
             const entryId = 'entryId' in found && typeof found.entryId === 'string' && found.entryId.length > 0 ? found.entryId : undefined;
             const seq = 'seq' in found && typeof found.seq === 'number' ? found.seq : undefined;
             const scanned = 'scanned' in found && typeof found.scanned === 'number' ? found.scanned : undefined;
+            const sendStatus = 'sendStatus' in found && typeof found.sendStatus === 'string' && found.sendStatus ? found.sendStatus : undefined;
+            const tailError = 'tailError' in found && typeof found.tailError === 'string' && found.tailError ? found.tailError : undefined;
+            const rejectionCode = 'rejectionCode' in found && typeof found.rejectionCode === 'string' && found.rejectionCode ? found.rejectionCode : undefined;
             const value = {
                 id: found.target.id,
                 name: found.target.name,
                 kind: found.target.isGroup ? 'group' : 'bot',
                 clientNonce: found.clientNonce,
-                status: found.status === 'delivered' ? 'delivered' : 'not-found-in-tail',
+                status: asStatus(found.status),
                 ...entryId ? {
                     entryId
                 } : {},
@@ -11405,9 +11422,22 @@ var __webpack_modules__ = {
                 } : {},
                 ...scanned !== undefined ? {
                     scanned
+                } : {},
+                ...sendStatus ? {
+                    sendStatus
+                } : {},
+                ...rejectionCode ? {
+                    rejectionCode
+                } : {},
+                ...tailError ? {
+                    tailError
+                } : {},
+                ...found.target.roster === 'box' ? {
+                    roster: 'box'
                 } : {}
             };
-            const text = value.status === 'delivered' ? `Delivered nonce ${value.clientNonce} to ${value.kind} ${value.name} (${value.id})${value.entryId ? ` entry ${value.entryId}` : ''}${value.seq !== undefined ? ` seq ${value.seq}` : ''}.` : `Nonce ${value.clientNonce} was not found in the last ${value.scanned ?? 0} transcript entries for ${value.kind} ${value.name} (${value.id}). Nothing was resent.`;
+            const who = `${value.kind} ${value.name} (${value.id})`;
+            const text = value.status === 'delivered' ? `Delivered nonce ${value.clientNonce} to ${who}${value.entryId ? ` entry ${value.entryId}` : ''}${value.seq !== undefined ? ` seq ${value.seq}` : ''}.` : value.status === 'pending' ? `Nonce ${value.clientNonce} for ${who} ${value.tailError ? `could not be checked in the transcript (${value.tailError})` : "is not in the transcript yet"}, and ${value.sendStatus === 'UNAVAILABLE' ? 'its send status could not be read' : `the server says ${value.sendStatus}`}: it may still land. Do not resend.` : value.status === 'rejected' ? `The server rejected nonce ${value.clientNonce} for ${who}${value.rejectionCode ? ` (${value.rejectionCode})` : ''}. It was not delivered. Nothing was resent.` : `Nonce ${value.clientNonce} was not found in the last ${value.scanned ?? 0} transcript entries for ${who}${value.sendStatus === 'NOT_FOUND' ? ', and the server has no record of it' : ''}. Nothing was resent.`;
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Result, {
                 value: value,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_3.g.Text, {
@@ -11561,7 +11591,8 @@ var __webpack_modules__ = {
             messageId: zod__rspack_import_8.YjP().optional(),
             name: zod__rspack_import_8.YjP(),
             replyTo: zod__rspack_import_8.YjP().optional(),
-            result: zod__rspack_import_8.g1P(zod__rspack_import_8.YjP(), zod__rspack_import_8.Pq9())
+            result: zod__rspack_import_8.g1P(zod__rspack_import_8.YjP(), zod__rspack_import_8.Pq9()),
+            roster: zod__rspack_import_8.euz('box').optional()
         }).strict();
         const resultSchema = zod__rspack_import_8.KCZ([
             receiptSchema,
@@ -11611,6 +11642,9 @@ var __webpack_modules__ = {
                 } : {},
                 hop: envelope.hop,
                 maxHops: envelope.maxHops,
+                ...out.target.roster === 'box' ? {
+                    roster: 'box'
+                } : {},
                 exitCode: 0
             };
         };
@@ -30360,7 +30394,9 @@ var __webpack_modules__ = {
                     kind,
                     session,
                     list: ()=>_gateway_js__rspack_import_1.vc(session),
-                    resolve: (ref)=>_gateway_js__rspack_import_1.qE(session, ref),
+                    resolve: (ref)=>_gateway_js__rspack_import_1.qE(session, ref, {
+                            clientState: true
+                        }),
                     createAgent: (input)=>_gateway_js__rspack_import_1.Sn(session, input),
                     updateAgent: (ref, patch)=>_gateway_js__rspack_import_1.x4(session, ref, patch),
                     deleteAgent: (ref)=>_gateway_js__rspack_import_1.RB(session, ref),
@@ -30900,7 +30936,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     hiddenFromSidebar: rec.hiddenFromSidebar
                 } : {},
                 kind: rec.isGroup ? "group" : "bot",
-                members: rec.isGroup ? rec.memberIds : undefined
+                members: rec.isGroup ? rec.memberIds : undefined,
+                ...rec.roster === "box" ? {
+                    roster: "box"
+                } : {}
             };
         }
         function formatRecord(rec, all) {
@@ -31244,12 +31283,35 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     ]);
                 }
             }
-            return rememberSession({
+            return attachBackend(rememberSession({
                 gatewayUrl: sandbox.gatewayUrl,
                 gatewayToken: sandbox.gatewayToken,
                 gatewayHeaders: sandbox.gatewayHeaders,
                 accountScope: scope
+            }), {
+                scope,
+                token: loaded.token,
+                expiresAt: loaded.expiresAt
             });
+        }
+        function withScopedBackend(session) {
+            if (!session || typeof session.accountScope !== "string" || !SCOPE_RE.test(session.accountScope)) return session;
+            try {
+                const loaded = (0, _app_auth_js__rspack_import_2.zM)({
+                    scope: session.accountScope,
+                    home: (0, node_os__rspack_import_1.homedir)(),
+                    env: process.env,
+                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                });
+                return attachBackend(session, {
+                    scope: session.accountScope,
+                    token: loaded.token,
+                    expiresAt: loaded.expiresAt
+                });
+            } catch (error) {
+                debug("no backend access token for this login (" + (error?.code || "unreadable") + "); using the box gateway only");
+                return session;
+            }
         }
         async function sessionFromApp(account, signal) {
             let choice;
@@ -31263,7 +31325,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             if (!choice) {
                 try {
-                    return descriptorSession(account);
+                    return withScopedBackend(descriptorSession(account));
                 } catch (error) {
                     if (implicitAuthFallback(error)) return null;
                     throw scrubOutbound(toGatewayError(error), []);
@@ -31281,7 +31343,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         ...session,
                         accountScope: choice.scope
                     };
-                    return session;
+                    return withScopedBackend(session);
                 }
                 return await sessionFromSavedLogin(choice.scope, signal);
             } catch (error) {
@@ -31608,11 +31670,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 }
                 throw error;
             }
-            return {
+            return attachBackend({
                 gatewayUrl: sandbox.gatewayUrl,
                 gatewayToken: sandbox.gatewayToken,
                 gatewayHeaders: sandbox.gatewayHeaders
-            };
+            }, {
+                env: true
+            });
         }
         function redactDetail(detail, session) {
             let text = (0, _url_policy_js__rspack_import_8.fp)(String(detail ?? "").slice(0, 300));
@@ -31910,6 +31974,445 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return data;
         }
+        const SCOPE_RE = /^[0-9a-f]{64}$/;
+        const GROK_BOT_SERVICE = "/aiserver.v1.GrokBotService/";
+        const ROOM_TIMEOUT_MS = 45000;
+        const ROOM_MEMBERS_TIMEOUT_MS = 20000;
+        const backendAuths = new WeakMap();
+        function debug(message) {
+            if (process.env.GBOT_DEBUG) console.error("gbot: " + message);
+        }
+        function attachBackend(session, auth) {
+            backendAuths.set(session, {
+                ...auth
+            });
+            return session;
+        }
+        function hasBackend(session) {
+            return Boolean(session) && typeof session === "object" && backendAuths.has(session);
+        }
+        function backendCredential(session) {
+            const auth = backendAuths.get(session);
+            if (!auth) throw new GatewayError("This session has no Grok Bot access token for the backend.", {
+                code: "NO_ACCESS_TOKEN"
+            });
+            if (auth.env) {
+                const token = accessTokenFromEnv();
+                if (!token) throw new GatewayError("CURSOR_ACCESS_TOKEN is no longer set.", {
+                    code: "NO_ACCESS_TOKEN"
+                });
+                return {
+                    token,
+                    appLogin: false
+                };
+            }
+            if (!(auth.expiresAt > Date.now() + 60000)) {
+                let loaded;
+                try {
+                    loaded = (0, _app_auth_js__rspack_import_2.zM)({
+                        scope: auth.scope,
+                        home: (0, node_os__rspack_import_1.homedir)(),
+                        env: process.env,
+                        ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    });
+                } catch (error) {
+                    throw scrubOutbound(toGatewayError(error), []);
+                }
+                auth.token = loaded.token;
+                auth.expiresAt = loaded.expiresAt;
+            }
+            return {
+                token: auth.token,
+                appLogin: true
+            };
+        }
+        function backendSecrets(session) {
+            const auth = backendAuths.get(session);
+            const token = auth?.env ? accessTokenFromEnv() : auth?.token;
+            return typeof token === "string" && token ? [
+                token
+            ] : [];
+        }
+        function serverText(text, secrets) {
+            return (0, _url_policy_js__rspack_import_8.Ok)(String(text ?? ""), secrets).slice(0, 300);
+        }
+        function connectDetail(data) {
+            const details = Array.isArray(data?.details) ? data.details : [];
+            for (const item of details){
+                const text = item?.debug?.details?.detail || item?.debug?.details?.title;
+                if (typeof text === "string" && text) return text;
+            }
+            return undefined;
+        }
+        function backendFailure(rpc, res, data, token) {
+            const code = typeof data?.code === "string" && data.code ? data.code : undefined;
+            let detail = (0, _url_policy_js__rspack_import_8.Ok)(String(connectDetail(data) || data?.message || data?.raw || res.statusText || ""), [
+                token
+            ]).slice(0, 300);
+            if (res.status === 401 && /no longer supported/i.test(detail)) {
+                detail += ` (gbot sent x-cursor-client-version ${(0, _client_version_js__rspack_import_3.Uz)()}; set SAND_CLIENT_VERSION to override)`;
+                (0, _client_version_js__rspack_import_3.ZF)();
+            }
+            const auth = res.status === 401 || res.status === 403 || code === "unauthenticated" || code === "permission_denied";
+            return new GatewayError(rpc + " failed: " + res.status + (code ? " " + code : "") + " " + detail, {
+                status: res.status,
+                method: rpc,
+                kind: auth ? "auth" : res.status >= 500 ? "server" : "client",
+                ...code ? {
+                    code
+                } : {}
+            });
+        }
+        async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false } = {}) {
+            assertGatewayActive(signal);
+            let token, url;
+            try {
+                const credential = backendCredential(session);
+                token = credential.token;
+                url = (0, _url_policy_js__rspack_import_8.Re)(backendBase(), {
+                    kind: "backend",
+                    ignoreAllowAny: credential.appLogin
+                }) + GROK_BOT_SERVICE + rpc;
+            } catch (error) {
+                const failed = scrubOutbound(error, token ? [
+                    token
+                ] : []);
+                if (send && failed && typeof failed === "object") failed.delivery = "rejected";
+                throw failed;
+            }
+            const deadline = gatewayDeadline(send ? undefined : signal, timeoutMs);
+            assertGatewayActive(signal);
+            let res, data;
+            try {
+                res = await fetch(url, {
+                    method: "POST",
+                    redirect: "error",
+                    signal: deadline,
+                    headers: {
+                        ...(0, _headers_js__rspack_import_4._6)(token),
+                        ...headers
+                    },
+                    body: JSON.stringify(body)
+                });
+                data = await readJson(res, deadline);
+            } catch (error) {
+                if (!send) assertGatewayActive(signal);
+                if (error instanceof GatewayError) throw scrubOutbound(error, [
+                    token
+                ]);
+                if (isDeadlineError(error)) {
+                    throw new GatewayError(send ? rpc + " timed out after " + timeoutMs + "ms; delivery is unknown. Do not resend automatically." : rpc + " timed out after " + timeoutMs + "ms.", {
+                        method: rpc,
+                        code: "GATEWAY_TIMEOUT",
+                        ...send ? {
+                            effect: "unknown"
+                        } : {}
+                    });
+                }
+                throw new GatewayError(rpc + " request failed.", {
+                    method: rpc,
+                    code: "GATEWAY_REQUEST_FAILED"
+                });
+            }
+            if (!send) assertGatewayActive(signal);
+            if (!res.ok) throw backendFailure(rpc, res, data, token);
+            return data;
+        }
+        const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
+        function serverRecord(agent, client) {
+            const isGroup = agent.kind === ROOM_KIND;
+            const members = Array.isArray(agent.memberAgentIds) ? agent.memberAgentIds.map(String) : [];
+            const written = Boolean(client) && Number(client.updatedAtMs) > 0;
+            return {
+                id: String(agent.agentId),
+                name: agent.name || "",
+                title: agent.title || "",
+                description: agent.description || "",
+                avatarShape: agent.avatarShape || "",
+                avatarColor: agent.avatarColor || "",
+                ...client === undefined ? {} : {
+                    notifyOnAgentUpdates: written ? client.notifyOnUpdatesEnabled === true : true,
+                    hiddenFromSidebar: client ? client.hiddenFromSidebar === true : false
+                },
+                isGroup,
+                memberIds: isGroup ? members : [],
+                ...agent.id ? {
+                    serverId: String(agent.id)
+                } : {},
+                harness: String(agent.harness || "")
+            };
+        }
+        const boxOnlyRecords = new WeakSet();
+        const truncatedRosters = new WeakSet();
+        const boxFallbackRosters = new WeakSet();
+        const serverIdsOf = new WeakMap();
+        function boxRows(session, signal) {
+            return gatewayCall(session, "listAgents", {}, {
+                signal,
+                allowWake: false
+            }).then(unwrapList, (error)=>{
+                if (signal?.aborted) throw error;
+                debug("box roster unavailable, using the server roster only: " + (error instanceof Error ? error.message : String(error)));
+                return [];
+            });
+        }
+        function boxOnly(rows, listed) {
+            const out = [];
+            for (const row of rows){
+                const rec = asRecord(row);
+                if (!rec?.id || listed.has(rec.id) || row?.harness === "temporal") continue;
+                boxOnlyRecords.add(rec);
+                out.push(rec);
+            }
+            return out;
+        }
+        function clientStates(session, signal) {
+            return backendCall(session, "ListGrokBotAgentStatuses", {
+                agentIds: []
+            }, {
+                signal
+            }).then((data)=>{
+                const clients = new Map();
+                for (const status of Array.isArray(data?.statuses) ? data.statuses : []){
+                    if (status?.agentId) clients.set(String(status.agentId), status.client ?? null);
+                }
+                return clients;
+            }, (error)=>{
+                if (signal?.aborted) throw error;
+                debug("ListGrokBotAgentStatuses failed, leaving notify and hidden out: " + (error instanceof Error ? error.message : String(error)));
+                return undefined;
+            });
+        }
+        const serverRosterModes = new WeakMap();
+        const boxRosterNotices = new WeakSet();
+        function serverRosterOn(session, signal) {
+            let known = serverRosterModes.get(session);
+            if (!known) {
+                known = backendCall(session, "GetGrokBotRuntimeCapabilities", {}, {
+                    signal
+                }).then((data)=>data?.capabilities?.durableIdentityEnabled === true, (error)=>{
+                    if (error instanceof GatewayError && error.code === "failed_precondition") return false;
+                    serverRosterModes.delete(session);
+                    throw error;
+                });
+                serverRosterModes.set(session, known);
+            }
+            return known;
+        }
+        function noteBoxRoster(session) {
+            if (boxRosterNotices.has(session)) return;
+            boxRosterNotices.add(session);
+            console.error("gbot: the server roster is off for this login (GetGrokBotRuntimeCapabilities); using the box roster and the box gateway.");
+        }
+        async function gatewayRoster(session, signal) {
+            const data = await gatewayCall(session, "listAgents", {}, {
+                signal
+            });
+            return unwrapList(data).map(asRecord).filter((r)=>r && r.id);
+        }
+        async function roster(session, { signal, clientState = false } = {}) {
+            if (!hasBackend(session)) return gatewayRoster(session, signal);
+            const onRead = serverRosterOn(session, signal);
+            const listRead = backendCall(session, "ListGrokBotAgents", {}, {
+                signal
+            });
+            const statesRead = clientState ? clientStates(session, signal) : Promise.resolve(undefined);
+            const boxRead = boxRows(session, signal);
+            const abandon = ()=>{
+                for (const read of [
+                    listRead,
+                    statesRead,
+                    boxRead
+                ])read.catch(()=>{});
+            };
+            let on;
+            try {
+                on = await onRead;
+            } catch (error) {
+                abandon();
+                throw error;
+            }
+            if (!on) {
+                abandon();
+                noteBoxRoster(session);
+                const records = (await gatewayRoster(session, signal)).map((rec)=>({
+                        ...rec,
+                        roster: "box"
+                    }));
+                for (const rec of records)boxOnlyRecords.add(rec);
+                boxFallbackRosters.add(records);
+                return records;
+            }
+            let data;
+            try {
+                data = await listRead;
+            } catch (error) {
+                abandon();
+                throw error;
+            }
+            const [clients, box] = await Promise.all([
+                statesRead,
+                boxRead
+            ]);
+            const listed = new Set();
+            const records = [];
+            for (const agent of Array.isArray(data?.agents) ? data.agents : []){
+                if (!agent || typeof agent.agentId !== "string" || !agent.agentId) continue;
+                listed.add(agent.agentId);
+                if (typeof agent.legacyAgentId === "string" && agent.legacyAgentId) listed.add(agent.legacyAgentId);
+                records.push(serverRecord(agent, clients === undefined ? undefined : clients.get(agent.agentId) ?? null));
+            }
+            const truncated = data?.truncated === true;
+            const all = truncated ? records : [
+                ...records,
+                ...boxOnly(box, listed)
+            ];
+            serverIdsOf.set(all, listed);
+            if (truncated) {
+                debug("ListGrokBotAgents says truncated; names will not resolve, ids still do, box-only rows are left out");
+                truncatedRosters.add(all);
+            }
+            return all;
+        }
+        async function setClientState(session, agentId, state) {
+            return backendCall(session, "SetGrokBotAgentClientState", {
+                agentId,
+                ...state
+            });
+        }
+        async function sendStatus(session, agentId, clientNonce, signal) {
+            try {
+                const data = await backendCall(session, "GetGrokBotSendStatus", {
+                    agentId,
+                    messageId: clientNonce
+                }, {
+                    signal,
+                    timeoutMs: SEND_GATEWAY_TIMEOUT_MS
+                });
+                return {
+                    status: String(data?.status || "UNSPECIFIED").replace(/^GROK_BOT_SEND_STATUS_/, ""),
+                    ...typeof data?.echoEntryId === "string" && data.echoEntryId ? {
+                        echoEntryId: data.echoEntryId
+                    } : {},
+                    ...typeof data?.rejectionCode === "string" && data.rejectionCode ? {
+                        rejectionCode: data.rejectionCode
+                    } : {}
+                };
+            } catch (error) {
+                if (signal?.aborted) throw error;
+                debug("GetGrokBotSendStatus failed: " + (error instanceof Error ? error.message : String(error)));
+                return {
+                    status: ""
+                };
+            }
+        }
+        function deviceTimeZone() {
+            try {
+                const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                return typeof zone === "string" && /^(UTC|[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+)$/.test(zone) ? zone : "";
+            } catch  {
+                return "";
+            }
+        }
+        const ACCEPTED_DELIVERIES = new Set([
+            "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_BOX",
+            "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL",
+            "GROK_BOT_USER_MESSAGE_DELIVERY_DUPLICATE"
+        ]);
+        const REFUSED_DELIVERY = "GROK_BOT_USER_MESSAGE_DELIVERY_REFUSED";
+        function refusedSend(refusal, rec, secrets) {
+            const message = typeof refusal?.message === "string" && refusal.message ? serverText(refusal.message, secrets) : "the message was refused";
+            const failureCode = typeof refusal?.failureCode === "string" && refusal.failureCode ? refusal.failureCode : undefined;
+            const error = new GatewayError("SendGrokBotUserMessage refused: " + message, {
+                method: "SendGrokBotUserMessage",
+                code: "SEND_REFUSED",
+                ...failureCode ? {
+                    failureCode
+                } : {}
+            });
+            error.delivery = "rejected";
+            error.targetId = rec.id;
+            return error;
+        }
+        const MAYBE_LANDED_CODES = new Set([
+            "canceled",
+            "deadline_exceeded",
+            "unavailable",
+            "unknown",
+            "internal"
+        ]);
+        async function backendSend(session, rec, prompt, extra, clientNonce) {
+            const body = {
+                agentId: rec.id,
+                messageId: clientNonce,
+                text: prompt,
+                sentAtMs: String(Date.now()),
+                source: "GROK_BOT_CLIENT_SURFACE_DESKTOP",
+                initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_USER",
+                sendSource: "GROK_BOT_SEND_SOURCE_CHAT",
+                ...extra.replyToId ? {
+                    replyToId: extra.replyToId
+                } : {}
+            };
+            const zone = deviceTimeZone();
+            const accepted = (data)=>({
+                    target: rec,
+                    result: data && typeof data === "object" ? data : {},
+                    delivery: "accepted",
+                    clientNonce
+                });
+            let data;
+            try {
+                data = await backendCall(session, "SendGrokBotUserMessage", body, {
+                    send: true,
+                    signal: extra.signal,
+                    timeoutMs: SEND_GATEWAY_TIMEOUT_MS,
+                    headers: zone ? {
+                        "x-cursor-timezone": zone
+                    } : {}
+                });
+            } catch (err) {
+                if (err && typeof err === "object" && err.delivery == null) {
+                    const answeredNo = err instanceof GatewayError && err.status != null && err.status < 500 && err.status !== 408 && err.status !== 499 && !MAYBE_LANDED_CODES.has(String(err.code ?? ""));
+                    err.delivery = answeredNo ? "rejected" : "unknown";
+                }
+                if (err?.delivery === "unknown" && !extra.signal?.aborted) {
+                    const status = await sendStatus(session, rec.id, clientNonce, undefined);
+                    if (status.status === "ACCEPTED") {
+                        return accepted({
+                            status: "GROK_BOT_SEND_STATUS_ACCEPTED",
+                            ...status.echoEntryId ? {
+                                echoEntryId: status.echoEntryId
+                            } : {}
+                        });
+                    }
+                    if (status.status === "REJECTED") {
+                        const rejected = refusedSend({
+                            failureCode: status.rejectionCode,
+                            message: "GetGrokBotSendStatus says rejected after " + (err.code || (err.status ? "HTTP " + err.status : "a transport failure"))
+                        }, rec, backendSecrets(session));
+                        rejected.cause = err;
+                        throw rejected;
+                    }
+                }
+                throw err;
+            }
+            const delivery = String(data?.delivery ?? "");
+            if (ACCEPTED_DELIVERIES.has(delivery)) return accepted(data);
+            if (delivery === REFUSED_DELIVERY) throw refusedSend(data?.refusal, rec, backendSecrets(session));
+            const status = await sendStatus(session, rec.id, clientNonce, undefined);
+            if (status.status === "ACCEPTED") return accepted(data);
+            if (status.status === "REJECTED") throw refusedSend({
+                failureCode: status.rejectionCode,
+                message: "GetGrokBotSendStatus says rejected"
+            }, rec, backendSecrets(session));
+            return {
+                target: rec,
+                result: data && typeof data === "object" ? data : {},
+                delivery: "unknown",
+                clientNonce
+            };
+        }
         function asRecord(agent) {
             if (!agent) return null;
             const id = agent.id || agent.agentId;
@@ -31953,23 +32456,47 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return asRecord(data.agent || data);
         }
         async function listAgents(session, { signal } = {}) {
-            const data = await gatewayCall(session, "listAgents", {}, {
-                signal
+            return roster(session, {
+                signal,
+                clientState: true
             });
-            return unwrapList(data).map(asRecord).filter((r)=>r && r.id);
         }
         function resolveFromList(records, ref) {
-            const needle = String(ref).trim().toLowerCase();
+            const needle = String(ref ?? "").trim().toLowerCase();
+            if (!needle) throw new GatewayError("A bot or group name or id is required.");
             const byId = records.find((r)=>r.id.toLowerCase() === needle);
             if (byId) return byId;
-            const matches = records.filter((r)=>r.name.toLowerCase() === needle || r.title.toLowerCase() === needle);
-            if (matches.length === 1) return matches[0];
-            if (matches.length === 0) throw new GatewayError("No bot or group named \"" + ref + "\"");
-            throw new GatewayError("Ambiguous name \"" + ref + "\"");
+            if (truncatedRosters.has(records)) {
+                throw new GatewayError("The server sent only part of the bot list (truncated), so \"" + ref + "\" is not matched by name. Use the bot or group id.", {
+                    code: "ROSTER_TRUNCATED"
+                });
+            }
+            const ambiguous = (why)=>new GatewayError("Ambiguous name \"" + ref + "\"" + (why ? " (" + why + ")" : "") + ". Use the id.");
+            const one = (found, why)=>{
+                if (found.length > 1) throw ambiguous(why);
+                return found[0] ?? null;
+            };
+            const exact = (r)=>r.name.toLowerCase() === needle || r.title !== "" && r.title.toLowerCase() === needle;
+            const folded = (r)=>{
+                if (r.title) return false;
+                const parts = r.name.toLowerCase().split(" · ");
+                return parts.length > 1 && (parts[0] === needle || parts.slice(1).join(" · ") === needle || parts.at(-1) === needle);
+            };
+            const server = records.filter((r)=>!boxOnlyRecords.has(r));
+            const box = records.filter((r)=>boxOnlyRecords.has(r));
+            const serverExact = one(server.filter(exact));
+            if (serverExact) return serverExact;
+            const boxExact = box.filter(exact);
+            const serverFolded = server.filter(folded);
+            if (serverFolded.length > 0 && boxExact.length > 0) throw ambiguous("a server bot and a box-only bot match");
+            const found = one(serverFolded) ?? one(boxExact) ?? one(box.filter(folded));
+            if (found) return found;
+            throw new GatewayError("No bot or group named \"" + ref + "\"");
         }
-        async function resolveRef(session, ref, { signal } = {}) {
-            return resolveFromList(await listAgents(session, {
-                signal
+        async function resolveRef(session, ref, { signal, clientState = false } = {}) {
+            return resolveFromList(await roster(session, {
+                signal,
+                clientState
             }), ref);
         }
         async function createAgent(session, input) {
@@ -31983,22 +32510,32 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             });
             return unwrapOne(data);
         }
-        async function updateAgent(session, ref, patch = {}) {
-            const rec = await resolveRef(session, ref);
+        function profileChanges(patch) {
             if (patch.name !== undefined && !String(patch.name).trim()) {
                 throw new GatewayError("Name cannot be blank.");
             }
-            const profile = {
-                name: patch.name !== undefined ? String(patch.name).trim() : rec.name,
-                description: patch.description !== undefined ? String(patch.description) : rec.description
-            };
-            if (patch.title !== undefined) profile.title = String(patch.title);
-            if (patch.avatarShape !== undefined) profile.avatarShape = assertAvatar("shape", patch.avatarShape, _store_js__rspack_import_7.Jb);
-            if (patch.avatarColor !== undefined) profile.avatarColor = assertAvatar("color", patch.avatarColor, _store_js__rspack_import_7.T7);
-            await gatewayCall(session, "updateAgent", {
-                id: rec.id,
-                profile
-            });
+            const changes = {};
+            if (patch.name !== undefined) changes.name = String(patch.name).trim();
+            if (patch.description !== undefined) changes.description = String(patch.description);
+            if (patch.title !== undefined) changes.title = String(patch.title);
+            if (patch.avatarShape !== undefined) changes.avatarShape = assertAvatar("shape", patch.avatarShape, _store_js__rspack_import_7.Jb);
+            if (patch.avatarColor !== undefined) changes.avatarColor = assertAvatar("color", patch.avatarColor, _store_js__rspack_import_7.T7);
+            return changes;
+        }
+        async function gatewayUpdate(session, rec, patch, changes) {
+            const edited = Object.keys(changes);
+            if (edited.length > 0) {
+                const profile = {
+                    name: rec.name,
+                    description: rec.description,
+                    ...changes
+                };
+                await gatewayCall(session, "updateAgent", {
+                    id: rec.id,
+                    profile,
+                    editedFields: edited
+                });
+            }
             if (patch.notifyOnAgentUpdates !== undefined) {
                 await gatewayCall(session, "setAgentNotifyOnUpdates", {
                     id: rec.id,
@@ -32011,14 +32548,61 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     isHidden: Boolean(patch.hiddenFromSidebar)
                 });
             }
+        }
+        async function backendUpdate(session, rec, patch, changes) {
+            if (Object.keys(changes).length > 0) {
+                if (!rec.serverId) throw new GatewayError("The server listed no numeric id for \"" + rec.name + "\", so its profile cannot be updated.");
+                await backendCall(session, "UpdateGrokBotAgent", {
+                    id: rec.serverId,
+                    ...changes,
+                    partialUpdate: true
+                });
+            }
+            if (patch.notifyOnAgentUpdates !== undefined) {
+                const isEnabled = Boolean(patch.notifyOnAgentUpdates);
+                await setClientState(session, rec.id, {
+                    notifyOnUpdatesEnabled: isEnabled
+                });
+                try {
+                    await gatewayCall(session, "setAgentNotifyOnUpdates", {
+                        id: rec.id,
+                        isEnabled
+                    }, {
+                        allowWake: false
+                    });
+                } catch (error) {
+                    debug("box notify mirror failed: " + (error instanceof Error ? error.message : String(error)));
+                }
+            }
+            if (patch.hiddenFromSidebar !== undefined) {
+                await setClientState(session, rec.id, {
+                    hiddenFromSidebar: Boolean(patch.hiddenFromSidebar)
+                });
+            }
+        }
+        async function updateAgent(session, ref, patch = {}) {
+            const rec = await resolveRef(session, ref);
+            const changes = profileChanges(patch);
+            if (hasBackend(session) && !boxOnlyRecords.has(rec)) await backendUpdate(session, rec, patch, changes);
+            else await gatewayUpdate(session, rec, patch, changes);
             const fresh = (await listAgents(session)).find((r)=>r.id === rec.id);
             return fresh || rec;
         }
         async function deleteAgent(session, ref) {
             const rec = await resolveRef(session, ref);
-            await gatewayCall(session, "deleteAgent", {
-                id: rec.id
-            });
+            if (!hasBackend(session) || boxOnlyRecords.has(rec)) {
+                await gatewayCall(session, "deleteAgent", {
+                    id: rec.id
+                });
+                return rec;
+            }
+            try {
+                await backendCall(session, "DeleteGrokBotAgent", {
+                    id: rec.id
+                });
+            } catch (error) {
+                if (!(error instanceof GatewayError && error.code === "not_found")) throw error;
+            }
             return rec;
         }
         const SKILL_MAX_BODY_LENGTH = 100000;
@@ -32047,7 +32631,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return list.filter((s)=>s && s.id).map(asSkill);
         }
         async function anyBotId(session) {
-            const bot = (await listAgents(session)).find((r)=>!r.isGroup);
+            const box = unwrapList(await gatewayCall(session, "listAgents", {})).map(asRecord).filter((r)=>r && r.id && !r.isGroup);
+            let bot = box[0];
+            if (hasBackend(session)) {
+                const listed = serverIdsOf.get(await roster(session));
+                if (listed) bot = box.find((r)=>listed.has(r.id));
+            }
             if (!bot) throw new GatewayError("Skills need at least one bot. Run gbot bots create first.");
             return bot.id;
         }
@@ -32120,27 +32709,89 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...memberIds
             ];
         }
+        async function createRoom(session, input, memberAgentIds) {
+            let data;
+            try {
+                data = await backendCall(session, "CreateGrokBotRoom", {
+                    agentId: (0, node_crypto__rspack_import_0.randomUUID)(),
+                    name: input.name,
+                    description: input.description || "",
+                    memberAgentIds,
+                    humanMemberUserIds: []
+                }, {
+                    timeoutMs: ROOM_TIMEOUT_MS
+                });
+            } catch (error) {
+                if (error instanceof GatewayError && (error.code === "GATEWAY_TIMEOUT" || error.code === "GATEWAY_REQUEST_FAILED" || (error.status ?? 0) >= 500)) {
+                    error.message += " The group may have been created; run gbot groups list before trying again.";
+                }
+                throw error;
+            }
+            if (!data?.agent || data.agent.kind !== ROOM_KIND) throw new GatewayError("CreateGrokBotRoom did not return a room.");
+            if (typeof data.agent.agentId !== "string" || !data.agent.agentId) {
+                throw new GatewayError("CreateGrokBotRoom returned a room without an id. The group may have been created; run gbot groups list before trying again.");
+            }
+            return serverRecord(data.agent);
+        }
         async function createGroup(session, input) {
-            const records = await listAgents(session);
+            const extras = {};
+            if (input.title) extras.title = String(input.title);
+            const avatarShape = assertAvatar("shape", input.avatarShape, _store_js__rspack_import_7.Jb);
+            const avatarColor = assertAvatar("color", input.avatarColor, _store_js__rspack_import_7.T7);
+            if (avatarShape) extras.avatarShape = avatarShape;
+            if (avatarColor) extras.avatarColor = avatarColor;
+            const records = await roster(session);
             const memberAgentIds = normalizeMemberIds(records, input.memberIds || []);
-            const data = await gatewayCall(session, "createGroup", {
+            const onBackend = hasBackend(session) && !boxFallbackRosters.has(records);
+            const rec = onBackend ? await createRoom(session, input, memberAgentIds) : unwrapOne(await gatewayCall(session, "createGroup", {
                 name: input.name,
                 description: input.description || "",
                 memberAgentIds
-            });
-            const rec = unwrapOne(data);
-            const extras = {};
-            if (input.title) extras.title = input.title;
-            if (input.avatarShape) extras.avatarShape = input.avatarShape;
-            if (input.avatarColor) extras.avatarColor = input.avatarColor;
-            if (Object.keys(extras).length && rec?.id) return updateAgent(session, rec.id, extras);
-            return rec;
+            }));
+            if (!Object.keys(extras).length || !rec?.id) return rec;
+            try {
+                if (!onBackend) return await updateAgent(session, rec.id, extras);
+                if (!rec.serverId) throw new GatewayError("The server returned no numeric id for the new room, so it cannot be updated yet.");
+                const data = await backendCall(session, "UpdateGrokBotAgent", {
+                    id: rec.serverId,
+                    ...extras,
+                    partialUpdate: true
+                });
+                return data?.agent ? serverRecord(data.agent) : {
+                    ...rec,
+                    ...extras
+                };
+            } catch (error) {
+                if (error instanceof Error) {
+                    error.message += " The group was created (id " + rec.id + ") without its title or avatar; set them with gbot groups update " + rec.id + ".";
+                }
+                throw error;
+            }
         }
         async function setGroupMembers(session, groupRef, memberRefs) {
-            const records = await listAgents(session);
+            const records = await roster(session);
             const group = resolveFromList(records, groupRef);
             if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
+            return applyMembers(session, records, group, memberRefs);
+        }
+        async function applyMembers(session, records, group, memberRefs) {
             const memberAgentIds = normalizeMemberIds(records, memberRefs);
+            if (hasBackend(session) && !boxOnlyRecords.has(group)) {
+                const data = await backendCall(session, "SetGrokBotRoomMembers", {
+                    agentId: group.id,
+                    memberAgentIds
+                }, {
+                    timeoutMs: ROOM_MEMBERS_TIMEOUT_MS
+                });
+                const room = data?.agent;
+                if (!room || room.agentId !== group.id || room.kind !== ROOM_KIND) {
+                    throw new GatewayError("SetGrokBotRoomMembers answered " + (room ? "for a different room" : "without the room") + "; the members may have changed. Check gbot groups get " + group.id + ".", {
+                        method: "SetGrokBotRoomMembers",
+                        code: "ROOM_MISMATCH"
+                    });
+                }
+                return serverRecord(room);
+            }
             const data = await gatewayCall(session, "setGroupMembers", {
                 id: group.id,
                 memberAgentIds
@@ -32152,7 +32803,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         async function addGroupMember(session, groupRef, memberRef) {
-            const records = await listAgents(session);
+            const records = await roster(session);
             const group = resolveFromList(records, groupRef);
             if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
             const member = resolveFromList(records, memberRef);
@@ -32162,15 +32813,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     member.id
                 ])
             ];
-            return setGroupMembers(session, group.id, next);
+            return applyMembers(session, records, group, next);
         }
         async function removeGroupMember(session, groupRef, memberRef) {
-            const records = await listAgents(session);
+            const records = await roster(session);
             const group = resolveFromList(records, groupRef);
             if (!group.isGroup) throw new GatewayError(`"${group.name}" is a bot, not a group.`);
             const member = resolveFromList(records, memberRef);
             const next = group.memberIds.filter((id)=>id !== member.id);
-            return setGroupMembers(session, group.id, next);
+            return applyMembers(session, records, group, next);
         }
         function sendReceiptFrom(data) {
             if (!data || typeof data !== "object") return {
@@ -32212,8 +32863,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 clientNonce: extra.clientNonce || (0, node_crypto__rspack_import_0.randomUUID)()
             };
             if (extra.replyToId) body.replyToId = extra.replyToId;
+            const viaBackend = hasBackend(session) && !boxOnlyRecords.has(rec);
             let data;
             try {
+                if (viaBackend) return await backendSend(session, rec, prompt, extra, body.clientNonce);
                 data = await gatewayCall(session, "sendPrompt", body, {
                     signal: extra.signal
                 });
@@ -32225,7 +32878,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 if (err && err.delivery === "unknown") err.effect = err.effect || "unknown";
                 if (err && err.targetId == null) err.targetId = rec.id;
                 if (err && typeof err === "object" && err.clientNonce == null) err.clientNonce = body.clientNonce;
-                if (err instanceof GatewayError && err.delivery === "unknown" && !/delivery unknown/.test(err.message)) {
+                if (err instanceof GatewayError && err.delivery === "unknown" && !/delivery (is )?unknown/.test(err.message)) {
                     err.message += " (delivery unknown; check the thread before resending)";
                 }
                 throw err;
@@ -32242,8 +32895,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 clientNonce: body.clientNonce
             };
         }
-        async function getTranscriptTail(session, ref, limit = 40) {
-            const rec = await resolveRef(session, ref);
+        async function transcriptTail(session, rec, limit) {
             const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
             const data = await gatewayCall(session, "getAgentTranscriptTail", {
                 id: rec.id,
@@ -32254,11 +32906,56 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 transcript: data
             };
         }
+        async function getTranscriptTail(session, ref, limit = 40) {
+            return transcriptTail(session, await resolveRef(session, ref), limit);
+        }
         async function reconcileDelivery(session, ref, clientNonce) {
             if (typeof clientNonce !== "string" || clientNonce.length === 0) {
                 throw new GatewayError("A clientNonce is required to reconcile a delivery.");
             }
-            const tail = await getTranscriptTail(session, ref, 200);
+            const rec = await resolveRef(session, ref);
+            let backend = null;
+            if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+                backend = await sendStatus(session, rec.id, clientNonce, undefined);
+                if (backend.status === "ACCEPTED") {
+                    return {
+                        target: rec,
+                        clientNonce,
+                        status: "delivered",
+                        entryId: backend.echoEntryId ?? "",
+                        sendStatus: "ACCEPTED"
+                    };
+                }
+                if (backend.status === "REJECTED") {
+                    return {
+                        target: rec,
+                        clientNonce,
+                        status: "rejected",
+                        sendStatus: "REJECTED",
+                        ...backend.rejectionCode ? {
+                            rejectionCode: backend.rejectionCode
+                        } : {}
+                    };
+                }
+            }
+            const sendStatusField = backend ? {
+                sendStatus: backend.status || "UNAVAILABLE"
+            } : {};
+            let tail;
+            try {
+                tail = await transcriptTail(session, rec, 200);
+            } catch (error) {
+                if (!backend?.status || backend.status === "NOT_FOUND") throw error;
+                const code = error instanceof GatewayError && typeof error.code === "string" && error.code ? error.code : "TAIL_READ_FAILED";
+                debug("reconcile: transcript tail failed (" + code + "); keeping the server's " + backend.status);
+                return {
+                    target: rec,
+                    clientNonce,
+                    status: "pending",
+                    ...sendStatusField,
+                    tailError: code
+                };
+            }
             const entries = transcriptRows(tail?.transcript);
             for(let index = entries.length - 1; index >= 0; index -= 1){
                 const entry = entries[index];
@@ -32272,14 +32969,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     entryId,
                     ...typeof entry.seq === "number" ? {
                         seq: entry.seq
-                    } : {}
+                    } : {},
+                    ...sendStatusField
                 };
             }
             return {
                 target: tail.target,
                 clientNonce,
-                status: "not-found-in-tail",
-                scanned: entries.length
+                status: backend && backend.status !== "NOT_FOUND" ? "pending" : "not-found-in-tail",
+                scanned: entries.length,
+                ...sendStatusField
             };
         }
         async function getThread(session, ref, rootId) {
@@ -32293,41 +32992,124 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 thread: data
             };
         }
-        async function listGrokApprovals(session, ref) {
-            const { target, transcript } = await getTranscriptTail(session, ref, 200);
+        async function pendingApprovals(session, rec) {
+            const { transcript } = await transcriptTail(session, rec, 200);
             if (!Array.isArray(transcript?.entries) || transcript.entries.length > 200) throw new GatewayError("Invalid approval transcript coverage");
+            return transcript.entries.map(_grok_approvals_js__rspack_import_9.Ny).filter(Boolean);
+        }
+        async function listGrokApprovals(session, ref) {
+            const rec = await resolveRef(session, ref);
             return {
                 target: {
-                    id: target.id,
-                    name: target.name
+                    id: rec.id,
+                    name: rec.name
                 },
-                approvals: transcript.entries.map(_grok_approvals_js__rspack_import_9.Ny).filter(Boolean),
+                approvals: await pendingApprovals(session, rec),
                 coverage: "Latest 200 transcript entries only; older requests require the owning Grok UI."
             };
+        }
+        async function resolveApprovalOnBackend(session, rec, approval, entryId, requestId, accept) {
+            if (approval.type === "local-tool-permission") {
+                const data = await backendCall(session, "ResolveGrokBotLocalToolPermission", {
+                    agentId: rec.id,
+                    entryId,
+                    requestId,
+                    resolution: accept ? "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_ALLOW_ONCE" : "GROK_BOT_LOCAL_TOOL_PERMISSION_CARD_RESOLUTION_DENY"
+                });
+                if (data?.refusal) {
+                    const { message, failureCode } = data.refusal;
+                    const reason = typeof message === "string" && message ? serverText(message, backendSecrets(session)) : "the card was not resolved";
+                    const error = new GatewayError("ResolveGrokBotLocalToolPermission refused: " + reason, {
+                        method: "ResolveGrokBotLocalToolPermission",
+                        code: "APPROVAL_REFUSED",
+                        ...typeof failureCode === "string" && failureCode ? {
+                            failureCode
+                        } : {}
+                    });
+                    error.delivery = "rejected";
+                    throw error;
+                }
+                return data ?? {};
+            }
+            return await backendCall(session, "ResolveGrokBotAutoReviewApproval", {
+                agentId: rec.id,
+                requestId,
+                resolution: accept ? "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_APPROVED" : "GROK_BOT_AUTO_REVIEW_APPROVAL_RESOLUTION_DENIED",
+                approvalPlatform: "desktop"
+            }) ?? {};
         }
         async function respondGrokApproval(session, ref, input) {
             const { entryId, requestId, decision } = _grok_approvals_js__rspack_import_9.T5.parse({
                 ...input,
                 target: ref
             });
-            const { target, approvals } = await listGrokApprovals(session, ref);
+            const rec = await resolveRef(session, ref);
+            const approvals = await pendingApprovals(session, rec);
+            const target = {
+                id: rec.id,
+                name: rec.name
+            };
             const matches = approvals.filter((card)=>card.entryId === entryId && card.requestId === requestId);
             if (matches.length !== 1) throw new GatewayError("Stale, foreign or unsupported Grok approval; refresh pending requests or use the owning Grok UI");
             const approval = matches[0];
             if (decision === "accept" && approval.truncated) throw new GatewayError("Approval details are truncated; acceptance requires the owning Grok UI");
             const local = approval.type === "local-tool-permission";
-            await gatewayCall(session, local ? "resolveLocalToolPermission" : "resolveAutoReviewApproval", {
-                agentId: target.id,
+            const temporal = rec.harness === "temporal";
+            const onBox = ()=>gatewayCall(session, local ? "resolveLocalToolPermission" : "resolveAutoReviewApproval", {
+                    agentId: target.id,
+                    entryId,
+                    requestId,
+                    resolution: local ? decision === "accept" ? "allow-once" : "deny" : decision === "accept" ? "approved" : "denied"
+                });
+            if (!hasBackend(session) || boxOnlyRecords.has(rec) || !local && !temporal) {
+                await onBox();
+                return {
+                    target,
+                    entryId,
+                    requestId,
+                    decision,
+                    delivery: "accepted",
+                    via: "box"
+                };
+            }
+            let data;
+            try {
+                data = await resolveApprovalOnBackend(session, rec, approval, entryId, requestId, decision === "accept");
+            } catch (error) {
+                if (!(local && !temporal && error instanceof GatewayError && error.code === "unimplemented")) throw error;
+                await onBox();
+                return {
+                    target,
+                    entryId,
+                    requestId,
+                    decision,
+                    delivery: "accepted",
+                    via: "box"
+                };
+            }
+            const workflowId = typeof data.workflowId === "string" && data.workflowId ? {
+                workflowId: data.workflowId
+            } : {};
+            if (data.dispatched === true) return {
+                target,
                 entryId,
                 requestId,
-                resolution: local ? decision === "accept" ? "allow-once" : "deny" : decision === "accept" ? "approved" : "denied"
-            });
+                decision,
+                delivery: "accepted",
+                via: "backend",
+                dispatched: true,
+                ...workflowId
+            };
             return {
                 target,
                 entryId,
                 requestId,
                 decision,
-                delivery: "accepted"
+                delivery: "unknown",
+                via: "backend",
+                dispatched: false,
+                ...workflowId,
+                note: "The server answered without dispatching it (dispatched: false). Check the card in the Grok Bot app before deciding again."
             };
         }
         __webpack_require__.d(__webpack_exports__, {

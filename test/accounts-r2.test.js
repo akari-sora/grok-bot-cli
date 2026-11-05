@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { grokBotGatewayDescriptorPath, loadGrokBotGatewaySelection } from "../src/core/app-session.js";
 import { outcomeFromError } from "../src/core/codex/contract.js";
-import { connectGateway, listAgents, sendPrompt } from "../src/core/gateway.js";
+import { connectGateway, createAgent, hasBackend, resolveRef, sendPrompt } from "../src/core/gateway.js";
 import {
   importAccountConfig,
   readGbotConfig,
@@ -228,8 +228,8 @@ test("two accounts in one process each hit their own gateway", async (t) => {
     assert.equal(second.gatewayUrl, "http://127.0.0.1:1402");
     assert.equal(third.gatewayUrl, "http://127.0.0.1:1401");
     assert.equal(seen.filter((url) => url.includes("EnsureSandBox")).length, 2);
-    await listAgents(first).catch(() => {});
-    await listAgents(second).catch(() => {});
+    await createAgent(first, { name: "A" }).catch(() => {});
+    await createAgent(second, { name: "B" }).catch(() => {});
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1401/")));
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1402/")));
     assert.equal(
@@ -813,6 +813,58 @@ test("a rewritten descriptor is used on the next connectGateway", {
   });
 });
 
+test("a descriptor login uses the backend only when the app saved an access token for its scope", {
+  skip: process.platform === "win32" ? "CBC fixture; Windows DPAPI is covered in app-session.test.js" : false,
+}, async (t) => {
+  const platform = process.platform;
+  const sub = "user_synthetic_r5_descriptor_backend";
+  const scope = scopeFor(sub);
+  const descriptor = {
+    version: 2,
+    entries: {
+      [scope]: {
+        ...sealedDescriptor({ baseUrl: "http://127.0.0.1:1431", token: "descriptor-gateway-token", headers: {}, name: "Desk" }, platform),
+        savedAtMs: 1,
+      },
+    },
+  };
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    calls.push({ target, bearer: String(init?.headers?.authorization ?? "") });
+    if (target.includes("EnsureSandBox")) throw new Error("a descriptor session must not call EnsureSandBox");
+    if (backendRpc(target) === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (backendRpc(target) === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    return json({ agents: [{ id: "box-bot", name: "Box", harness: "temporal" }] });
+  });
+  const withToken = homeWith({
+    descriptor,
+    secrets: accountsDoc({ [scope]: savedEntry(jwt(sub), "desk@example.com") }, scope),
+  }, platform);
+  await withEnv(gatewayEnv(withToken, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(session.gatewayToken, "descriptor-gateway-token");
+    assert.equal(session.accountScope, scope);
+    assert.equal(hasBackend(session), true);
+    assert.equal((await resolveRef(session, "Bot")).id, "bot-1");
+    const listed = calls.find((call) => backendRpc(call.target) === "ListGrokBotAgents");
+    assert.match(listed.bearer, /^Bearer eyJ/);
+    // The box roster read for box-only bots still uses the descriptor's gateway token.
+    const box = calls.find((call) => call.target.endsWith("/api/listAgents"));
+    assert.equal(box.bearer, "Bearer descriptor-gateway-token");
+    // The temporal box row the server does not list is stale and is not merged.
+    await assert.rejects(resolveRef(session, "Box"), /No bot or group named/);
+  });
+  calls.length = 0;
+  const withoutToken = homeWith({ descriptor }, platform);
+  await withEnv(gatewayEnv(withoutToken, { GBOT_TEST_KEYCHAIN_PASSWORD: "demo-password" }), async () => {
+    const session = await connectGateway();
+    assert.equal(hasBackend(session), false);
+    assert.equal((await resolveRef(session, "Box")).id, "box-bot");
+    assert.deepEqual(calls.map((call) => call.target), ["http://127.0.0.1:1431/api/listAgents"]);
+  });
+});
+
 test("a saved-login session is rebuilt once after 401", async (t) => {
   const sub = "user_synthetic_r2_refresh";
   const scope = scopeFor(sub);
@@ -843,18 +895,19 @@ test("a saved-login session is rebuilt once after 401", async (t) => {
     if (bearer.includes("could-not-route")) {
       return new Response("request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
     }
-    return new Response(JSON.stringify({ agents: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ id: "bot-1", name: "Bot" }), { status: 200, headers: { "content-type": "application/json" } });
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
     assert.equal(session.gatewayToken, "gateway-stale");
-    const agents = await listAgents(session);
-    assert.deepEqual(agents, []);
+    // createAgent stays a box gateway call for a saved login (the backend owns sends and rooms).
+    const created = await createAgent(session, { name: "Bot" });
+    assert.equal(created.id, "bot-1");
     assert.equal(session.gatewayToken, "gateway-fresh");
     assert.equal(ensured.length, 2);
     assert.equal(gatewayCalls, 2);
     failFresh = true;
-    await assert.rejects(listAgents(session), (error) => error.status === 401 && error.kind === "auth");
+    await assert.rejects(createAgent(session, { name: "Bot" }), (error) => error.status === 401 && error.kind === "auth");
     assert.equal(ensured.length, 3);
     assert.equal(gatewayCalls, 4);
     assert.equal(session.gatewayToken, "gateway-again");
@@ -884,7 +937,7 @@ test("a saved-login session is rebuilt once after a routing failure", async (t) 
     gatewayCalls += 1;
     const bearer = String(init?.headers?.authorization ?? "");
     if (bearer.includes("gateway-moved-ok")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+      return new Response(JSON.stringify({ id: "bot-1", name: "Bot" }), { status: 200 });
     }
     return new Response("the request could not be routed", {
       status: 404,
@@ -893,8 +946,8 @@ test("a saved-login session is rebuilt once after a routing failure", async (t) 
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
-    const agents = await listAgents(session);
-    assert.equal(agents.length, 1);
+    const created = await createAgent(session, { name: "Bot" });
+    assert.equal(created.id, "bot-1");
     assert.equal(session.gatewayToken, "gateway-moved-ok");
     assert.equal(ensured.length, 2);
     assert.equal(gatewayCalls, 2);
@@ -917,11 +970,27 @@ function runningSandbox(token, port) {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot send", async (t) => {
+// A saved login has the app access token, so its sends and roster go to aiserver.v1.GrokBotService
+// (Grok Bot 0.78.x). The box roster is read only for box-only bots; these fixtures have none.
+const SERVER_ROSTER = { agents: [{ id: "101", agentId: "bot-1", name: "Bot", harness: "temporal", kind: "GROK_BOT_AGENT_KIND_AGENT" }] };
+// The server roster is on when GetGrokBotRuntimeCapabilities says durableIdentityEnabled, as in the app.
+const CAPS_ON = { capabilities: { durableIdentityEnabled: true, durableIdentityWritesEnabled: true, temporalCreationEnabled: true } };
+
+function backendRpc(target) {
+  const match = /\/aiserver\.v1\.GrokBotService\/(\w+)$/.exec(target);
+  return match && match[1] !== "EnsureSandBox" ? match[1] : null;
+}
+
+function json(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+}
+
+test("a backend 401 on a saved-login send is delivery rejected and does not rebuild the box session", async (t) => {
   const sub = "user_synthetic_r3_send_reject";
   const home = savedLoginHome(sub, "reject@example.com");
   const ensured = [];
   const prompts = [];
+  const statuses = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const target = String(url);
     if (target.includes("EnsureSandBox")) {
@@ -930,11 +999,17 @@ test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot sen
       return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
     }
     const body = init?.body ? JSON.parse(init.body) : {};
-    if (target.endsWith("/api/listAgents")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    const rpc = backendRpc(target);
+    if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    if (rpc === "GetGrokBotSendStatus") statuses.push(body);
+    if (rpc === "SendGrokBotUserMessage") {
+      prompts.push(body);
+      // An auth error body that echoes the bearer token must not reach the error text.
+      return json({ code: "unauthenticated", message: String(init?.headers?.authorization ?? "") }, 401);
     }
-    prompts.push(body);
-    return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
+    return new Response("unexpected " + target, { status: 599 });
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
@@ -947,7 +1022,6 @@ test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot sen
       assert.equal(error.clientNonce, "nonce-reject");
       assert.doesNotMatch(error.message, /delivery unknown/);
       assert.equal(error.rebuildError, undefined);
-      assert.ok(error.cause instanceof Error);
       assert.equal(outcome.rebuildError, undefined);
       assert.doesNotMatch(error.message, /synthetic-r2-token-do-not-leak/);
       assert.doesNotMatch(JSON.stringify(outcome), /synthetic-r2-token-do-not-leak/);
@@ -955,30 +1029,34 @@ test("a 401 whose saved-login rebuild fails stays delivery rejected for gbot sen
     });
   });
   assert.equal(prompts.length, 1);
-  assert.equal(prompts[0].clientNonce, "nonce-reject");
-  assert.equal(ensured.length, 2);
+  assert.equal(prompts[0].messageId, "nonce-reject");
+  assert.equal(statuses.length, 0, "a definite 401 needs no status read");
+  assert.equal(ensured.length, 1);
 });
 
-test("a saved-login sendPrompt rebuild retries once with the same client nonce", async (t) => {
+test("a saved-login send goes once to SendGrokBotUserMessage with the nonce as messageId", async (t) => {
   const sub = "user_synthetic_r3_send_retry";
   const home = savedLoginHome(sub, "retry@example.com");
   const ensured = [];
   const prompts = [];
+  const boxSends = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const target = String(url);
     if (target.includes("EnsureSandBox")) {
       ensured.push(JSON.parse(init.body));
-      return runningSandbox(ensured.length === 1 ? "gateway-send-stale" : "gateway-send-fresh", 1421);
+      return runningSandbox("gateway-send-stale", 1421);
     }
     const body = init?.body ? JSON.parse(init.body) : {};
     const bearer = String(init?.headers?.authorization ?? "");
-    if (target.endsWith("/api/listAgents")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    const rpc = backendRpc(target);
+    if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    if (rpc === "SendGrokBotUserMessage") {
+      prompts.push({ body, bearer });
+      return json({ dispatched: true, mode: "GROK_BOT_TEMPORAL_HARNESS_MODE_LIVE", delivery: "GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL" });
     }
-    prompts.push({ body, bearer });
-    if (bearer.includes("gateway-send-fresh")) {
-      return new Response(JSON.stringify({ accepted: true }), { status: 200 });
-    }
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
+    boxSends.push(target);
     return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
   });
   await withEnv(gatewayEnv(home), async () => {
@@ -986,19 +1064,24 @@ test("a saved-login sendPrompt rebuild retries once with the same client nonce",
     const sent = await sendPrompt(session, "Bot", "hello", { clientNonce: "nonce-retry" });
     assert.equal(sent.delivery, "accepted");
     assert.equal(sent.clientNonce, "nonce-retry");
+    assert.equal(sent.target.id, "bot-1");
   });
-  assert.equal(ensured.length, 2);
-  assert.equal(prompts.length, 2);
-  assert.equal(prompts[0].body.clientNonce, "nonce-retry");
-  assert.equal(prompts[1].body.clientNonce, "nonce-retry");
-  assert.match(prompts[1].bearer, /gateway-send-fresh/);
+  assert.equal(ensured.length, 1);
+  assert.deepEqual(boxSends, []);
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].body.messageId, "nonce-retry");
+  assert.equal(prompts[0].body.agentId, "bot-1");
+  // The app access token, not the box gateway token.
+  assert.match(prompts[0].bearer, /^Bearer eyJ/);
+  assert.doesNotMatch(prompts[0].bearer, /gateway-send-stale/);
 });
 
-test("a sendPrompt 5xx is not rebuilt or resent", async (t) => {
+test("a backend send 5xx is delivery unknown and is not rebuilt or resent", async (t) => {
   const sub = "user_synthetic_r3_send_5xx";
   const home = savedLoginHome(sub, "five@example.com");
   const ensured = [];
   const prompts = [];
+  const statuses = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const target = String(url);
     if (target.includes("EnsureSandBox")) {
@@ -1006,25 +1089,35 @@ test("a sendPrompt 5xx is not rebuilt or resent", async (t) => {
       return runningSandbox("gateway-send-5xx", 1422);
     }
     const body = init?.body ? JSON.parse(init.body) : {};
-    if (target.endsWith("/api/listAgents")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
+    const rpc = backendRpc(target);
+    if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    if (rpc === "GetGrokBotSendStatus") {
+      statuses.push(body);
+      return json({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" });
     }
-    prompts.push(body);
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
+    prompts.push({ target, body });
     return new Response("unavailable", { status: 503, headers: { "content-type": "text/plain" } });
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
     await assert.rejects(sendPrompt(session, "Bot", "hello", { clientNonce: "nonce-5xx" }), (error) => {
       assert.equal(error.delivery, "unknown");
+      assert.equal(error.effect, "unknown");
       assert.equal(error.status, 503);
+      assert.match(error.message, /delivery unknown/);
       return true;
     });
   });
   assert.equal(prompts.length, 1);
+  assert.match(prompts[0].target, /SendGrokBotUserMessage$/);
+  // NOT_FOUND right after a 5xx settles nothing: gbot never resends.
+  assert.deepEqual(statuses, [{ agentId: "bot-1", messageId: "nonce-5xx" }]);
   assert.equal(ensured.length, 1);
 });
 
-test("a relay records delivery rejected when a 401 rebuild fails", {
+test("a relay records delivery rejected when the backend answers 401", {
   skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
 }, async (t) => {
   const { fakeAppServer } = await import("./helpers/codex-server.js");
@@ -1052,9 +1145,10 @@ test("a relay records delivery rejected when a 401 rebuild fails", {
       return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
     }
     const body = init?.body ? JSON.parse(init.body) : {};
-    if (target.endsWith("/api/listAgents")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
-    }
+    const rpc = backendRpc(target);
+    if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
     prompts.push(body);
     return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
   });
@@ -1093,10 +1187,11 @@ test("a relay records delivery rejected when a 401 rebuild fails", {
     assert.notEqual(receipt.reason, "delivery-unknown");
   });
   assert.equal(prompts.length, 1);
-  assert.equal(ensured.length, 2);
+  assert.equal(prompts[0].messageId !== undefined, true);
+  assert.equal(ensured.length, 1);
 });
 
-test("a later relay send stays rejected when saved-login rebuild keeps failing", {
+test("a later relay send stays rejected while the backend keeps answering 401", {
   skip: process.platform === "win32" ? "Unix relay sockets are unsupported on win32" : false,
 }, async (t) => {
   const { fakeAppServer } = await import("./helpers/codex-server.js");
@@ -1124,9 +1219,10 @@ test("a later relay send stays rejected when saved-login rebuild keeps failing",
       return new Response("sandbox down", { status: 500, headers: { "content-type": "text/plain" } });
     }
     const body = init?.body ? JSON.parse(init.body) : {};
-    if (target.endsWith("/api/listAgents")) {
-      return new Response(JSON.stringify({ agents: [{ id: "bot-1", name: "Bot" }] }), { status: 200 });
-    }
+    const rpc = backendRpc(target);
+    if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
+    if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
     if (target.endsWith("/api/getAgentTranscriptTail")) {
       return new Response(JSON.stringify({ entries: [] }), { status: 200 });
     }
@@ -1168,8 +1264,10 @@ test("a later relay send stays rejected when saved-login rebuild keeps failing",
     assert.notEqual(second.reason, "delivery-unknown");
     assert.equal(JSON.stringify([first, second]).includes("synthetic-r2-token-do-not-leak"), false);
   });
-  assert.equal(prompts.length, 1);
-  assert.equal(ensured.length, 3);
+  // Both sends reached the backend once each and were refused; the box session was never rebuilt.
+  assert.equal(prompts.length, 2);
+  assert.deepEqual(prompts.map((body) => typeof body.messageId), ["string", "string"]);
+  assert.equal(ensured.length, 1);
 });
 
 test("a v1 descriptor that contradicts the only saved login is not merged", {
