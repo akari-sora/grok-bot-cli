@@ -14,9 +14,10 @@ Reply in the user's language. Full guide: `docs/migration.md` in this fork; real
 
 ## Before you start
 
-- `gbot migrate --help` must list `bots capture preview import check run`. If not, install the
-  fork's latest GitLab release file as FORK.md "Install" says (never `npm install -g grok-bot-cli`:
-  that is upstream, without `migrate`).
+- `gbot migrate --help` must list `bots capture preview import check run`. If not, install or
+  upgrade with one command (same on macOS, Linux and Windows):
+  `npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz`.
+  Never `npm install -g grok-bot-cli`: that is upstream, without `migrate`.
 - The Grok Bot desktop app is signed in on this computer (gbot reads its login; `gbot accounts`
   lists the logins). With several, pass `--account <alias|email|label>` after the subcommand.
 - Destination tools on the same computer: Hermes → `hermes --version`. Muse → `trinity-cli` 0.5.2+,

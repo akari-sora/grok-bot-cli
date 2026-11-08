@@ -37,8 +37,8 @@ GitLab CI runs the tests on Linux for every push and on Windows for merge reques
 1. Update `CHANGELOG.md` and the fork notes in `FORK.md` and `FORK.zh-TW.md`.
 2. Merge to `main` and wait for a green pipeline.
 3. Build the package with `npm ci && npm run build && npm pack`.
-4. Tag `vX.Y.Z-iml1s.N` on `main`, push the tag, and attach the `.tgz` to the GitLab Release for that tag. There is no release job; the upload is manual.
-5. Update the `.tgz` link in `README.md`, `README.zh-TW.md`, `FORK.md`, `FORK.zh-TW.md`, and trinity-cli's README.
+4. Tag `vX.Y.Z-iml1s.N` on `main`, push the tag, and attach the `.tgz` to the GitLab Release for that tag with `glab release create <tag> grok-bot-cli-0.11.2.tgz`, so its download path stays `/grok-bot-cli-0.11.2.tgz`. The docs install from `…/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz`, which then points at the new release by itself. There is no release job; the upload is manual.
+5. Check that link installs the new release (`npm install -g --prefix <tmp> <link>`). If the package version changes, the file name changes: update the link everywhere it appears. trinity-cli's README pins a tagged link; update it when trinity is released.
 6. Do not publish to npm. The `grok-bot-cli` name on npm belongs to upstream.
 
 Never move or delete a published tag. Fix forward with a new version.

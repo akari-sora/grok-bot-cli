@@ -14,23 +14,13 @@ npm 上的套件仍屬於上游。不要 `npm install -g grok-bot-cli`。GitLab�
 
 使用 Node.js 22.19+（22.x）或 24.2+，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。產生的 CLI 使用 [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain)；Node 23 與 Node 24.0–24.1 沒有此功能，啟動器會以非零結束碼與版本說明拒絕執行。GitLab（<https://gitlab.com/aa22396584/grok-bot-cli>）是主要遠端。
 
-不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.13` 附的套件檔再安裝。
-
-macOS 或 Linux：
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改裝 release 附的套件檔；每個作業系統都是同一行，而且永遠裝到最新 release（要升級就再跑一次）：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz"
-npm install -g ./grok-bot-cli-0.11.2.tgz
-rm -f grok-bot-cli-0.11.2.tgz
+npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
 ```
 
-Windows PowerShell：
-
-```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
-npm install -g .\grok-bot-cli-0.11.2.tgz
-Remove-Item grok-bot-cli-0.11.2.tgz
-```
+要裝指定版本：`npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/v0.11.2-iml1s.13/downloads/grok-bot-cli-0.11.2.tgz`（換掉標籤）。
 
 Windows 上 npm 會建立 `gbot.cmd`，PowerShell 與 cmd 都能執行 `gbot`。
 

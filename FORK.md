@@ -14,23 +14,13 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 Use Node.js 22.19+ (22.x) or 24.2+, with the Grok Bot desktop app signed in once on the same OS user. The generated CLI uses [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain), which is absent in Node 23 and Node 24.0–24.1; the launcher rejects those versions with a nonzero exit and a version diagnostic.
 
-Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.13` release and install that file.
-
-macOS or Linux:
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Install the release package file instead; one command does it on every OS and always gets the latest release (run it again to upgrade):
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz"
-npm install -g ./grok-bot-cli-0.11.2.tgz
-rm -f grok-bot-cli-0.11.2.tgz
+npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
 ```
 
-Windows PowerShell:
-
-```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
-npm install -g .\grok-bot-cli-0.11.2.tgz
-Remove-Item grok-bot-cli-0.11.2.tgz
-```
+A specific release: `npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/v0.11.2-iml1s.13/downloads/grok-bot-cli-0.11.2.tgz` (change the tag).
 
 npm creates `gbot.cmd` on Windows, so `gbot` works from PowerShell and cmd.
 

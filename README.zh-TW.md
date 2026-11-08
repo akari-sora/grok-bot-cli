@@ -32,29 +32,18 @@
 
 ## 安裝
 
-需要 Node.js `^22.19.0 || >=24.2.0`（22.x 的 22.19 以上，或 24.2 以上；Node 23 與 24.0–24.1 沒有 `import.meta.main`，啟動器會拒絕執行），以及在同一個作業系統使用者下登入過一次的 Grok Bot 桌面版。安裝 GitLab release 附的套件檔。
+需要 Node.js `^22.19.0 || >=24.2.0`（22.x 的 22.19 以上，或 24.2 以上；Node 23 與 24.0–24.1 沒有 `import.meta.main`，啟動器會拒絕執行），以及在同一個作業系統使用者下登入過一次的 Grok Bot 桌面版。
 
-macOS 或 Linux：
-
-```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz"
-npm install -g ./grok-bot-cli-0.11.2.tgz
-rm -f grok-bot-cli-0.11.2.tgz
-```
-
-Windows PowerShell：
-
-```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
-npm install -g .\grok-bot-cli-0.11.2.tgz
-Remove-Item grok-bot-cli-0.11.2.tgz
-```
+macOS、Linux、Windows（PowerShell 或 cmd）都是同一行，裝的是最新 release；要升級就再跑一次：
 
 ```sh
+npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
 gbot --version   # gbot 0.11.2
 ```
 
-`gbot --version` 印出 `gbot 0.11.2`，這是上游套件版本；fork 的版本看 git 標籤（`v0.11.2-iml1s.N`）。升級就用同樣方式安裝新 release 的檔案；移除用 `npm uninstall -g grok-bot-cli`。從 clone 建置與還原腳本見 [FORK.zh-TW.md](FORK.zh-TW.md#安裝)。
+要裝指定版本，把 `permalink/latest` 換成那個標籤，例如 `…/-/releases/v0.11.2-iml1s.13/downloads/grok-bot-cli-0.11.2.tgz`。
+
+`gbot --version` 印出 `gbot 0.11.2`，這是上游套件版本；fork 的版本看 git 標籤（`v0.11.2-iml1s.N`）。移除用 `npm uninstall -g grok-bot-cli`。從 clone 建置與還原腳本見 [FORK.zh-TW.md](FORK.zh-TW.md#安裝)。
 
 > [!WARNING]
 > 不要執行 `npm install -g grok-bot-cli`：npm 上這個名字是上游的套件，沒有這個 fork 的改動。也不要安裝 `git+https://…`：npm 會以結束碼 0 結束，卻留下斷掉的 `gbot` 連結。
@@ -100,6 +89,13 @@ Hermes 每個 bot 一個新 profile；Muse 和 Your dot 在它們自己的電腦
 **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。它只搬到 Hermes。從公開範本加入：<https://x.ai/bot/y2AFnYLdbz5T66loRBHar>。自己建一個或用範本分享，見 [docs/move-to-hermes.zh-TW.md](docs/move-to-hermes.zh-TW.md)。
 
 ## 給 agent 用
+
+- **設定**：兩行指令，然後開新的 session 直接跟 agent 說，例如「幫我把 Grok Bot 的 bot 搬到 Hermes」：
+
+  ```sh
+  npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
+  gbot-install install claude   # 或 codex、cursor
+  ```
 
 - **外掛**：`gbot-install install claude|codex|cursor|grokbot` 安裝同一個 release 檔附帶的 `gbot` 外掛：`grok-bot` MCP server、`claude-channel` MCP server（Claude Code）、`talk-to-grok-bot`、`chatgpt-desktop`、`codex-dot`、`migrate-grok-bot` 四個 skill，以及 `/gbot:codex-*` 命令。細節見 [docs/reference.zh-TW.md](docs/reference.zh-TW.md#給-agent-用的整合)。
 - **搬 bot**：`migrate-grok-bot` skill 會列出 bot、擷取、給你看預覽，明確同意後才匯入，再讀回驗收。步驟與規則見 [docs/migration.zh-TW.md](docs/migration.zh-TW.md#給-agent-用)。

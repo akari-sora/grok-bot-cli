@@ -32,29 +32,18 @@ Manage Grok Bot bots, groups and messages from your terminal, and move a bot to 
 
 ## Install
 
-Requires Node.js `^22.19.0 || >=24.2.0` (22.19+ on 22.x, or 24.2+; Node 23 and 24.0–24.1 lack `import.meta.main`, and the launcher refuses them) and the Grok Bot desktop app, signed in once on the same OS user. Install the package file attached to the GitLab release.
+Requires Node.js `^22.19.0 || >=24.2.0` (22.19+ on 22.x, or 24.2+; Node 23 and 24.0–24.1 lack `import.meta.main`, and the launcher refuses them) and the Grok Bot desktop app, signed in once on the same OS user.
 
-macOS or Linux:
-
-```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz"
-npm install -g ./grok-bot-cli-0.11.2.tgz
-rm -f grok-bot-cli-0.11.2.tgz
-```
-
-Windows PowerShell:
-
-```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
-npm install -g .\grok-bot-cli-0.11.2.tgz
-Remove-Item grok-bot-cli-0.11.2.tgz
-```
+One command on macOS, Linux and Windows (PowerShell or cmd) installs the latest release; run it again to upgrade:
 
 ```sh
+npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
 gbot --version   # gbot 0.11.2
 ```
 
-`gbot --version` prints `gbot 0.11.2`, the upstream package version; the fork revision is the git tag (`v0.11.2-iml1s.N`). Upgrade by installing a newer release's file the same way; uninstall with `npm uninstall -g grok-bot-cli`. Building from a clone and the restore scripts: [FORK.md](FORK.md#install).
+A specific release: put its tag in place of `permalink/latest`, for example `…/-/releases/v0.11.2-iml1s.13/downloads/grok-bot-cli-0.11.2.tgz`.
+
+`gbot --version` prints `gbot 0.11.2`, the upstream package version; the fork revision is the git tag (`v0.11.2-iml1s.N`). Uninstall with `npm uninstall -g grok-bot-cli`. Building from a clone and the restore scripts: [FORK.md](FORK.md#install).
 
 > [!WARNING]
 > Do not run `npm install -g grok-bot-cli`: that npm name is upstream's package, without this fork's changes. Do not install a `git+https://…` spec either: npm exits 0 and leaves a dangling `gbot` link.
@@ -100,6 +89,13 @@ Options, destinations, routines, checks and limits: [docs/migration.md](docs/mig
 The **Move to Hermes** bot runs `gbot migrate` on your computer and asks before each command. It moves bots to Hermes only. Add it from its public template: <https://x.ai/bot/y2AFnYLdbz5T66loRBHar>. To create your own copy or share it as a template: [docs/move-to-hermes.md](docs/move-to-hermes.md).
 
 ## For agents
+
+- **Set up**: two commands, then ask the agent in a new session, for example "Move my Grok Bot bot to Hermes":
+
+  ```sh
+  npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz
+  gbot-install install claude   # or codex, cursor
+  ```
 
 - **Plugin**: `gbot-install install claude|codex|cursor|grokbot` installs the `gbot` plugin from the same release file: the `grok-bot` MCP server, the `claude-channel` MCP server (Claude Code), the skills `talk-to-grok-bot`, `chatgpt-desktop`, `codex-dot` and `migrate-grok-bot`, and the `/gbot:codex-*` commands. Details: [docs/reference.md](docs/reference.md#agent-integrations).
 - **Moving a bot**: the `migrate-grok-bot` skill lists the bots, captures, shows the preview, imports only after an explicit yes, then reads back and checks. Steps and rules: [docs/migration.md](docs/migration.md#for-agents-claude-code-codex-cursor).
