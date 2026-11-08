@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, distinctiveTokens, inspectHermes, summarizeHermesPlan, verifyHermes, writeInside } from '../src/core/migration-hermes.js';
 import { hasSecret } from '../src/core/migration-redact.js';
 
@@ -79,7 +79,7 @@ function fakeHermes(root, knobs = {}) {
     if (!homes.has(home)) homes.set(home, { config: {}, memory: [], user: [], jobs: [], sessions: [] });
     return homes.get(home);
   };
-  const skillNames = (home) => (existsSync(join(home, 'skills')) ? walk(join(home, 'skills')) : []).filter((f) => f.endsWith('/SKILL.md'))
+  const skillNames = (home) => (existsSync(join(home, 'skills')) ? walk(join(home, 'skills')) : []).filter((f) => basename(f) === 'SKILL.md')
     .map((f) => /^name:\s*(.+)$/m.exec(readFileSync(f, 'utf8'))?.[1].trim());
   const helper = (req, home) => {
     const s = state(home);
@@ -229,7 +229,7 @@ test('b: destinations are validated relative paths that stay inside the workspac
   ] });
   const plan = buildPlan(a, root);
   assert.deepEqual(plan.files.map((f) => f.boxPath), ['/home/box/sand-data/workflows/ok/SKILL.md', '/home/box/fine.txt']);
-  for (const f of plan.files) assert.ok(f.dest.startsWith(plan.boxRoot + '/'), f.dest);
+  for (const f of plan.files) assert.ok(f.dest.startsWith(plan.boxRoot + sep), f.dest);
   assert.deepEqual(plan.skills.map((s) => [s.slug, s.files.map((f) => f.rel)]), [['ok', ['SKILL.md']]]);
   const refused = plan.notMigrated.filter((n) => /unsafe destination path/.test(n.reason)).map((n) => n.item);
   assert.deepEqual(refused.sort(), [
@@ -492,12 +492,22 @@ test('r2-1: a file saved over the destination between the digest check and the w
   mkdirSync(join(root, 'a'));
   const path = join(root, 'a', 'f.txt');
   writeFileSync(path, 'what the migration wrote');
+  let refused = false;
   const status = writeInside(root, path, Buffer.from('repaired'), 0o600, (digest) => {
     // The user saves the file the atomic way (new file renamed over it) right after the check.
     writeFileSync(join(root, 'a', '.f.txt.tmp'), 'saved by the user');
-    renameSync(join(root, 'a', '.f.txt.tmp'), path);
+    try { renameSync(join(root, 'a', '.f.txt.tmp'), path); } catch (error) {
+      // Windows refuses to rename over a file that is open, so the save cannot slip in between.
+      if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
+      refused = true;
+    }
     return digest === sha('what the migration wrote');
   });
+  if (refused) {
+    assert.equal(status, 'updated');
+    assert.equal(readFileSync(path, 'utf8'), 'repaired');
+    return;
+  }
   assert.equal(status, 'conflict');
   assert.equal(readFileSync(path, 'utf8'), 'saved by the user');
   // Without a race the recorded digest still allows the repair.
