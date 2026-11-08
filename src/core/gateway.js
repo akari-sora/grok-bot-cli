@@ -2250,7 +2250,17 @@ async function readTemplate(session, rec, signal) {
 /** The bot's shared template, read only. @param {any} session @param {string} ref @param {{ signal?: AbortSignal }} [options] */
 export async function getBotTemplate(session, ref, { signal } = {}) {
   const rec = await templateBot(session, ref, signal);
-  return { target: rec, ...(await readTemplate(session, rec, signal)) };
+  const found = await readTemplate(session, rec, signal);
+  if (!found.template) return { target: rec, ...found };
+  // The newest draft the bot posted as a review card, so a caller can see when the live version is
+  // older (an old card confirmed in the app publishes its version again). Status works without it.
+  let newestDraftVersion;
+  try {
+    newestDraftVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), found.template.shareId);
+  } catch {
+    newestDraftVersion = undefined;
+  }
+  return { target: rec, ...found, ...(newestDraftVersion ? { newestDraftVersion } : {}) };
 }
 
 /**
@@ -2357,6 +2367,18 @@ async function existingTemplate(session, rec, signal) {
   return template;
 }
 
+// The version on the newest bot-template-share card for this template among the transcript entries.
+function newestCardVersion(entries, shareId) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    const card = entry && typeof entry === "object" ? entry.message : undefined;
+    if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== shareId) continue;
+    const version = Number(card.version);
+    if (Number.isSafeInteger(version) && version >= 1) return version;
+  }
+  return undefined;
+}
+
 // The version to read or publish: the one asked for; else the newest bot-template-share card the bot
 // posted for this template in the last 200 transcript entries (the card the app asks to confirm); else
 // the active version.
@@ -2365,14 +2387,8 @@ async function templateVersionFor(session, rec, template, version) {
     if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", { code: "TEMPLATE_NO_VERSION" });
     return { version, versionFrom: "option" };
   }
-  const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    const card = entry && typeof entry === "object" ? entry.message : undefined;
-    if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
-    const cardVersion = Number(card.version);
-    if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return { version: cardVersion, versionFrom: "card" };
-  }
+  const cardVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), template.shareId);
+  if (cardVersion) return { version: cardVersion, versionFrom: "card" };
   if (template.activeVersion >= 1) return { version: template.activeVersion, versionFrom: "active" };
   throw new GatewayError(
     "No template version to use: the last 200 transcript entries of " + rec.name + " have no template card for " + template.shareId + ", and no version is active. Give the version (--template-version N).",

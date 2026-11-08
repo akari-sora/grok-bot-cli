@@ -65,6 +65,7 @@ const statusSchema = z.object({
   exitCode: z.literal(0),
   exportPolicy: z.string().optional(),
   hasTeam: z.boolean(),
+  newestDraftVersion: z.number().optional(),
   template: templateSchema.nullable(),
 }).strict();
 
@@ -170,10 +171,17 @@ const run = async (input: z.infer<typeof inputSchema>, signal: AbortSignal): Pro
         template: found.template,
         ...(found.exportPolicy ? { exportPolicy: found.exportPolicy } : {}),
         hasTeam: found.hasTeam,
+        ...(found.newestDraftVersion ? { newestDraftVersion: found.newestDraftVersion } : {}),
         exitCode: 0,
       },
       text: found.template
-        ? `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})\n${found.template.link}`
+        ? [
+            `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})`,
+            ...(found.newestDraftVersion && found.newestDraftVersion > (found.template.activeVersion ?? 0)
+              ? [`The newest draft in the bot's chat is version ${found.newestDraftVersion}; the live one is ${found.template.activeVersion ?? 'none'}. To make the draft live: gbot bots template ${found.target.id} --publish --template-version ${found.newestDraftVersion}`]
+              : []),
+            found.template.link,
+          ].join('\n')
         : `${who[0]!.toUpperCase()}${who.slice(1)} has no template yet.`,
     };
   }

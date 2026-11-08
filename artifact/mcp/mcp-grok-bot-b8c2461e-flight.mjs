@@ -31061,9 +31061,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function getBotTemplate(session, ref, { signal } = {}) {
             const rec = await templateBot(session, ref, signal);
+            const found = await readTemplate(session, rec, signal);
+            if (!found.template) return {
+                target: rec,
+                ...found
+            };
+            let newestDraftVersion;
+            try {
+                newestDraftVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), found.template.shareId);
+            } catch  {
+                newestDraftVersion = undefined;
+            }
             return {
                 target: rec,
-                ...await readTemplate(session, rec, signal)
+                ...found,
+                ...newestDraftVersion ? {
+                    newestDraftVersion
+                } : {}
             };
         }
         async function shareBotTemplate(session, ref, { waitSeconds = 600, pollSeconds = 10, signal, clientNonce = randomUUID() } = {}) {
@@ -31217,6 +31231,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return template;
         }
+        function newestCardVersion(entries, shareId) {
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                const card = entry && typeof entry === "object" ? entry.message : undefined;
+                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== shareId) continue;
+                const version = Number(card.version);
+                if (Number.isSafeInteger(version) && version >= 1) return version;
+            }
+            return undefined;
+        }
         async function templateVersionFor(session, rec, template, version) {
             if (version !== undefined) {
                 if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", {
@@ -31227,17 +31251,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     versionFrom: "option"
                 };
             }
-            const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
-            for(let index = entries.length - 1; index >= 0; index -= 1){
-                const entry = entries[index];
-                const card = entry && typeof entry === "object" ? entry.message : undefined;
-                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
-                const cardVersion = Number(card.version);
-                if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return {
-                    version: cardVersion,
-                    versionFrom: "card"
-                };
-            }
+            const cardVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), template.shareId);
+            if (cardVersion) return {
+                version: cardVersion,
+                versionFrom: "card"
+            };
             if (template.activeVersion >= 1) return {
                 version: template.activeVersion,
                 versionFrom: "active"
