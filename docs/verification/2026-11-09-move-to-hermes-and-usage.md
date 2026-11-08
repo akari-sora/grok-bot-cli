@@ -28,6 +28,14 @@ The Grok Bot app reads the weekly meter with `aiserver.v1.DashboardService/GetSa
 | 17:16:21–17:17:23 | three readings | 16.57550 |
 | 17:17:54 | about 100 s after that message | 16.58092 |
 
-A one-line bot turn showed up on the meter within two minutes (+0.0054 points); the full capture (transcript pages, memory, skills, routines, tasks, the box-store manifest and 321 files) did not move it, before or for three minutes after. This matches the code: the capture only calls read RPCs (`backendRead`) and never sends a message to a bot, so no bot runs. Only `--move-routines` writes to Grok Bot (the routine switch), and that is not a bot turn either.
+A one-line bot turn showed up on the meter 70–100 s after it was sent (+0.0054 points). In this first run the capture ended only 22 s before that message, so the two could not be told apart, and the meter was read for about 90 s after the capture. The capture was therefore measured again with no message to any bot in the window:
+
+| Time (UTC) | Event | usagePercent |
+| --- | --- | --- |
+| 17:39:13 | before `gbot migrate capture` of the demo bot | 16.58092 |
+| 17:39:14–17:41:31 | capture (exit 0) | |
+| 17:41:32–17:47:48 | 14 readings, every ~30 s, no message to any bot | 16.58092 (all) |
+
+The full capture (transcript pages, memory, skills, routines, tasks, the box-store manifest and 321 files) did not move the meter in the 6 minutes after it, more than three times the delay a bot turn needs to show. This matches the code: the capture only calls read RPCs (`backendRead`) and never sends a message to a bot, so no bot runs. Only `--move-routines` writes to Grok Bot (the routine switch), and that is not a bot turn either.
 
 The Move to Hermes route is different: each step is a turn of that bot and uses Grok Bot usage.

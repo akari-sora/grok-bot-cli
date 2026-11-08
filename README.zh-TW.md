@@ -2,7 +2,7 @@
 
 [English](README.md) | 繁體中文
 
-**把 Grok Bot 的 bot 搬到 Hermes、Muse 或 Your dot**：角色、記憶、Skills、排程、還沒做完的任務、完整對話和檔案。`gbot migrate` 匯入後會讀回比對，再確認搬過去的 bot 能接著做事。它只讀 Grok Bot、不會傳訊息給你的 bot，所以搬家不花 Grok Bot 用量。同一個 CLI 也能在終端機管理 Grok Bot 的 bot、群組和訊息。
+**把 Grok Bot 的 bot 搬到 Hermes、Muse 或 Your dot**：角色、記憶、Skills、排程、還沒做完的任務、完整對話和檔案。`gbot migrate` 匯入後會讀回比對，再確認搬過去的 bot 能接著做事。它只讀 Grok Bot（除了你要求交接排程時，會切換那個排程的開關），也不會傳訊息給你的 bot，所以搬家不花 Grok Bot 用量（[實測紀錄](docs/verification/2026-11-09-move-to-hermes-and-usage.md)）。同一個 CLI 也能在終端機管理 Grok Bot 的 bot、群組和訊息。
 
 > 正本和 issue 在 <https://gitlab.com/aa22396584/grok-bot-cli>。Release 與下載：<https://gitlab.com/aa22396584/grok-bot-cli/-/releases>。GitHub 鏡像：<https://github.com/akari-sora/grok-bot-cli>（issue 與 merge request 請開在 GitLab）。
 

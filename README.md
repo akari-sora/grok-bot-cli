@@ -2,7 +2,7 @@
 
 English | [繁體中文](README.zh-TW.md)
 
-**Move your Grok Bot bots to Hermes, Muse or Your dot**: role, memory, skills, routines, open tasks, the whole conversation and the files. `gbot migrate` imports them, reads them back, and checks the moved bot can carry on the work. It only reads from Grok Bot and never messages your bot, so the move does not spend Grok Bot usage. The same CLI also manages Grok Bot bots, groups and messages from your terminal.
+**Move your Grok Bot bots to Hermes, Muse or Your dot**: role, memory, skills, routines, open tasks, the whole conversation and the files. `gbot migrate` imports them, reads them back, and checks the moved bot can carry on the work. It only reads from Grok Bot (apart from switching a routine when you ask it to move one) and never messages your bot, so the move does not spend Grok Bot usage ([measured](docs/verification/2026-11-09-move-to-hermes-and-usage.md)). The same CLI also manages Grok Bot bots, groups and messages from your terminal.
 
 > Canonical repository and issues: <https://gitlab.com/aa22396584/grok-bot-cli>. Releases and downloads: <https://gitlab.com/aa22396584/grok-bot-cli/-/releases>. GitHub mirror: <https://github.com/akari-sora/grok-bot-cli> (open issues and merge requests on GitLab).
 
