@@ -4,6 +4,10 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.16
+
+- `gbot bots template <bot> --status` also reads the bot's newest template review card. When that draft is newer than the live version (for example after an older card was confirmed in the app, which publishes that old version again), the text says so and gives the `--publish --template-version N` command; `--json` has `newestDraftVersion`. Reading the chat is best effort: status still works without it.
+
 ### 0.11.2-iml1s.15
 
 - `gbot usage` shows this week's Grok Bot usage, reset time and plan (read-only; DashboardService GetSandUsageStatus). `--account` picks the login and `--json` gives `{ account, usagePercent, periodStart, resetsAt, hasAvailableUsage, plan, planLabel, unified, onDemandEligible }`. It reads with the saved access token only and does not wake the box; the answer's dashboard URL (it carries the user id) is never printed. At 80% or more, or with no included usage left, it adds `Moving bots elsewhere: gbot migrate (docs/migration.md).` Exit 0 read, 2 the login could not be chosen, 1 other errors.

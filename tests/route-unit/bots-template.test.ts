@@ -52,7 +52,7 @@ const answer = (path: string): unknown => {
     case `${SERVICE}SendGrokBotUserMessage`:
       return { dispatched: true, delivery: 'GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL' };
     case `${SERVICE}ListGrokBotTranscriptEntries`:
-      return { entries: [{ seq: '1', entryKind: 'send-message', entryId: 'card-1', updatedSeq: '1', body: Buffer.from(JSON.stringify(CARD)).toString('base64') }] };
+      return { entries: [{ seq: '1', entryKind: 'send-message', entryId: 'card-1', updatedSeq: '1', body: Buffer.from(JSON.stringify({ ...CARD, message: { ...CARD.message, version: cardVersion } })).toString('base64') }] };
     case `${SERVICE}GetGrokBotTemplateVersion`:
       return { version: 1, active: false, createdAtMs: '1794137204348', blobObjectKey: 'k', blobGetUrl: `${base}/recipes/share-abc`, visibility: 'GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC' };
     case `${SERVICE}ActivateGrokBotTemplateVersion`:
@@ -77,6 +77,8 @@ const shared = {
     visibility: 'GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC',
   },
 };
+
+let cardVersion = 1;
 
 const CARD = {
   id: 'card-1',
@@ -211,6 +213,24 @@ describe('gbot bots template', () => {
     expect(out.value).toMatchObject({ version: 1, versionFrom: 'card', template: { published: true, activeVersion: 1, link: 'https://x.ai/bot/share-abc' } });
     expect(activations().map((call) => call.body)).toEqual([{ shareId: 'share-abc', version: 1 }]);
     expect(sends()).toHaveLength(0);
+  });
+
+  it('--status says when the newest draft card is newer than the live version, and stays quiet when it is live', async () => {
+    templates.push(shared);
+    cardVersion = 3;
+    const text = await invokeCli(['bots', 'template', BOT, '--status']);
+    expect(text.exitCode).toBe(0);
+    const lines = text.stdout.trim().split('\n');
+    expect(lines).toContain(`The newest draft in the bot's chat is version 3; the live one is 1. To make the draft live: gbot bots template ${BOT} --publish --template-version 3`);
+    expect(lines.at(-1)).toBe('https://x.ai/bot/share-abc');
+    const json = await invokeCli(['bots', 'template', BOT, '--status', '--json']);
+    expect(json.value).toMatchObject({ newestDraftVersion: 3, template: { activeVersion: 1 } });
+    cardVersion = 1;
+    const live = await invokeCli(['bots', 'template', BOT, '--status']);
+    expect(live.stdout).not.toContain('newest draft');
+    expect(sends()).toHaveLength(0);
+    expect(activations()).toHaveLength(0);
+    templates.length = 0;
   });
 
   it('--status, --show, --publish and --wait are exclusive, and --template-version needs --show or --publish', async () => {

@@ -7249,6 +7249,7 @@ var __webpack_modules__ = {
             exitCode: zod__rspack_import_3.euz(0),
             exportPolicy: zod__rspack_import_3.YjP().optional(),
             hasTeam: zod__rspack_import_3.zMY(),
+            newestDraftVersion: zod__rspack_import_3.aig().optional(),
             template: templateSchema.nullable()
         }).strict();
         const sharedSchema = zod__rspack_import_3.Ikc({
@@ -7382,9 +7383,18 @@ var __webpack_modules__ = {
                             exportPolicy: found.exportPolicy
                         } : {},
                         hasTeam: found.hasTeam,
+                        ...found.newestDraftVersion ? {
+                            newestDraftVersion: found.newestDraftVersion
+                        } : {},
                         exitCode: 0
                     },
-                    text: found.template ? `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})\n${found.template.link}` : `${who[0].toUpperCase()}${who.slice(1)} has no template yet.`
+                    text: found.template ? [
+                        `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})`,
+                        ...found.newestDraftVersion && found.newestDraftVersion > (found.template.activeVersion ?? 0) ? [
+                            `The newest draft in the bot's chat is version ${found.newestDraftVersion}; the live one is ${found.template.activeVersion ?? 'none'}. To make the draft live: gbot bots template ${found.target.id} --publish --template-version ${found.newestDraftVersion}`
+                        ] : [],
+                        found.template.link
+                    ].join('\n') : `${who[0].toUpperCase()}${who.slice(1)} has no template yet.`
                 };
             }
             if (input.show) {
@@ -54633,9 +54643,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function getBotTemplate(session, ref, { signal } = {}) {
             const rec = await templateBot(session, ref, signal);
+            const found = await readTemplate(session, rec, signal);
+            if (!found.template) return {
+                target: rec,
+                ...found
+            };
+            let newestDraftVersion;
+            try {
+                newestDraftVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), found.template.shareId);
+            } catch  {
+                newestDraftVersion = undefined;
+            }
             return {
                 target: rec,
-                ...await readTemplate(session, rec, signal)
+                ...found,
+                ...newestDraftVersion ? {
+                    newestDraftVersion
+                } : {}
             };
         }
         async function shareBotTemplate(session, ref, { waitSeconds = 600, pollSeconds = 10, signal, clientNonce = (0, node_crypto__rspack_import_0.randomUUID)() } = {}) {
@@ -54789,6 +54813,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return template;
         }
+        function newestCardVersion(entries, shareId) {
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                const card = entry && typeof entry === "object" ? entry.message : undefined;
+                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== shareId) continue;
+                const version = Number(card.version);
+                if (Number.isSafeInteger(version) && version >= 1) return version;
+            }
+            return undefined;
+        }
         async function templateVersionFor(session, rec, template, version) {
             if (version !== undefined) {
                 if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", {
@@ -54799,17 +54833,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     versionFrom: "option"
                 };
             }
-            const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
-            for(let index = entries.length - 1; index >= 0; index -= 1){
-                const entry = entries[index];
-                const card = entry && typeof entry === "object" ? entry.message : undefined;
-                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
-                const cardVersion = Number(card.version);
-                if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return {
-                    version: cardVersion,
-                    versionFrom: "card"
-                };
-            }
+            const cardVersion = newestCardVersion(transcriptRows((await transcriptTail(session, rec, 200)).transcript), template.shareId);
+            if (cardVersion) return {
+                version: cardVersion,
+                versionFrom: "card"
+            };
             if (template.activeVersion >= 1) return {
                 version: template.activeVersion,
                 versionFrom: "active"
