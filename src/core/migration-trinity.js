@@ -17,8 +17,12 @@ const STEP_CHARS = 6000;
 const RECENT_MESSAGES = 30;
 const FILE_CHARS = 6000;
 const LABEL = { muse: 'Muse', dot: 'Your dot' };
-/** Digest of text with all whitespace removed (what the agent's check command prints). */
-export const fingerprint = (text) => createHash('sha256').update(String(text).replace(/\s+/gu, '')).digest('hex').slice(0, 12);
+/**
+ * Digest of text without whitespace and backslashes (what the agent's check command prints).
+ * Agents that write files from chat text drop escape backslashes (Muse turned \\"odb\\" into "odb",
+ * verified 2026-11-08); every other character must match.
+ */
+export const fingerprint = (text) => createHash('sha256').update(String(text).replace(/[\s\\]+/gu, '')).digest('hex').slice(0, 12);
 
 function chunks(lines, limit = STEP_CHARS) {
   const out = [];
@@ -129,7 +133,7 @@ export function buildTrinityPlan(archive, seat, { activateRoutines = false } = {
   const listing = JSON.stringify(written.map((w) => w.rel));
   ask({ area: 'files-on-computer',
     text: `Run this exactly on your computer (it only reads files) and paste its output:\n\n` +
-      `python3 -c 'import hashlib,json,os,re,sys\nfor f in json.loads(sys.argv[2]):\n p=os.path.join(os.path.expanduser(sys.argv[1]),f)\n try: print(f, hashlib.sha256(re.sub(r"\\s+","",open(p,encoding="utf-8").read()).encode()).hexdigest()[:12])\n except OSError: print(f, "MISSING")' ${JSON.stringify(folder)} '${listing}'`,
+      `python3 -c 'import hashlib,json,os,re,sys\nfor f in json.loads(sys.argv[2]):\n p=os.path.join(os.path.expanduser(sys.argv[1]),f)\n try: print(f, hashlib.sha256(re.sub(r"[\\s\\\\]+","",open(p,encoding="utf-8").read()).encode()).hexdigest()[:12])\n except OSError: print(f, "MISSING")' ${JSON.stringify(folder)} '${listing}'`,
     expect: written.map((w) => w.fingerprint) });
   if (open.length) ask({ area: 'open-tasks', note: contextNote, text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`, expect: open.flatMap((t) => distinctiveTokens(t.content, 1)).slice(0, 3) });
   const facts = [...new Set(user.map((u) => distinctiveTokens(u, 1)[0]).filter(Boolean))].slice(0, 3);

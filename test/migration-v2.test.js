@@ -316,6 +316,9 @@ test('digest answers: only files reported missing or different are repaired', as
   const q = plan.questions.find((x) => x.area === 'files-on-computer');
   assert.deepEqual(q.expect, plan.files.map((f) => f.fingerprint));
   assert.equal(fingerprint('a b\n c'), fingerprint('abc'));
+  // Agents drop escape backslashes when they write chat text to a file (seen on Muse).
+  assert.equal(fingerprint('say \\"odb\\" now'), fingerprint('say "odb" now'));
+  assert.notEqual(fingerprint('say "odb" now'), fingerprint('say "obd" now'));
   const [first, second] = plan.files;
   const answer = `Q2:\n${first.rel} ${first.fingerprint}\n${second.rel} MISSING`;
   assert.deepEqual(brokenFiles(plan, answer).map((f) => f.rel), [second.rel]);

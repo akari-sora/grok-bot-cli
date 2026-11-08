@@ -309,8 +309,16 @@ async function migrateWizard(real) {
     }
     const selector = account.alias ?? account.id;
     const listed = await runChild(real, ["migrate", "bots", "--account", selector, "--json"], { capture: true });
-    const bots = (() => { try { return JSON.parse(listed.stdout).bots; } catch { return []; } })();
+    let bots = (() => { try { return JSON.parse(listed.stdout).bots; } catch { return []; } })();
     if (!bots.length) { say("This login has no bots to migrate."); return 1; }
+    // A long roster is filtered first, so only the bots the user means are listed.
+    while (bots.length > 15) {
+      const words = (await rl.question(`   ${bots.length} bots. Type part of a name to narrow the list (Enter shows all): `)).trim().toLowerCase();
+      if (!words) break;
+      const matched = bots.filter((b) => b.name.toLowerCase().includes(words));
+      if (matched.length) { bots = matched; break; }
+      say(`   No bot name contains "${words}".`);
+    }
     say(`\n2) Bots on ${account.alias ?? (account.email ? maskEmail(account.email) : "this login")}:`);
     bots.forEach((b, i) => say(`   ${String(i + 1).padStart(2)}. ${b.name}`));
     const chosen = (await ask("   Bot number(s), e.g. 3 or 1,4: ", bots.length, { multiple: true })).map((i) => bots[i]);

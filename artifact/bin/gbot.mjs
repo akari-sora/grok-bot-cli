@@ -56628,7 +56628,7 @@ else:
             muse: 'Muse',
             dot: 'Your dot'
         };
-        const fingerprint = (text)=>(0, node_crypto__rspack_import_0.createHash)('sha256').update(String(text).replace(/\s+/gu, '')).digest('hex').slice(0, 12);
+        const fingerprint = (text)=>(0, node_crypto__rspack_import_0.createHash)('sha256').update(String(text).replace(/[\s\\]+/gu, '')).digest('hex').slice(0, 12);
         function chunks(lines, limit = STEP_CHARS) {
             const out = [];
             let cur = '';
@@ -56808,7 +56808,7 @@ else:
             const listing = JSON.stringify(written.map((w)=>w.rel));
             ask({
                 area: 'files-on-computer',
-                text: `Run this exactly on your computer (it only reads files) and paste its output:\n\n` + `python3 -c 'import hashlib,json,os,re,sys\nfor f in json.loads(sys.argv[2]):\n p=os.path.join(os.path.expanduser(sys.argv[1]),f)\n try: print(f, hashlib.sha256(re.sub(r"\\s+","",open(p,encoding="utf-8").read()).encode()).hexdigest()[:12])\n except OSError: print(f, "MISSING")' ${JSON.stringify(folder)} '${listing}'`,
+                text: `Run this exactly on your computer (it only reads files) and paste its output:\n\n` + `python3 -c 'import hashlib,json,os,re,sys\nfor f in json.loads(sys.argv[2]):\n p=os.path.join(os.path.expanduser(sys.argv[1]),f)\n try: print(f, hashlib.sha256(re.sub(r"[\\s\\\\]+","",open(p,encoding="utf-8").read()).encode()).hexdigest()[:12])\n except OSError: print(f, "MISSING")' ${JSON.stringify(folder)} '${listing}'`,
                 expect: written.map((w)=>w.fingerprint)
             });
             if (open1.length) ask({
