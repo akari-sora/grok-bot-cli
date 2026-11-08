@@ -20,11 +20,12 @@ test("unix-only suites are exactly the files that import the Windows skip helper
     const source = readFileSync(join(root, rel), "utf8");
     assert.equal(/import test from ['"]\.\/helpers\/win32-test\.js['"]/.test(source), listed.has(rel), rel);
   }
-  const fork = readFileSync(join(root, "FORK.md"), "utf8");
-  for (const rel of UNIX_ONLY_TEST_FILES) assert.equal(fork.includes(`\`${rel}\``), true, rel);
-  assert.match(fork, /Windows limitations/);
-  assert.match(fork, /Windows 限制/);
-  assert.match(fork, new RegExp(UNIX_ONLY_SKIP_REASON.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const [doc, heading] of [["FORK.md", /^## Windows limitations$/m], ["FORK.zh-TW.md", /^## Windows 限制$/m]]) {
+    const fork = readFileSync(join(root, doc), "utf8");
+    for (const rel of UNIX_ONLY_TEST_FILES) assert.equal(fork.includes(`\`${rel}\``), true, `${doc}: ${rel}`);
+    assert.match(fork, heading, doc);
+    assert.match(fork, new RegExp(UNIX_ONLY_SKIP_REASON.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), doc);
+  }
 });
 
 test("Windows collection skips unix-only tests and still runs portable files", () => {
