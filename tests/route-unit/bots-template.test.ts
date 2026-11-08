@@ -51,6 +51,14 @@ const answer = (path: string): unknown => {
       return templates.length > 1 ? templates.shift() : templates[0];
     case `${SERVICE}SendGrokBotUserMessage`:
       return { dispatched: true, delivery: 'GROK_BOT_USER_MESSAGE_DELIVERY_ACCEPTED_TEMPORAL' };
+    case `${SERVICE}ListGrokBotTranscriptEntries`:
+      return { entries: [{ seq: '1', entryKind: 'send-message', entryId: 'card-1', updatedSeq: '1', body: Buffer.from(JSON.stringify(CARD)).toString('base64') }] };
+    case `${SERVICE}GetGrokBotTemplateVersion`:
+      return { version: 1, active: false, createdAtMs: '1794137204348', blobObjectKey: 'k', blobGetUrl: `${base}/recipes/share-abc`, visibility: 'GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC' };
+    case `${SERVICE}ActivateGrokBotTemplateVersion`:
+      return { template: { ...shared.template, published: true, activeVersion: 1, updatedAtMs: '1762600009999' } };
+    case '/recipes/share-abc':
+      return RECIPE;
     case '/api/listAgents':
       return { agents: [] };
     default:
@@ -69,6 +77,22 @@ const shared = {
     visibility: 'GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC',
   },
 };
+
+const CARD = {
+  id: 'card-1',
+  kind: 'send-message',
+  message: { type: 'bot-template-share', shareId: 'share-abc', name: 'Move to Hermes', shareUrl: 'https://x.ai/bot/share-abc', version: 1, published: false, visibility: 'public', body: 'Review' },
+};
+
+const RECIPE = {
+  profile: { name: 'Move to Hermes', description: 'Moves your bots to Hermes.', avatarColor: 'violet', avatarShape: 'arch' },
+  memory: [{ kind: 'profile', content: 'Job: help move bots.' }],
+  skills: [{ name: 'migrate', description: 'Run gbot migrate', content: '# Migrate' }],
+  routines: [],
+  plugins: [],
+};
+
+const activations = () => calls.filter((call) => call.path === `${SERVICE}ActivateGrokBotTemplateVersion`);
 
 const sends = () => calls.filter((call) => call.path === `${SERVICE}SendGrokBotUserMessage`);
 const reads = () => calls.filter((call) => call.path === `${SERVICE}GetGrokBotTemplateForSourceAgent`);
@@ -158,5 +182,49 @@ describe('gbot bots template', () => {
     expect(out.stdout.trim().split('\n').at(-1)).toBe('https://x.ai/bot/share-abc');
     expect(sends()).toHaveLength(1);
     expect(reads()).toHaveLength(2);
+  });
+
+  it('--show prints the recipe of the newest card\'s version and sends nothing', async () => {
+    templates.push(shared);
+    const text = await invokeCli(['bots', 'template', BOT, '--show']);
+    expect(text.exitCode).toBe(0);
+    const lines = text.stdout.trim().split('\n');
+    expect(lines[0]).toContain('version 1 (not active');
+    expect(lines).toContain('Name: Move to Hermes');
+    expect(lines).toContain('Skills (1)');
+    expect(lines).toContain('  migrate');
+    expect(lines.at(-1)).toBe('https://x.ai/bot/share-abc');
+    const json = await invokeCli(['bots', 'template', BOT, '--show', '--template-version', '1', '--json']);
+    expect(json.exitCode).toBe(0);
+    expect(json.value).toMatchObject({ shareId: 'share-abc', version: 1, versionFrom: 'option', active: false, recipe: { profile: { name: 'Move to Hermes' } } });
+    expect(sends()).toHaveLength(0);
+    expect(activations()).toHaveLength(0);
+  });
+
+  it('--publish activates the card\'s version and prints the link', async () => {
+    templates.push(shared);
+    const out = await invokeCli(['bots', 'template', BOT, '--publish', '--json']);
+    expect(out.exitCode).toBe(0);
+    expect(out.value).toMatchObject({ version: 1, versionFrom: 'card', template: { published: true, activeVersion: 1, link: 'https://x.ai/bot/share-abc' } });
+    expect(activations().map((call) => call.body)).toEqual([{ shareId: 'share-abc', version: 1 }]);
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('--status, --show, --publish and --wait are exclusive, and --template-version needs --show or --publish', async () => {
+    for (const flags of [
+      ['--show', '--publish'],
+      ['--status', '--show'],
+      ['--status', '--publish'],
+      ['--publish', '--wait', '5'],
+      ['--show', '--wait', '0'],
+      ['--status', '--wait', '5'],
+      ['--template-version', '1'],
+      ['--status', '--template-version', '1'],
+      ['--show', '--template-version', '0'],
+    ]) {
+      const out = await invokeCli(['bots', 'template', BOT, ...flags]);
+      expect(out.exitCode, flags.join(' ')).toBe(2);
+    }
+    expect(calls).toHaveLength(0);
   });
 });

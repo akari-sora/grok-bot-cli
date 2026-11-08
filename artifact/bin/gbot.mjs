@@ -7160,7 +7160,7 @@ var __webpack_modules__ = {
         var _core_codex_contract_js__rspack_import_1 = __webpack_require__("./src/core/codex/contract.js");
         var _shared_js__rspack_import_2 = __webpack_require__("./src/cli/_shared.ts");
         const config = {
-            description: 'Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does, or show its current template with --status.',
+            description: 'Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.',
             exitCode: 'result',
             inputJsonSchema: {
                 additionalProperties: false,
@@ -7185,9 +7185,21 @@ var __webpack_modules__ = {
                         description: 'Bot id or name',
                         type: 'string'
                     },
+                    publish: {
+                        description: 'Publish a template version (ActivateGrokBotTemplateVersion), as confirming the app\'s review card does',
+                        type: 'boolean'
+                    },
+                    show: {
+                        description: 'Show a template version\'s recipe (instructions, memory, skills, routines, plugins); sends nothing',
+                        type: 'boolean'
+                    },
                     status: {
                         description: 'Show the current template and link; sends nothing',
                         type: 'boolean'
+                    },
+                    templateVersion: {
+                        description: 'Template version for --show or --publish (default: the newest template card in the bot\'s chat, else the active version)',
+                        type: 'number'
                     },
                     wait: {
                         description: 'Seconds to wait for the template after the message (default 600; 0 does not wait)',
@@ -7204,10 +7216,17 @@ var __webpack_modules__ = {
             ]
         };
         const inputSchema = _shared_js__rspack_import_2.lK.extend({
+            publish: zod__rspack_import_3.zMY().optional(),
             ref: zod__rspack_import_3.YjP().min(1),
+            show: zod__rspack_import_3.zMY().optional(),
             status: zod__rspack_import_3.zMY().optional(),
+            templateVersion: zod__rspack_import_3.aig().int().min(1).optional(),
             wait: zod__rspack_import_3.aig().int().min(0).optional()
-        }).strict().refine((input)=>!(input.status && input.wait !== undefined), '--wait applies to sending, not to --status.');
+        }).strict().refine((input)=>[
+                input.status,
+                input.show,
+                input.publish
+            ].filter(Boolean).length <= 1, 'Use one of --status, --show and --publish.').refine((input)=>!((input.status || input.show || input.publish) && input.wait !== undefined), '--wait applies to sending, not to --status, --show or --publish.').refine((input)=>input.templateVersion === undefined || Boolean(input.show || input.publish), '--template-version applies to --show and --publish.');
         const templateSchema = zod__rspack_import_3.Ikc({
             activeVersion: zod__rspack_import_3.aig(),
             link: zod__rspack_import_3.YjP(),
@@ -7258,30 +7277,157 @@ var __webpack_modules__ = {
             hint: zod__rspack_import_3.YjP(),
             template: zod__rspack_import_3.chJ()
         }).strict();
+        const recipeSchema = zod__rspack_import_3.Ikc({
+            gettingStarted: zod__rspack_import_3.Ikc({
+                skill: zod__rspack_import_3.YjP()
+            }).optional(),
+            memory: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                createdAt: zod__rspack_import_3.YjP().optional(),
+                kind: zod__rspack_import_3.YjP().optional()
+            })),
+            plugins: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                description: zod__rspack_import_3.YjP().optional(),
+                name: zod__rspack_import_3.YjP(),
+                pluginId: zod__rspack_import_3.YjP()
+            })),
+            profile: zod__rspack_import_3.Ikc({
+                avatarColor: zod__rspack_import_3.YjP().optional(),
+                avatarShape: zod__rspack_import_3.YjP().optional(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP()
+            }),
+            routines: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP(),
+                slug: zod__rspack_import_3.YjP()
+            })),
+            skills: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP()
+            }))
+        });
+        const versionFromSchema = zod__rspack_import_3.k5n([
+            'option',
+            'card',
+            'active'
+        ]);
+        const asVersionFrom = (from)=>from === 'card' || from === 'active' ? from : 'option';
+        const showSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            active: zod__rspack_import_3.zMY(),
+            createdAtMs: zod__rspack_import_3.aig().optional(),
+            exitCode: zod__rspack_import_3.euz(0),
+            link: zod__rspack_import_3.YjP(),
+            recipe: recipeSchema,
+            shareId: zod__rspack_import_3.YjP(),
+            version: zod__rspack_import_3.aig(),
+            versionFrom: versionFromSchema,
+            visibility: zod__rspack_import_3.YjP()
+        }).strict();
+        const publishedSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            exitCode: zod__rspack_import_3.euz(0),
+            template: templateSchema,
+            version: zod__rspack_import_3.aig(),
+            versionFrom: versionFromSchema
+        }).strict();
         const resultSchema = zod__rspack_import_3.KCZ([
             statusSchema,
             sharedSchema,
             notYetSchema,
+            showSchema,
+            publishedSchema,
             _shared_js__rspack_import_2.R9
         ]);
         const DEFAULT_WAIT_SECONDS = 600;
         const describe = (template)=>`${template.published ? 'published' : 'not published'}${template.visibility ? `, ${template.visibility}` : ''}${template.activeVersion ? `, version ${template.activeVersion}` : ''}`;
+        const whoOf = (target)=>`bot ${target.name} (${target.id})`;
+        const firstLine = (text)=>{
+            const line = text.trim().split('\n')[0] ?? '';
+            return line.length > 80 ? `${line.slice(0, 80)}…` : line;
+        };
+        const recipeText = (recipe)=>{
+            const list = (label, names)=>`${label} (${names.length})${names.map((name)=>`\n  ${name}`).join('')}`;
+            return [
+                `Name: ${recipe.profile.name}`,
+                `Description: ${recipe.profile.description.trim()}`,
+                list('Memory', recipe.memory.map((item)=>`${item.kind ?? 'memory'}: ${firstLine(item.content)}`)),
+                list('Skills', recipe.skills.map((skill)=>skill.name)),
+                list('Routines', recipe.routines.map((routine)=>`${routine.name} (${routine.slug})`)),
+                list('Plugins', recipe.plugins.map((plugin)=>`${plugin.name} (${plugin.pluginId})`)),
+                `Getting started: ${recipe.gettingStarted ? `skill ${recipe.gettingStarted.skill}` : 'none'}`
+            ];
+        };
         const run = async (input, signal)=>{
             const backend = await (0, _shared_js__rspack_import_2.FS)(input);
             if (input.status) {
                 const found = await backend.template(input.ref, {
                     signal
                 });
+                const who = whoOf(found.target);
                 return {
-                    id: found.target.id,
-                    kind: 'bot',
-                    name: found.target.name,
-                    template: found.template,
-                    ...found.exportPolicy ? {
-                        exportPolicy: found.exportPolicy
-                    } : {},
-                    hasTeam: found.hasTeam,
-                    exitCode: 0
+                    value: {
+                        id: found.target.id,
+                        kind: 'bot',
+                        name: found.target.name,
+                        template: found.template,
+                        ...found.exportPolicy ? {
+                            exportPolicy: found.exportPolicy
+                        } : {},
+                        hasTeam: found.hasTeam,
+                        exitCode: 0
+                    },
+                    text: found.template ? `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})\n${found.template.link}` : `${who[0].toUpperCase()}${who.slice(1)} has no template yet.`
+                };
+            }
+            if (input.show) {
+                const found = await backend.templateVersion(input.ref, {
+                    signal,
+                    version: input.templateVersion
+                });
+                return {
+                    value: {
+                        id: found.target.id,
+                        kind: 'bot',
+                        name: found.target.name,
+                        shareId: found.template.shareId,
+                        link: found.template.link,
+                        version: found.version,
+                        versionFrom: asVersionFrom(found.versionFrom),
+                        active: found.active,
+                        ...found.createdAtMs !== undefined ? {
+                            createdAtMs: found.createdAtMs
+                        } : {},
+                        visibility: found.visibility,
+                        recipe: found.recipe,
+                        exitCode: 0
+                    },
+                    text: [
+                        `Template ${found.template.shareId} of ${whoOf(found.target)}, version ${found.version} (${found.active ? 'active' : 'not active'}${found.visibility ? `, ${found.visibility}` : ''})`,
+                        ...recipeText(found.recipe),
+                        found.template.link
+                    ].join('\n')
+                };
+            }
+            if (input.publish) {
+                const out = await backend.publishTemplate(input.ref, {
+                    signal,
+                    version: input.templateVersion
+                });
+                return {
+                    value: {
+                        id: out.target.id,
+                        kind: 'bot',
+                        name: out.target.name,
+                        version: out.version,
+                        versionFrom: asVersionFrom(out.versionFrom),
+                        template: out.template,
+                        exitCode: 0
+                    },
+                    text: `Published version ${out.version} of the template of ${whoOf(out.target)}: ${describe(out.template)}\n${out.template.link}`
                 };
             }
             const waitSeconds = input.wait ?? DEFAULT_WAIT_SECONDS;
@@ -7299,44 +7445,45 @@ var __webpack_modules__ = {
                 clientNonce: out.clientNonce,
                 delivery
             };
-            if (out.template) return {
-                ...fields,
-                template: out.template,
-                exitCode: 0
-            };
+            const who = whoOf(out.target);
+            if (out.template) {
+                return {
+                    value: {
+                        ...fields,
+                        template: out.template,
+                        exitCode: 0
+                    },
+                    text: `Template of ${who} ${action}: ${out.template.name || out.template.shareId} (${describe(out.template)})\n${out.template.link}`
+                };
+            }
             const shown = /[\s"]/.test(input.ref) ? JSON.stringify(input.ref) : input.ref;
+            const hint = `No ${action === 'updated' ? 'newer ' : ''}template within ${waitSeconds} s. Check later with gbot bots template ${shown} --status; sending again would ask the bot again.`;
             return {
-                ...fields,
-                template: null,
-                hint: `No ${action === 'updated' ? 'newer ' : ''}template within ${waitSeconds} s. Check later with gbot bots template ${shown} --status; sending again would ask the bot again.`,
-                exitCode: 3
+                value: {
+                    ...fields,
+                    template: null,
+                    hint,
+                    exitCode: 3
+                },
+                text: `Asked ${who} to ${action === 'updated' ? 'update' : 'create'} its template (delivery ${delivery}, nonce ${out.clientNonce}).\n${hint}`
             };
-        };
-        const textOf = (value)=>{
-            if (value.exitCode === 1) {
-                const nonce = typeof value.clientNonce === 'string' && value.clientNonce ? value.clientNonce : '';
-                return nonce ? `${value.error}\nnonce ${nonce}` : value.error;
-            }
-            const who = `bot ${value.name} (${value.id})`;
-            if (value.exitCode === 3) {
-                return `Asked ${who} to ${value.action === 'updated' ? 'update' : 'create'} its template (delivery ${value.delivery}, nonce ${value.clientNonce}).\n${value.hint}`;
-            }
-            if (!('action' in value)) {
-                return value.template ? `Template of ${who}: ${value.template.name || value.template.shareId} (${describe(value.template)})\n${value.template.link}` : `${who[0].toUpperCase()}${who.slice(1)} has no template yet.`;
-            }
-            return `Template of ${who} ${value.action}: ${value.template.name || value.template.shareId} (${describe(value.template)})\n${value.template.link}`;
         };
         async function botsTemplate({ input, signal }) {
-            let value;
+            let outcome;
             try {
-                value = await run(input, signal);
+                outcome = await run(input, signal);
             } catch (error) {
-                value = (0, _core_codex_contract_js__rspack_import_1.DG)(error);
+                const value = (0, _core_codex_contract_js__rspack_import_1.DG)(error);
+                const nonce = typeof value.clientNonce === 'string' && value.clientNonce ? value.clientNonce : '';
+                outcome = {
+                    value,
+                    text: nonce ? `${value.error}\nnonce ${nonce}` : value.error
+                };
             }
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
-                value: value,
+                value: outcome.value,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
-                    children: textOf(value)
+                    children: outcome.text
                 })
             });
         }
@@ -35707,9 +35854,9 @@ var __webpack_modules__ = {
                 reverseTransform: def.transform
             });
         }
-        const ZodPreprocess = null && core.$constructor("ZodPreprocess", (inst, def)=>{
+        const ZodPreprocess = _core_index_js__rspack_import_0.xI("ZodPreprocess", (inst, def)=>{
             ZodPipe.init(inst, def);
-            core.$ZodPreprocess.init(inst, def);
+            _core_index_js__rspack_import_3.KX.init(inst, def);
         });
         const ZodReadonly = _core_index_js__rspack_import_0.xI("ZodReadonly", (inst, def)=>{
             _core_index_js__rspack_import_3.Sb.init(inst, def);
@@ -35863,6 +36010,7 @@ var __webpack_modules__ = {
             g1P: ()=>record,
             k5n: ()=>_enum,
             rej: ()=>strictObject,
+            vkY: ()=>preprocess,
             zMY: ()=>boolean
         });
     },
@@ -41634,7 +41782,7 @@ var __webpack_modules__ = {
                 issues: left.issues
             }, ctx);
         }
-        const $ZodPreprocess = null && core.$constructor("$ZodPreprocess", (inst, def)=>{
+        const $ZodPreprocess = _core_js__rspack_import_0.xI("$ZodPreprocess", (inst, def)=>{
             $ZodPipe.init(inst, def);
         });
         const $ZodReadonly = _core_js__rspack_import_0.xI("$ZodReadonly", (inst, def)=>{
@@ -41899,6 +42047,7 @@ var __webpack_modules__ = {
             GP: $ZodUnknown,
             GY: $ZodKSUID,
             I: $ZodNumberFormat,
+            KX: $ZodPreprocess,
             Ko: $ZodISODateTime,
             LJ: $ZodIntersection,
             Lc: $ZodIPv4,
@@ -44152,7 +44301,7 @@ var __webpack_modules__ = {
                     },
                     {
                         "aliases": [],
-                        "description": "Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does, or show its current template with --status.",
+                        "description": "Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.",
                         "exitCode": "result",
                         "options": [
                             {
@@ -44188,6 +44337,14 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
+                                "description": "Publish a template version (ActivateGrokBotTemplateVersion), as confirming the app's review card does",
+                                "key": "publish",
+                                "kind": "boolean",
+                                "option": "publish",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
                                 "description": "Bot id or name",
                                 "key": "ref",
                                 "kind": "string",
@@ -44197,10 +44354,26 @@ var __webpack_modules__ = {
                                 "required": true
                             },
                             {
+                                "description": "Show a template version's recipe (instructions, memory, skills, routines, plugins); sends nothing",
+                                "key": "show",
+                                "kind": "boolean",
+                                "option": "show",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
                                 "description": "Show the current template and link; sends nothing",
                                 "key": "status",
                                 "kind": "boolean",
                                 "option": "status",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Template version for --show or --publish (default: the newest template card in the bot's chat, else the active version)",
+                                "key": "templateVersion",
+                                "kind": "number",
+                                "option": "template-version",
                                 "repeated": false,
                                 "required": false
                             },
@@ -51107,6 +51280,8 @@ var __webpack_modules__ = {
                     reconcile: (ref, clientNonce)=>_gateway_js__rspack_import_1.zk(session, ref, clientNonce),
                     template: (ref, options)=>_gateway_js__rspack_import_1.Yy(session, ref, options),
                     shareTemplate: (ref, options)=>_gateway_js__rspack_import_1.Bj(session, ref, options),
+                    templateVersion: (ref, options)=>_gateway_js__rspack_import_1.YA(session, ref, options),
+                    publishTemplate: (ref, options)=>_gateway_js__rspack_import_1.VZ(session, ref, options),
                     transcript: (ref, limit)=>_gateway_js__rspack_import_1.bA(session, ref, limit),
                     thread: (ref, rootId)=>_gateway_js__rspack_import_1.fG(session, ref, rootId),
                     skills: ()=>_gateway_js__rspack_import_1.bG(session),
@@ -51137,6 +51312,12 @@ var __webpack_modules__ = {
                     throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
                 },
                 shareTemplate: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
+                },
+                templateVersion: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
+                },
+                publishTemplate: async ()=>{
                     throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
                 },
                 transcript: async ()=>{
@@ -51791,6 +51972,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/gateway.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_os__rspack_import_1 = __webpack_require__("node:os");
+        var zod__rspack_import_12 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _app_auth_js__rspack_import_2 = __webpack_require__("./src/core/app-auth.js");
         var _client_version_js__rspack_import_3 = __webpack_require__("./src/core/client-version.js");
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
@@ -52931,6 +53113,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "ReadGrokBotAgentAttachmentChunk",
             "GetGrokBotRuntimeCapabilities",
             "GetGrokBotTemplateForSourceAgent",
+            "GetGrokBotTemplateVersion",
             "ListSandBoxStoreObjects",
             "StatSandBoxStoreObject",
             "PresignSandBoxStoreReads"
@@ -54039,6 +54222,197 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 template
             };
         }
+        const RECIPE_MAX_BYTES = 26214400;
+        const RECIPE_TIMEOUT_MS = 20000;
+        const RECIPE_BUCKET = "grok-bot-templates";
+        const RECIPE_AVATAR_SHAPES = [
+            "blob",
+            "pebble",
+            "bean",
+            "egg",
+            "squircle",
+            "tablet",
+            "capsule",
+            "cylinder",
+            "hex",
+            "gem",
+            "crystal",
+            "wedge",
+            "shield",
+            "dome",
+            "arch",
+            "cloud",
+            "teardrop",
+            "leaf",
+            "square",
+            "sparkle",
+            "clover",
+            "flower",
+            "heart",
+            "house",
+            "star"
+        ];
+        const absentWhenNull = (value)=>value === null ? undefined : value;
+        const recipeSchema = zod__rspack_import_12.Ikc({
+            profile: zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                avatarColor: zod__rspack_import_12.k5n(_store_js__rspack_import_7.T7).optional(),
+                avatarShape: zod__rspack_import_12.k5n(RECIPE_AVATAR_SHAPES).optional()
+            }),
+            memory: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                kind: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.k5n([
+                    "profile",
+                    "log"
+                ]).optional()),
+                createdAt: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.YjP().optional()),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            skills: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            routines: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                slug: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            plugins: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1).optional(),
+                pluginId: zod__rspack_import_12.YjP().min(1)
+            })),
+            gettingStarted: zod__rspack_import_12.Ikc({
+                skill: zod__rspack_import_12.YjP().min(1)
+            }).optional()
+        }).superRefine((recipe, ctx)=>{
+            const skill = recipe.gettingStarted?.skill;
+            if (skill !== undefined && !recipe.skills.some((s)=>s.name === skill)) {
+                ctx.addIssue({
+                    code: "custom",
+                    path: [
+                        "gettingStarted",
+                        "skill"
+                    ],
+                    message: "gettingStarted.skill must name one of this recipe's skills"
+                });
+            }
+        });
+        function parseRecipe(bytes) {
+            if (bytes.byteLength < 1 || bytes.byteLength > RECIPE_MAX_BYTES) {
+                throw new GatewayError("Grok Bot template recipe refused: size " + bytes.byteLength + " bytes", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            let value;
+            try {
+                value = JSON.parse(new TextDecoder().decode(bytes));
+            } catch  {
+                throw new GatewayError("Grok Bot template recipe is invalid: not JSON", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            const parsed = recipeSchema.safeParse(value);
+            if (!parsed.success) {
+                const issue = parsed.error.issues[0];
+                throw new GatewayError("Grok Bot template recipe is invalid: " + (issue ? (issue.path.join(".") || "recipe") + " " + issue.message : "unexpected shape"), {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            return parsed.data;
+        }
+        async function existingTemplate(session, rec, signal) {
+            const { template } = await readTemplate(session, rec, signal);
+            if (!template) {
+                throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") has no template yet; gbot bots template creates one.", {
+                    code: "TEMPLATE_MISSING"
+                });
+            }
+            return template;
+        }
+        async function templateVersionFor(session, rec, template, version) {
+            if (version !== undefined) {
+                if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", {
+                    code: "TEMPLATE_NO_VERSION"
+                });
+                return {
+                    version,
+                    versionFrom: "option"
+                };
+            }
+            const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                const card = entry && typeof entry === "object" ? entry.message : undefined;
+                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
+                const cardVersion = Number(card.version);
+                if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return {
+                    version: cardVersion,
+                    versionFrom: "card"
+                };
+            }
+            if (template.activeVersion >= 1) return {
+                version: template.activeVersion,
+                versionFrom: "active"
+            };
+            throw new GatewayError("No template version to use: the last 200 transcript entries of " + rec.name + " have no template card for " + template.shareId + ", and no version is active. Give the version (--template-version N).", {
+                code: "TEMPLATE_NO_VERSION"
+            });
+        }
+        async function getBotTemplateVersion(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendRead(session, "GetGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            }, {
+                signal
+            });
+            const url = typeof data?.blobGetUrl === "string" ? data.blobGetUrl.trim() : "";
+            if (!url) throw new GatewayError("GetGrokBotTemplateVersion returned no recipe url", {
+                code: "RECIPE_MISSING"
+            });
+            const { bytes } = await (0, _migration_capture_js__rspack_import_10.$8)(url, {
+                cap: RECIPE_MAX_BYTES,
+                timeoutMs: RECIPE_TIMEOUT_MS,
+                bucket: RECIPE_BUCKET
+            });
+            const createdAtMs = Number(data?.createdAtMs);
+            return {
+                target: rec,
+                template,
+                version: Number(data?.version) || chosen.version,
+                versionFrom: chosen.versionFrom,
+                active: data?.active === true,
+                ...Number.isFinite(createdAtMs) && createdAtMs > 0 ? {
+                    createdAtMs
+                } : {},
+                visibility: typeof data?.visibility === "string" ? data.visibility : "",
+                recipe: parseRecipe(bytes)
+            };
+        }
+        async function publishBotTemplate(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendCall(session, "ActivateGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            });
+            const published = templateFrom(data?.template);
+            if (!published) throw new GatewayError("ActivateGrokBotTemplateVersion returned no template", {
+                code: "TEMPLATE_MISSING"
+            });
+            return {
+                target: rec,
+                version: chosen.version,
+                versionFrom: chosen.versionFrom,
+                template: published
+            };
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {
@@ -54183,7 +54557,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             Sm: ()=>wakeSandbox,
             Sn: ()=>createAgent,
             Td: ()=>setGroupMembers,
+            VZ: ()=>publishBotTemplate,
             Vq: ()=>connectGateway,
+            YA: ()=>getBotTemplateVersion,
             Yy: ()=>getBotTemplate,
             bA: ()=>getTranscriptTail,
             bG: ()=>listSkills,
@@ -55433,7 +55809,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const n = typeof v === 'string' ? Number(v) : v;
             return Number.isFinite(n) ? n : null;
         };
-        function assertStoreUrl(raw, env = process.env) {
+        function assertStoreUrl(raw, env = process.env, bucket = 'sand-box-stores') {
             let url;
             try {
                 url = new URL(raw);
@@ -55449,13 +55825,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ].includes(url.hostname)) throw new _migration_js__rspack_import_1.Py('Store URL must be loopback in test mode.');
                 return url.href;
             }
-            if (url.protocol !== 'https:' || !/^sand-box-stores\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/.test(url.hostname)) {
+            if (url.protocol !== 'https:' || !new RegExp(`^${bucket}\\.s3(?:\\.[a-z0-9-]+)?\\.amazonaws\\.com$`).test(url.hostname)) {
                 throw new _migration_js__rspack_import_1.Py('The store returned a read URL for an unexpected host; nothing was fetched.');
             }
             return url.href;
         }
-        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000 } = {}) {
-            const res = await fetchImpl(assertStoreUrl(url), {
+        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000, bucket } = {}) {
+            const res = await fetchImpl(assertStoreUrl(url, process.env, bucket), {
                 redirect: 'error',
                 headers,
                 signal: AbortSignal.timeout(timeoutMs)

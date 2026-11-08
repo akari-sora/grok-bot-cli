@@ -196,7 +196,7 @@ When the session has an access token, gbot uses these backend RPCs:
 | `bots update`, `groups update` | `UpdateGrokBotAgent` (numeric server id, only the changed fields); `--notify` and `--hidden` with `SetGrokBotAgentClientState` |
 | `bots delete`, `groups delete` | `DeleteGrokBotAgent` (not found counts as deleted) |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested) |
-| `bots template` | `GetGrokBotTemplateForSourceAgent`; to create or update, `SendGrokBotUserMessage` with the `TEMPLATE_SHARE` initiator |
+| `bots template` | `GetGrokBotTemplateForSourceAgent`; to create or update, `SendGrokBotUserMessage` with the `TEMPLATE_SHARE` initiator; `--show` `GetGrokBotTemplateVersion`; `--publish` `ActivateGrokBotTemplateVersion` |
 
 Since 0.11.2-iml1s.7, `bots create` calls `CreateGrokBotTemporalAgent` as the app does (the box gateway answered 404 on 0.78). `thread`, the tail that `reconcile` falls back to, the relay, `approvals list` and `approvals respond`, and the MCP thread tool read the transcript tail with `ListGrokBotTranscriptEntries` (`limit` N+1, newest page, oldest first; bodies left out of the page are read from the store, 8 at a time, and checked against their hash). A row whose body cannot be read is shown as `unreadable`, and a `--after` cursor stops before it so the next read gets it. `thread --root` and `skills` stay on the box gateway; the app has no backend call for a root thread.
 
@@ -257,9 +257,13 @@ Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. 
 ```sh
 gbot bots template "Move to Hermes"            # create or update, then wait up to 600 s
 gbot bots template "Move to Hermes" --status   # read only: the current template and link
+gbot bots template "Move to Hermes" --show     # read only: review the draft's recipe
+gbot bots template "Move to Hermes" --publish  # publish it
 ```
 
 gbot reads `GetGrokBotTemplateForSourceAgent` for the bot. With no template it sends the bot the app's message `Create a public template of yourself that I can share with somebody else`; with one, `Update the shared template of yourself.` The message goes through `SendGrokBotUserMessage` with `initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"` and the send delivery rules in Grok Bot 0.78.x above, and the bot builds the template on the server. gbot then reads the template every 10 seconds until one appears (or, for an update, one with a newer `updatedAtMs`), for at most `--wait` seconds (default 600; `0` does not wait). The link `https://x.ai/bot/<shareId>` is printed on its own line. `--json` gives `action` (`created` or `updated`), `delivery`, `clientNonce`, and `template` (`shareId`, `link`, `name`, `published`, `visibility`, `activeVersion`, `updatedAtMs`). Exit 0: the template was seen. Exit 3: the message was accepted or its delivery is unknown, but no template appeared within `--wait` (`template: null` and a `hint`); check later with `gbot bots template <bot> --status`. gbot never sends the message again; running the command again asks the bot again. Exit 1: the message was rejected, or nothing was sent. `--status` sends nothing; it returns `template` (or `null`, "no template yet"), `hasTeam`, and `exportPolicy` when the server gives one. Templates are for server-hosted bots (the app has no box path for them): a box-only bot, a login whose server roster is off, a group, and a session without an access token are refused before anything is sent.
+
+A new or updated template is a draft: live (2026-11-08) the first one came back with `published: false` and `activeVersion: 0`, and the bot posted a review card in its chat (`kind: "send-message"`, `message.type: "bot-template-share"`, with `shareId` and `version`). The app publishes the version only when that card is confirmed. `--show` reads a version as the app's review dialog does: `GetGrokBotTemplateVersion` with `{ shareId, version }`, then a GET of its presigned `blobGetUrl` (only the `grok-bot-templates` S3 bucket, no credentials, no redirects, at most 25 MiB, 20 s), and the recipe is checked as the app checks it: `profile` (`name`, `description`, avatar), `memory`, `skills`, `routines`, `plugins`, and an optional `gettingStarted` skill that must be one of the recipe's skills. It prints the name, the description, each memory entry (kind and first line), the skills, routines and plugins, the getting-started skill, and the link; `--json` gives the parsed `recipe` with `version`, `versionFrom`, `active`, `visibility`, and `createdAtMs`. `--publish` calls `ActivateGrokBotTemplateVersion` with `{ shareId, version }`, as confirming the card does, and prints `published`, the visibility, the active version, and the link. Both take the version from `--template-version N` (`--version` prints gbot's version); without it, from the newest review card for this template in the last 200 transcript entries (`versionFrom: "card"`), else from the active version (`"active"`); with neither, the command fails and asks for `--template-version`. Both need a template (`TEMPLATE_MISSING` otherwise). `--status`, `--show`, `--publish`, and `--wait` cannot be combined, and `--template-version` goes only with `--show` or `--publish`.
 
 ### Move a bot to Hermes, Muse or Your dot (`gbot migrate`)
 
@@ -586,7 +590,7 @@ Session 有 access token 時，gbot 改用這些後端 RPC：
 | `bots update`、`groups update` | `UpdateGrokBotAgent`（數字的伺服器 id，只送有改的欄位）；`--notify` 與 `--hidden` 用 `SetGrokBotAgentClientState` |
 | `bots delete`、`groups delete` | `DeleteGrokBotAgent`（找不到視為已刪除） |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` 或 `ResolveGrokBotLocalToolPermission`（照 App 對應，沒有實測） |
-| `bots template` | `GetGrokBotTemplateForSourceAgent`；建立或更新時用 `SendGrokBotUserMessage`，initiator 是 `TEMPLATE_SHARE` |
+| `bots template` | `GetGrokBotTemplateForSourceAgent`；建立或更新時用 `SendGrokBotUserMessage`，initiator 是 `TEMPLATE_SHARE`；`--show` 用 `GetGrokBotTemplateVersion`；`--publish` 用 `ActivateGrokBotTemplateVersion` |
 
 從 0.11.2-iml1s.7 起，`bots create` 跟 App 一樣呼叫 `CreateGrokBotTemporalAgent`（0.78 的雲端電腦 gateway 回 404）。`thread`、`reconcile` 退回去讀的 transcript 尾端、relay、`approvals list` 與 `approvals respond`，以及 MCP 的 thread 工具，都用 `ListGrokBotTranscriptEntries` 讀尾端（`limit` N+1，最新一頁，舊的在前；頁面裡省略的內文從 store 讀，一次 8 個，並核對雜湊）。讀不到內文的列顯示成 `unreadable`，`--after` 游標停在它前面，下次讀會再拿到它。`thread --root` 與 `skills` 仍走雲端電腦 gateway；App 沒有對應 root thread 的後端呼叫。
 
@@ -647,9 +651,13 @@ gbot thread Researcher --after "<cursor>" --json
 ```sh
 gbot bots template "Move to Hermes"            # 建立或更新，最多等 600 秒
 gbot bots template "Move to Hermes" --status   # 只讀：目前的範本與連結
+gbot bots template "Move to Hermes" --show     # 只讀：檢查草稿的內容
+gbot bots template "Move to Hermes" --publish  # 發布
 ```
 
 gbot 先讀這個 bot 的 `GetGrokBotTemplateForSourceAgent`。還沒有範本時，送給 bot 的是 App 的訊息 `Create a public template of yourself that I can share with somebody else`；已經有範本時是 `Update the shared template of yourself.`。訊息走 `SendGrokBotUserMessage`，`initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"`，送達規則同上面 Grok Bot 0.78.x 的送訊；範本由 bot 在伺服器上建立。之後 gbot 每 10 秒讀一次範本，直到範本出現（更新時則是 `updatedAtMs` 比原本新的範本），最多等 `--wait` 秒（預設 600；`0` 不等）。連結 `https://x.ai/bot/<shareId>` 單獨印在一行。`--json` 有 `action`（`created` 或 `updated`）、`delivery`、`clientNonce` 與 `template`（`shareId`、`link`、`name`、`published`、`visibility`、`activeVersion`、`updatedAtMs`）。結束碼 0：看到範本了。結束碼 3：訊息已被接受或送達未知，但 `--wait` 內沒有出現範本（`template: null`，附 `hint`）；稍後用 `gbot bots template <bot> --status` 查。gbot 不會再送一次訊息；再跑一次命令就是再請 bot 一次。結束碼 1：訊息被拒絕，或什麼都沒送出。`--status` 不送任何東西，回傳 `template`（沒有時是 `null`，「no template yet」）、`hasTeam`，伺服器有給時還有 `exportPolicy`。範本只給伺服器上的 bot（App 沒有走雲端電腦的做法）：只在雲端電腦名單上的 bot、伺服器名單關閉的登入、群組，以及沒有 access token 的 session，都會在送出任何東西之前被拒絕。
+
+新建或更新的範本是草稿：2026-11-08 實測，第一個範本回來時是 `published: false`、`activeVersion: 0`，bot 在對話裡貼出一張審核卡（`kind: "send-message"`、`message.type: "bot-template-share"`，帶 `shareId` 與 `version`）。App 要等那張卡被確認才發布該版本。`--show` 照 App 的審核對話框讀一個版本：`GetGrokBotTemplateVersion`（`{ shareId, version }`），再 GET 它預先簽名的 `blobGetUrl`（只接受 `grok-bot-templates` 這個 S3 bucket，不帶憑證、不跟重新導向、最多 25 MiB、20 秒），內容照 App 的規則檢查：`profile`（`name`、`description`、頭像）、`memory`、`skills`、`routines`、`plugins`，以及選填的 `gettingStarted`（必須是內容裡的某個 skill）。它印出名稱、說明、每筆記憶（種類與第一行）、skills、排程、plugins、入門 skill 與連結；`--json` 給解析後的 `recipe`，以及 `version`、`versionFrom`、`active`、`visibility`、`createdAtMs`。`--publish` 呼叫 `ActivateGrokBotTemplateVersion`（`{ shareId, version }`），等同確認那張卡，印出 `published`、可見範圍、啟用中的版本與連結。兩者的版本來自 `--template-version N`（`--version` 是印出 gbot 版本）；沒給時，取最後 200 筆 transcript 裡這個範本最新的審核卡（`versionFrom: "card"`），再不然取啟用中的版本（`"active"`）；兩者都沒有就失敗，請改給 `--template-version`。兩者都需要已有範本（否則是 `TEMPLATE_MISSING`）。`--status`、`--show`、`--publish`、`--wait` 四者擇一，`--template-version` 只配 `--show` 或 `--publish`。
 
 ### 把 bot 搬到 Hermes、Muse 或 Your dot（`gbot migrate`）
 

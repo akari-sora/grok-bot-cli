@@ -13685,7 +13685,7 @@ var __webpack_modules__ = {
             const def = {
                 type: "object",
                 shape: shape ?? {},
-                ...util.normalizeParams(params)
+                ..._core_index_js__rspack_import_4.A2(params)
             };
             return new ZodObject(def);
         }
@@ -14156,9 +14156,9 @@ var __webpack_modules__ = {
                 reverseTransform: def.transform
             });
         }
-        const ZodPreprocess = null && core.$constructor("ZodPreprocess", (inst, def)=>{
+        const ZodPreprocess = _core_index_js__rspack_import_0.xI("ZodPreprocess", (inst, def)=>{
             ZodPipe.init(inst, def);
-            core.$ZodPreprocess.init(inst, def);
+            _core_index_js__rspack_import_3.KX.init(inst, def);
         });
         const ZodReadonly = _core_index_js__rspack_import_0.xI("ZodReadonly", (inst, def)=>{
             _core_index_js__rspack_import_3.Sb.init(inst, def);
@@ -14300,6 +14300,7 @@ var __webpack_modules__ = {
             });
         }
         __webpack_require__.d(__webpack_exports__, {
+            Ikc: ()=>object,
             YOg: ()=>array,
             YjP: ()=>string,
             aig: ()=>number,
@@ -14308,6 +14309,7 @@ var __webpack_modules__ = {
             gMt: ()=>discriminatedUnion,
             k5n: ()=>_enum,
             rej: ()=>strictObject,
+            vkY: ()=>preprocess,
             zMY: ()=>boolean
         });
     },
@@ -20074,7 +20076,7 @@ var __webpack_modules__ = {
                 issues: left.issues
             }, ctx);
         }
-        const $ZodPreprocess = null && core.$constructor("$ZodPreprocess", (inst, def)=>{
+        const $ZodPreprocess = _core_js__rspack_import_0.xI("$ZodPreprocess", (inst, def)=>{
             $ZodPipe.init(inst, def);
         });
         const $ZodReadonly = _core_js__rspack_import_0.xI("$ZodReadonly", (inst, def)=>{
@@ -20339,6 +20341,7 @@ var __webpack_modules__ = {
             GP: $ZodUnknown,
             GY: $ZodKSUID,
             I: $ZodNumberFormat,
+            KX: $ZodPreprocess,
             Ko: $ZodISODateTime,
             LJ: $ZodIntersection,
             Lc: $ZodIPv4,
@@ -25722,6 +25725,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/gateway.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_os__rspack_import_1 = __webpack_require__("node:os");
+        var zod__rspack_import_12 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _app_auth_js__rspack_import_2 = __webpack_require__("./src/core/app-auth.js");
         var _client_version_js__rspack_import_3 = __webpack_require__("./src/core/client-version.js");
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
@@ -26862,6 +26866,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "ReadGrokBotAgentAttachmentChunk",
             "GetGrokBotRuntimeCapabilities",
             "GetGrokBotTemplateForSourceAgent",
+            "GetGrokBotTemplateVersion",
             "ListSandBoxStoreObjects",
             "StatSandBoxStoreObject",
             "PresignSandBoxStoreReads"
@@ -27970,6 +27975,197 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 template
             };
         }
+        const RECIPE_MAX_BYTES = 26214400;
+        const RECIPE_TIMEOUT_MS = 20000;
+        const RECIPE_BUCKET = "grok-bot-templates";
+        const RECIPE_AVATAR_SHAPES = [
+            "blob",
+            "pebble",
+            "bean",
+            "egg",
+            "squircle",
+            "tablet",
+            "capsule",
+            "cylinder",
+            "hex",
+            "gem",
+            "crystal",
+            "wedge",
+            "shield",
+            "dome",
+            "arch",
+            "cloud",
+            "teardrop",
+            "leaf",
+            "square",
+            "sparkle",
+            "clover",
+            "flower",
+            "heart",
+            "house",
+            "star"
+        ];
+        const absentWhenNull = (value)=>value === null ? undefined : value;
+        const recipeSchema = zod__rspack_import_12.Ikc({
+            profile: zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                avatarColor: zod__rspack_import_12.k5n(_store_js__rspack_import_7.T7).optional(),
+                avatarShape: zod__rspack_import_12.k5n(RECIPE_AVATAR_SHAPES).optional()
+            }),
+            memory: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                kind: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.k5n([
+                    "profile",
+                    "log"
+                ]).optional()),
+                createdAt: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.YjP().optional()),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            skills: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            routines: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                slug: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            plugins: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1).optional(),
+                pluginId: zod__rspack_import_12.YjP().min(1)
+            })),
+            gettingStarted: zod__rspack_import_12.Ikc({
+                skill: zod__rspack_import_12.YjP().min(1)
+            }).optional()
+        }).superRefine((recipe, ctx)=>{
+            const skill = recipe.gettingStarted?.skill;
+            if (skill !== undefined && !recipe.skills.some((s)=>s.name === skill)) {
+                ctx.addIssue({
+                    code: "custom",
+                    path: [
+                        "gettingStarted",
+                        "skill"
+                    ],
+                    message: "gettingStarted.skill must name one of this recipe's skills"
+                });
+            }
+        });
+        function parseRecipe(bytes) {
+            if (bytes.byteLength < 1 || bytes.byteLength > RECIPE_MAX_BYTES) {
+                throw new GatewayError("Grok Bot template recipe refused: size " + bytes.byteLength + " bytes", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            let value;
+            try {
+                value = JSON.parse(new TextDecoder().decode(bytes));
+            } catch  {
+                throw new GatewayError("Grok Bot template recipe is invalid: not JSON", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            const parsed = recipeSchema.safeParse(value);
+            if (!parsed.success) {
+                const issue = parsed.error.issues[0];
+                throw new GatewayError("Grok Bot template recipe is invalid: " + (issue ? (issue.path.join(".") || "recipe") + " " + issue.message : "unexpected shape"), {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            return parsed.data;
+        }
+        async function existingTemplate(session, rec, signal) {
+            const { template } = await readTemplate(session, rec, signal);
+            if (!template) {
+                throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") has no template yet; gbot bots template creates one.", {
+                    code: "TEMPLATE_MISSING"
+                });
+            }
+            return template;
+        }
+        async function templateVersionFor(session, rec, template, version) {
+            if (version !== undefined) {
+                if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", {
+                    code: "TEMPLATE_NO_VERSION"
+                });
+                return {
+                    version,
+                    versionFrom: "option"
+                };
+            }
+            const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                const card = entry && typeof entry === "object" ? entry.message : undefined;
+                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
+                const cardVersion = Number(card.version);
+                if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return {
+                    version: cardVersion,
+                    versionFrom: "card"
+                };
+            }
+            if (template.activeVersion >= 1) return {
+                version: template.activeVersion,
+                versionFrom: "active"
+            };
+            throw new GatewayError("No template version to use: the last 200 transcript entries of " + rec.name + " have no template card for " + template.shareId + ", and no version is active. Give the version (--template-version N).", {
+                code: "TEMPLATE_NO_VERSION"
+            });
+        }
+        async function getBotTemplateVersion(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendRead(session, "GetGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            }, {
+                signal
+            });
+            const url = typeof data?.blobGetUrl === "string" ? data.blobGetUrl.trim() : "";
+            if (!url) throw new GatewayError("GetGrokBotTemplateVersion returned no recipe url", {
+                code: "RECIPE_MISSING"
+            });
+            const { bytes } = await fetchStoreBytes(url, {
+                cap: RECIPE_MAX_BYTES,
+                timeoutMs: RECIPE_TIMEOUT_MS,
+                bucket: RECIPE_BUCKET
+            });
+            const createdAtMs = Number(data?.createdAtMs);
+            return {
+                target: rec,
+                template,
+                version: Number(data?.version) || chosen.version,
+                versionFrom: chosen.versionFrom,
+                active: data?.active === true,
+                ...Number.isFinite(createdAtMs) && createdAtMs > 0 ? {
+                    createdAtMs
+                } : {},
+                visibility: typeof data?.visibility === "string" ? data.visibility : "",
+                recipe: parseRecipe(bytes)
+            };
+        }
+        async function publishBotTemplate(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendCall(session, "ActivateGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            });
+            const published = templateFrom(data?.template);
+            if (!published) throw new GatewayError("ActivateGrokBotTemplateVersion returned no template", {
+                code: "TEMPLATE_MISSING"
+            });
+            return {
+                target: rec,
+                version: chosen.version,
+                versionFrom: chosen.versionFrom,
+                template: published
+            };
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {
@@ -28997,7 +29193,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const n = typeof v === 'string' ? Number(v) : v;
             return Number.isFinite(n) ? n : null;
         };
-        function assertStoreUrl(raw, env = process.env) {
+        function assertStoreUrl(raw, env = process.env, bucket = 'sand-box-stores') {
             let url;
             try {
                 url = new URL(raw);
@@ -29013,13 +29209,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ].includes(url.hostname)) throw new _migration_js__rspack_import_1.Py('Store URL must be loopback in test mode.');
                 return url.href;
             }
-            if (url.protocol !== 'https:' || !/^sand-box-stores\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/.test(url.hostname)) {
+            if (url.protocol !== 'https:' || !new RegExp(`^${bucket}\\.s3(?:\\.[a-z0-9-]+)?\\.amazonaws\\.com$`).test(url.hostname)) {
                 throw new _migration_js__rspack_import_1.Py('The store returned a read URL for an unexpected host; nothing was fetched.');
             }
             return url.href;
         }
-        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000 } = {}) {
-            const res = await fetchImpl(assertStoreUrl(url), {
+        async function fetchStoreBytes1(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000, bucket } = {}) {
+            const res = await fetchImpl(assertStoreUrl(url, process.env, bucket), {
                 redirect: 'error',
                 headers,
                 signal: AbortSignal.timeout(timeoutMs)
@@ -29176,7 +29372,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         async function readStoreManifest({ presign, fetchImpl = fetch }) {
             for(let attempt = 0; attempt < 3; attempt++){
                 const url = await presign('manifest.json');
-                const first = await fetchStoreBytes(url, {
+                const first = await fetchStoreBytes1(url, {
                     cap: MANIFEST_RANGE,
                     headers: {
                         Range: `bytes=0-${MANIFEST_RANGE - 1}`
@@ -29195,7 +29391,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ]);
                 let changed = false;
                 for(let i = 0; i < ranges.length && !changed; i += MANIFEST_PARALLEL){
-                    const batch = await Promise.allSettled(ranges.slice(i, i + MANIFEST_PARALLEL).map(([a, b])=>fetchStoreBytes(url, {
+                    const batch = await Promise.allSettled(ranges.slice(i, i + MANIFEST_PARALLEL).map(([a, b])=>fetchStoreBytes1(url, {
                             cap: b - a + 1,
                             headers: {
                                 Range: `bytes=${a}-${b}`,
@@ -29408,7 +29604,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     await Promise.all(batch.map(async (h)=>{
                         const url = urls.get('blobs/' + h);
                         if (!url) return;
-                        const { bytes } = await fetchStoreBytes(url, {
+                        const { bytes } = await fetchStoreBytes1(url, {
                             cap: 64 * 1024 * 1024,
                             fetchImpl: io.fetchImpl
                         });
@@ -29883,7 +30079,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
-            $8: ()=>fetchStoreBytes
+            $8: ()=>fetchStoreBytes1
         });
     },
     "./src/core/migration.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -32130,7 +32326,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             xA: ()=>codexSenderPrefix
         });
     },
-    "./src/core/store.js" (__unused_rspack___webpack_module__, __unused_rspack___webpack_exports__, __webpack_require__) {
+    "./src/core/store.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_fs__rspack_import_1 = __webpack_require__("node:fs");
         var node_os__rspack_import_2 = __webpack_require__("node:os");
@@ -32160,7 +32356,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "teardrop",
             "leaf"
         ];
-        const AVATAR_COLORS1 = null && [
+        const AVATAR_COLORS1 = [
             "black",
             "brown",
             "red",
@@ -32448,6 +32644,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const member = resolveRef(root, memberRef);
             return setGroupMembers(root, group.id, group.memberIds.filter((id)=>id !== member.id));
         }
+        __webpack_require__.d(__webpack_exports__, {}, {
+            T7: AVATAR_COLORS1
+        });
     },
     "./src/core/transcript.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         function toSafeText(value) {

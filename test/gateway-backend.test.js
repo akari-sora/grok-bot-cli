@@ -19,11 +19,13 @@ import {
   createGroup,
   deleteAgent,
   getBotTemplate,
+  getBotTemplateVersion,
   getTranscriptTail,
   hasBackend,
   listAgents,
   listGrokApprovals,
   listSkills,
+  publishBotTemplate,
   reconcileDelivery,
   removeGroupMember,
   resolveRef,
@@ -1693,7 +1695,12 @@ test("bots template refuses a box-only bot, a group, and a session without the b
   });
   await withEnv(envFor(home), async () => {
     const session = await connectGateway();
-    for (const share of [(ref) => shareBotTemplate(session, ref, FAST), (ref) => getBotTemplate(session, ref)]) {
+    for (const share of [
+      (ref) => shareBotTemplate(session, ref, FAST),
+      (ref) => getBotTemplate(session, ref),
+      (ref) => getBotTemplateVersion(session, ref, { version: 1 }),
+      (ref) => publishBotTemplate(session, ref, { version: 1 }),
+    ]) {
       await assert.rejects(share("Local Box"), (err) => err.code === "TEMPLATE_NOT_SERVER_BOT" && /box roster only/.test(err.message));
       await assert.rejects(share("Launch"), (err) => err.code === "TEMPLATE_NOT_BOT");
     }
@@ -1703,6 +1710,8 @@ test("bots template refuses a box-only bot, a group, and a session without the b
     assert.equal(hasBackend(session), false);
     await assert.rejects(shareBotTemplate(session, "General", FAST), (err) => err.code === "NO_ACCESS_TOKEN" && /backend/.test(err.message));
     await assert.rejects(getBotTemplate(session, "General"), (err) => err.code === "NO_ACCESS_TOKEN");
+    await assert.rejects(getBotTemplateVersion(session, "General"), (err) => err.code === "NO_ACCESS_TOKEN");
+    await assert.rejects(publishBotTemplate(session, "General"), (err) => err.code === "NO_ACCESS_TOKEN");
   });
   // A login whose server roster is off has only box records: refused the same way.
   await withEnv(envFor(home), async () => {
@@ -1794,4 +1803,120 @@ test("a send initiator other than user or template_share is refused before anyth
   const ok = await run((session) => sendPrompt(session, "General", "hi", { initiator: "user" }));
   assert.equal(ok.delivery, "accepted");
   assert.equal(rpcCalls(calls, "SendGrokBotUserMessage")[0].body.initiator, "GROK_BOT_USER_MESSAGE_INITIATOR_USER");
+});
+
+// A recipe as the template store keeps it (live shape, 2026-11-08), plus keys the app's parser drops.
+const RECIPE = {
+  profile: { name: "General", description: "Helps with everything.", avatarColor: "violet", avatarShape: "arch", extra: "dropped" },
+  memory: [{ kind: "profile", content: "Job: help.", createdAt: null }, { kind: null, content: "Step 1." }],
+  skills: [{ name: "triage", description: "Sort the inbox", content: "# Triage" }],
+  routines: [{ name: "Daily", slug: "daily", description: "Every day", content: "Run triage" }],
+  plugins: [{ name: "GitLab", pluginId: "gitlab" }],
+  gettingStarted: { skill: "triage" },
+  unknownTopLevel: true,
+};
+// A bot-template-share card as the bot posts it in its chat.
+const card = (version, shareId = "share-1", seq) => ({
+  id: "card-" + shareId + "-" + version,
+  kind: "send-message",
+  ...(seq ? { seq } : {}),
+  message: { type: "bot-template-share", shareId, name: "General", shareUrl: "https://x.ai/bot/" + shareId, version, published: false, visibility: "public", body: "Review it" },
+});
+
+function templateVersionRoutes({ active = 0, entries = [], recipe = Buffer.from(JSON.stringify(RECIPE)), blobGetUrl = STORE + "/recipes/share-1" } = {}) {
+  return {
+    rpcs: {
+      GetGrokBotTemplateForSourceAgent: () => ({ template: template(100, { published: active > 0 ? true : undefined, activeVersion: active }) }),
+      ListGrokBotTranscriptEntries: () => tailPage(entries),
+      GetGrokBotTemplateVersion: (body) => ({ version: body.version, active: body.version === active, createdAtMs: "1794137204348", blobObjectKey: "k", blobGetUrl, visibility: "GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC" }),
+      ActivateGrokBotTemplateVersion: (body) => ({ template: template(900, { activeVersion: body.version, published: true }) }),
+      SendGrokBotUserMessage: () => assert.fail("no send"),
+    },
+    store: { "/recipes/share-1": recipe },
+  };
+}
+
+test("--show reads the newest template card's version and parses the recipe as the app does", async (t) => {
+  const entries = [card(9, "other-share"), card(1), { id: "m1", kind: "message", role: "user", content: "hi" }, card(2), { id: "m2", kind: "send-message", message: { type: "text", content: "done" } }];
+  const { calls, run } = await backendSession(t, templateVersionRoutes({ entries }));
+  const out = await run((session) => getBotTemplateVersion(session, "General"));
+  assert.equal(out.version, 2);
+  assert.equal(out.versionFrom, "card");
+  assert.equal(out.active, false);
+  assert.equal(out.createdAtMs, 1794137204348);
+  assert.equal(out.visibility, "GROK_BOT_TEMPLATE_VISIBILITY_PUBLIC");
+  assert.equal(out.template.link, "https://x.ai/bot/share-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(out.recipe)), {
+    profile: { name: "General", description: "Helps with everything.", avatarColor: "violet", avatarShape: "arch" },
+    memory: [{ kind: "profile", content: "Job: help." }, { content: "Step 1." }],
+    skills: RECIPE.skills,
+    routines: RECIPE.routines,
+    plugins: RECIPE.plugins,
+    gettingStarted: { skill: "triage" },
+  });
+  assert.deepEqual(rpcCalls(calls, "GetGrokBotTemplateVersion").map((call) => call.body), [{ shareId: "share-1", version: 2 }]);
+  const [blob] = calls.filter((call) => call.target.startsWith(STORE + "/"));
+  assert.equal(blob.headers.authorization, undefined, "no credentials to the store");
+  assert.equal(rpcCalls(calls, "ActivateGrokBotTemplateVersion").length, 0);
+});
+
+test("--show uses the active version without a card, the given version without reading the chat, and refuses neither", async (t) => {
+  const active = await backendSession(t, templateVersionRoutes({ active: 3 }));
+  const fromActive = await active.run((session) => getBotTemplateVersion(session, "General"));
+  assert.equal(fromActive.version, 3);
+  assert.equal(fromActive.versionFrom, "active");
+  assert.equal(fromActive.active, true);
+  t.mock.restoreAll();
+  const given = await backendSession(t, templateVersionRoutes({ entries: [card(2)] }));
+  const fromOption = await given.run((session) => getBotTemplateVersion(session, "General", { version: 1 }));
+  assert.equal(fromOption.version, 1);
+  assert.equal(fromOption.versionFrom, "option");
+  assert.equal(rpcCalls(given.calls, "ListGrokBotTranscriptEntries").length, 0);
+  t.mock.restoreAll();
+  const neither = await backendSession(t, templateVersionRoutes({ entries: [card(4, "other-share")] }));
+  await assert.rejects(neither.run((session) => getBotTemplateVersion(session, "General")), (err) => err.code === "TEMPLATE_NO_VERSION" && /--template-version/.test(err.message));
+  await assert.rejects(neither.run((session) => publishBotTemplate(session, "General")), (err) => err.code === "TEMPLATE_NO_VERSION");
+  assert.equal(rpcCalls(neither.calls, "GetGrokBotTemplateVersion").length, 0);
+  assert.equal(rpcCalls(neither.calls, "ActivateGrokBotTemplateVersion").length, 0);
+});
+
+test("--show refuses a missing recipe url, a recipe the app's parser refuses, and a bot without a template", async (t) => {
+  for (const [label, routes, pattern] of [
+    ["no url", { blobGetUrl: "  " }, /returned no recipe url/],
+    ["not JSON", { recipe: Buffer.from("not json") }, /recipe is invalid: not JSON/],
+    ["empty", { recipe: Buffer.alloc(0) }, /recipe refused: size 0/],
+    ["unknown getting-started skill", { recipe: Buffer.from(JSON.stringify({ ...RECIPE, gettingStarted: { skill: "nope" } })) }, /gettingStarted\.skill must name one of this recipe's skills/],
+    ["unknown avatar shape", { recipe: Buffer.from(JSON.stringify({ ...RECIPE, profile: { ...RECIPE.profile, avatarShape: "pumpkin" } })) }, /profile\.avatarShape/],
+    ["empty description", { recipe: Buffer.from(JSON.stringify({ ...RECIPE, profile: { name: "General", description: "" } })) }, /profile\.description/],
+  ]) {
+    t.mock.restoreAll();
+    const { run } = await backendSession(t, templateVersionRoutes({ entries: [card(1)], ...routes }));
+    await assert.rejects(run((session) => getBotTemplateVersion(session, "General")), pattern, label);
+  }
+  t.mock.restoreAll();
+  const { calls, run } = await backendSession(t, { rpcs: { GetGrokBotTemplateForSourceAgent: () => ({ hasTeam: true }) } });
+  for (const read of [(session) => getBotTemplateVersion(session, "General"), (session) => publishBotTemplate(session, "General", { version: 1 })]) {
+    await assert.rejects(run(read), (err) => err.code === "TEMPLATE_MISSING" && /no template yet/.test(err.message));
+  }
+  assert.equal(rpcCalls(calls, "GetGrokBotTemplateVersion").length, 0);
+  assert.equal(rpcCalls(calls, "ActivateGrokBotTemplateVersion").length, 0);
+});
+
+test("--publish calls ActivateGrokBotTemplateVersion with the share id and the card's version", async (t) => {
+  const { calls, run } = await backendSession(t, templateVersionRoutes({ entries: [card(1)] }));
+  const out = await run((session) => publishBotTemplate(session, "General"));
+  assert.equal(out.version, 1);
+  assert.equal(out.versionFrom, "card");
+  assert.equal(out.template.published, true);
+  assert.equal(out.template.activeVersion, 1);
+  assert.equal(out.template.link, "https://x.ai/bot/share-1");
+  const [activate] = rpcCalls(calls, "ActivateGrokBotTemplateVersion");
+  assert.deepEqual(activate.body, { shareId: "share-1", version: 1 });
+  assert.equal(activate.headers.authorization, "Bearer " + ACCESS);
+  assert.equal(rpcCalls(calls, "ActivateGrokBotTemplateVersion").length, 1);
+  assert.equal(rpcCalls(calls, "GetGrokBotTemplateVersion").length, 0, "publishing does not read the recipe");
+  t.mock.restoreAll();
+  const empty = await backendSession(t, { ...templateVersionRoutes(), rpcs: { ...templateVersionRoutes().rpcs, ActivateGrokBotTemplateVersion: () => ({}) } });
+  await assert.rejects(empty.run((session) => publishBotTemplate(session, "General", { version: 2 })), /ActivateGrokBotTemplateVersion returned no template/);
+  assert.deepEqual(rpcCalls(empty.calls, "ActivateGrokBotTemplateVersion").map((call) => call.body), [{ shareId: "share-1", version: 2 }]);
 });
