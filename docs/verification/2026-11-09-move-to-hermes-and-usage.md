@@ -49,3 +49,17 @@ The Move to Hermes route is different: each step is a turn of that bot and uses 
 - Continuing the work: asked in Hermes (`hermes -p grok-dqa-check -z …`, read-only question) for its role and its unfinished task, it named its job (watch GitLab CI and deploys, fix failures, squash-merge green non-draft MRs) and the open item from its migrated memory (two Telltale merge requests waiting to leave draft, then merge them and wake the full check on main).
 
 The test profile and the local archive were deleted afterwards.
+
+## Routine switch-over on a working bot (`--move-routines --routines`)
+
+The author's working bot "X Brief" has two routines on in Grok Bot: "Daily X brief" and "Weekly X recap" (Fridays 09:00, Taipei; next run four days later, so a few minutes off could not skip a run). With v0.11.2-iml1s.16:
+
+`gbot migrate run --account A --bot <X Brief> --to hermes --profile grok-xbrief-check --move-routines --routines weekly-x-recap --yes`
+
+| Time (UTC) | Grok Bot (read back) | Hermes (`cron list`) |
+| --- | --- | --- |
+| 18:26:44, before | daily on, weekly on | (no profile) |
+| 18:30:06, after the run (exit 0) | daily on, weekly **off** | daily paused, weekly **active** |
+
+- The report: weekly-x-recap "paused in Grok Bot, then on in Hermes", no rollback; daily-x-brief "off at the destination, unchanged in Grok Bot" (not named in `--routines`). Read back 7/7, acceptance 6/6; the transcript had 221 rows (131 messages) over seq 1–226, with 4 deleted rows reported as such.
+- Restored at 18:30:09: weekly-x-recap switched back on in Grok Bot and read back on; the test profile (with its cron jobs) deleted; the local archive deleted.
