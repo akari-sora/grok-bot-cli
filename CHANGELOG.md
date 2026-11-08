@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.14
+
+- One-line install on macOS, Linux and Windows: `npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz` always gets the latest release (run it again to upgrade). README, FORK, the `migrate-grok-bot` agent skill and the Move to Hermes instructions use it; agents need two commands (that line, then `gbot-install install claude|codex|cursor`).
+- Docs: an old template review card in the app can publish an old version again; how to check (`--status`) and fix (`--publish --template-version N`).
+
 ### 0.11.2-iml1s.13
 
 - `gbot bots template <bot>` waits up to `--wait` seconds as documented: its render budget was the default 60 s, so a template the bot drafted after a minute was reported as `render-failed` although the message had gone out. `--show` marks an instruction entry that reached 500 characters (a template cuts each entry there).
