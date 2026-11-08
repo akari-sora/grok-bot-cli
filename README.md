@@ -457,7 +457,7 @@ Sends have a 15-second deadline and reads 30 seconds, both including the respons
 | most commands / 大部分命令 | 0 done (a send can be `delivery: "unknown"` and still exit 0); 1 usage error or gateway failure (with `--json`, `send`, `wake` and the `codex` commands print the failure as a JSON document with `exitCode` on stdout); 2 unknown option, including `--account` before the subcommand |
 | `gbot wake` | 0 running, or `--check` succeeded; 2 usage; 3 could not wake; 4 timed out before the box was ready |
 | `gbot bots template` | 0 the template was seen, or `--status`, `--show` or `--publish` succeeded; 3 the message went out (or its delivery is unknown) but no template appeared within `--wait`: run `--status` later, do not send again; 1 rejected, or nothing sent |
-| `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify; 2 usage or missing `--yes`; 1 other errors |
+| `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify; 2 an invalid option (nothing ran); 1 other errors, including a missing `--yes` (nothing was imported) |
 | `gbot config import` | 0 imported; 2 invalid file (nothing written); 3 imported, but some aliased logins are not signed in on this machine |
 | `gbot wear pair` | 0 paired; 1–6 and 129/130/143 as listed in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair) |
 

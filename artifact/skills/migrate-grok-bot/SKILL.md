@@ -54,7 +54,7 @@ default and never paused. Give `preview`, `import` and `check` the same routine 
 - Exit 0: migrated and verified. Exit 3: imported, something did not verify — read the ✗ items
   (`verify`, `acceptance.results[].ok`, `notMigrated`, `routines`/`switchOver` for a move,
   `memoryNotCaptured`) and report them. A switch-over line saying ROUTINE MAY RUN NOWHERE is
-  urgent: report it first, with its manual fix. Exit 2: usage or missing `--yes`. Exit 1: other errors.
+  urgent: report it first, with its manual fix. Exit 2: an invalid option, rejected before anything runs. Exit 1: other errors, including a missing `--yes` (nothing was imported) and an unknown `--routines` entry.
 - The report JSON is also written next to the archive (`<archive>.<dest>.report.json`).
 
 ## Rules

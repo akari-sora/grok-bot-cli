@@ -123,7 +123,7 @@ Muse／dot 的傳送可中斷續跑：每一步都有 nonce 和 ledger；停了�
 
 ### 結束碼
 
-0 搬完並驗證；3 搬了但有項目沒驗過，或 `--move-routines` 有排程沒在 Grok Bot 關掉（看報告裡的 ✗）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。報告寫在存檔旁邊：`<存檔>.<目的地>….report.json`。
+0 搬完並驗證；3 搬了但有項目沒驗過，或 `--move-routines` 有排程沒在 Grok Bot 關掉（看報告裡的 ✗）；2 選項不合法（一開始就被拒絕，什麼都沒做）；1 其他錯誤，包括沒加 `--yes`（什麼都沒匯入）和 `--routines` 寫了不存在的排程。報告寫在存檔旁邊：`<存檔>.<目的地>….report.json`。
 
 ### 給 agent 用（Claude Code、Codex、Cursor）
 
@@ -180,7 +180,7 @@ A move is switched over with a short gap, never both running, so routines with s
 
 Muse/dot delivery is resumable and never resends an uncertain message: run the same `gbot migrate import` again. `gbot migrate check` sends no migration content; with `--accept` it sends the acceptance questions.
 
-Exit codes: 0 migrated and verified; 3 imported but something did not verify, or with `--move-routines` a routine was not paused in Grok Bot (see ✗ in the report); 2 usage or missing `--yes`; 1 other errors. The report is written next to the archive.
+Exit codes: 0 migrated and verified; 3 imported but something did not verify, or with `--move-routines` a routine was not paused in Grok Bot (see ✗ in the report); 2 an invalid option, rejected before anything runs; 1 other errors, including a missing `--yes` (nothing was imported) and an unknown `--routines` entry. The report is written next to the archive.
 
 ### For agents (Claude Code, Codex, Cursor)
 
