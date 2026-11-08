@@ -29374,6 +29374,40 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!res.ok) throw backendFailure(rpc, res, data, token);
             return data;
         }
+        const BACKEND_READ_RPCS = Object.freeze([
+            "ListGrokBotAgents",
+            "ListGrokBotAgentSessions",
+            "ListGrokBotTranscriptEntries",
+            "ListGrokBotUserBotMemories",
+            "ListGrokBotAgentSkills",
+            "ListGrokBotAgentRoutines",
+            "ListGrokBotAgentAutomations",
+            "ListGrokBotAgentTasks",
+            "ListGrokBotAgentTodos",
+            "ListGrokBotTasks",
+            "ListGrokBotSubagents",
+            "ListGrokBotAgentFiles",
+            "ListGrokBotUserStoreFiles",
+            "ListGrokBotLibraryDocs",
+            "GetGrokBotAgentPlugins",
+            "ResolveGrokBotAttachmentReads",
+            "ReadGrokBotAgentAttachmentChunk",
+            "GetGrokBotRuntimeCapabilities",
+            "ListSandBoxStoreObjects",
+            "StatSandBoxStoreObject",
+            "PresignSandBoxStoreReads"
+        ]);
+        async function backendRead(session, rpc, body = {}, { signal, timeoutMs } = {}) {
+            if (!BACKEND_READ_RPCS.includes(rpc)) throw new GatewayError(rpc + " is not a read-only migration RPC.", {
+                code: "RPC_NOT_ALLOWED"
+            });
+            return backendCall(session, rpc, body, {
+                signal,
+                ...timeoutMs ? {
+                    timeoutMs
+                } : {}
+            });
+        }
         const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
         function serverRecord(agent, client) {
             const isGroup = agent.kind === ROOM_KIND;

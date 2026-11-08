@@ -4,4 +4,5 @@ import { z } from 'zod';
 export const migrationResultSchema = z.object({
   exitCode: z.number().int().min(0).max(3),
 }).catchall(z.json());
-export const migrationResult = (value: unknown) => migrationResultSchema.parse(value);
+// JSON round-trip first: optional fields left undefined are dropped instead of failing validation.
+export const migrationResult = (value: unknown) => migrationResultSchema.parse(JSON.parse(JSON.stringify(value)));

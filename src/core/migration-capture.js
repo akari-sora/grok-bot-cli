@@ -182,16 +182,20 @@ const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.secrets|\.docker|\.kube|\.confi
 export const isSecretPath = (p) => SECRET_PATH.test(p) || SECRET_DIR.test(p);
 
 /** Box paths a bot owns or names, from the manifest. Returns [{path, entry, reason}]. */
-export function selectBoxFiles(entries, { agentId, referenced = [], skillDirs = [] }) {
+export function selectBoxFiles(entries, { agentId, referenced = [], skillDirs = [], projects = [] }) {
   const picks = new Map();
   const add = (path, reason) => {
     const entry = entries[path];
     if (!entry || picks.has(path) || isSecretPath(path)) return;
     picks.set(path, { path, entry, reason });
   };
+  // Grok Bot memory has three tiers (its prompt says so): shared user memory (every assistant's
+  // shard under user-memory/by-agent, visible to all bots), project memory for the projects the
+  // bot joined, and the bot's own memory folder.
   const prefixes = [
     [`home/box/sand-data/agents/${agentId}/`, 'bot-data'],
-    [`home/box/sand-data/user-memory/by-agent/${agentId}/`, 'user-memory'],
+    ['home/box/sand-data/user-memory/', 'user-memory'],
+    ...projects.map((slug) => [`home/box/sand-data/projects/${slug}/`, 'project-memory']),
     [`home/box/sand-data/agent-transcripts/${agentId}/`, 'box-transcript'],
     ...skillDirs.map((d) => [`home/box/sand-data/workflows/${d}/`, 'skill']),
   ];
@@ -277,6 +281,12 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     members: Array.isArray(row.memberAgentIds) ? row.memberAgentIds : [],
   };
   note('identity', 'complete', { source: 'ListGrokBotAgents' });
+  const groups = (roster?.agents ?? []).filter((a) => a?.kind === 'GROK_BOT_AGENT_KIND_ROOM' && (a.memberAgentIds ?? []).includes(agentId))
+    .map((a) => ({ id: str(a.agentId), name: str(a.name), members: (a.memberAgentIds ?? []).map((m) => {
+      const peer = (roster.agents ?? []).find((x) => x?.agentId === m);
+      return { id: m, name: str(peer?.name) };
+    }) }));
+  note('groups', 'complete', { count: groups.length, note: groups.length ? 'Group chats are listed; their conversations belong to the group, not this bot.' : undefined });
 
   const blobReader = async (hashes) => {
     const out = new Map();
@@ -403,8 +413,19 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
       if (m) skillDirs.add(m[1]);
     }
     const memoryTexts = [];
-    const picks0 = selectBoxFiles(store.entries, { agentId, skillDirs: [...skillDirs] });
-    const picks = selectBoxFiles(store.entries, { agentId, skillDirs: [...skillDirs], referenced: referencedBoxPaths(texts) });
+    // Projects this bot joined (agents/<id>/projects.json); their shared memory travels with it.
+    let projects = [];
+    const pj = store.entries[`home/box/sand-data/agents/${agentId}/projects.json`];
+    if (pj?.kind === 'file' && SHA_RE.test(str(pj.sha))) {
+      const got = (await blobReader([pj.sha])).get(pj.sha);
+      try {
+        const parsed = JSON.parse(got?.toString('utf8') ?? 'null');
+        const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.projects) ? parsed.projects : Array.isArray(parsed?.joined) ? parsed.joined : [];
+        projects = list.map((p) => (typeof p === 'string' ? p : str(p?.slug))).filter((p) => /^[A-Za-z0-9._-]+$/.test(p));
+      } catch { /* unreadable projects.json: reported below as no projects */ }
+    }
+    const picks0 = selectBoxFiles(store.entries, { agentId, skillDirs: [...skillDirs], projects });
+    const picks = selectBoxFiles(store.entries, { agentId, skillDirs: [...skillDirs], projects, referenced: referencedBoxPaths(texts) });
     let total = 0;
     const toRead = [];
     for (const p of picks) {
@@ -427,7 +448,9 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     // Second pass: paths the bot's own memory names (scripts, config) are "necessary files" too.
     const memoryRefs = referencedBoxPaths(memoryTexts).filter((r) => !picks.some((p) => '/' + p.path === r));
     if (memoryRefs.length) {
-      const extra = selectBoxFiles(store.entries, { agentId: '\0', referenced: memoryRefs }).filter((p) => p.entry.kind === 'file' && p.entry.size <= maxFileBytes);
+      const have = new Set([...files.map((f) => f.boxPath), ...skipped.map((x) => x.boxPath)]);
+      const extra = selectBoxFiles(store.entries, { agentId: '\0', referenced: memoryRefs })
+        .filter((p) => p.entry.kind === 'file' && p.entry.size <= maxFileBytes && !have.has('/' + p.path) && !p.path.startsWith('home/box/sand-data/user-memory/'));
       const extraBlobs = await blobReader([...new Set(extra.map((p) => p.entry.sha))]);
       for (const p of extra) {
         const bytes = extraBlobs.get(p.entry.sha);
@@ -440,18 +463,23 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     const unresolved = refs.filter((r) => !credentialRefs.includes(r) && !files.some((f) => f.boxPath === r || f.boxPath.startsWith(r + '/') || f.boxPath === r.replace('/home/box/agent-data/', '/home/box/sand-data/')) && !skipped.some((s) => s.boxPath === r));
     note('boxStore', skipped.length || unresolved.length ? 'partial' : 'complete', {
       source: 'box store manifest', manifestUpdatedAtMs: store.updatedAtMs, manifestBytes: store.bytes,
-      captured: files.length, skipped: skipped.length, botFiles: picks0.length,
+      captured: files.length, skipped: skipped.length, botFiles: picks0.length, projects,
       unresolvedReferences: unresolved, credentialReferences: credentialRefs.length,
     });
   }
 
   const memory = files.filter((f) => f.kind === 'file' && /\/(memory|user-memory)\//.test(f.boxPath) && f.boxPath.endsWith('.md'));
-  note('memory', memory.length ? 'complete' : (store ? 'empty' : 'failed'), { files: memory.map((f) => f.boxPath), source: 'box store memory/*.md' });
+  note('memory', memory.length ? 'complete' : (store ? 'empty' : 'failed'), {
+    source: 'box store: own memory/, shared user-memory/ (every assistant\'s shard), joined projects',
+    own: memory.filter((f) => f.boxPath.includes(`/agents/${agentId}/memory/`)).length,
+    sharedUser: memory.filter((f) => f.boxPath.includes('/user-memory/')).length,
+    project: memory.filter((f) => f.boxPath.includes('/projects/')).length,
+  });
 
   return {
     format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, capturedAt: now().toISOString(),
     source: { platform: 'grok-bot', harness: bot.harness },
-    bot, sessions, transcripts, automations, todos, tasks, serverMemories, serverSkills, workflows,
+    bot, groups, sessions, transcripts, automations, todos, tasks, serverMemories, serverSkills, workflows,
     connectors: plugins, library, files, skipped, coverage,
   };
 }
