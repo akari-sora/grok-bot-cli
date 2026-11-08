@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { grokBotGatewayDescriptorPath, loadGrokBotGatewaySelection } from "../src/core/app-session.js";
 import { outcomeFromError } from "../src/core/codex/contract.js";
-import { connectGateway, createAgent, hasBackend, resolveRef, sendPrompt } from "../src/core/gateway.js";
+import { connectGateway, hasBackend, listSkills, resolveRef, sendPrompt } from "../src/core/gateway.js";
 import {
   importAccountConfig,
   readGbotConfig,
@@ -228,8 +228,9 @@ test("two accounts in one process each hit their own gateway", async (t) => {
     assert.equal(second.gatewayUrl, "http://127.0.0.1:1402");
     assert.equal(third.gatewayUrl, "http://127.0.0.1:1401");
     assert.equal(seen.filter((url) => url.includes("EnsureSandBox")).length, 2);
-    await createAgent(first, { name: "A" }).catch(() => {});
-    await createAgent(second, { name: "B" }).catch(() => {});
+    // listSkills is a box gateway call (listAgents, then getAgentWorkflows).
+    await listSkills(first).catch(() => {});
+    await listSkills(second).catch(() => {});
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1401/")));
     assert.ok(seen.some((url) => url.startsWith("http://127.0.0.1:1402/")));
     assert.equal(
@@ -865,51 +866,51 @@ test("a descriptor login uses the backend only when the app saved an access toke
   });
 });
 
+// A box gateway fake for the rebuild tests: the backend roster lists bot-1; the gateway answers by token.
+function rebuildFake(t, { ensureToken, gatewayAnswer }) {
+  const ensured = [];
+  const gateway = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    if (target.includes("EnsureSandBox")) {
+      ensured.push(JSON.parse(init.body));
+      return json({ runState: "SAND_BOX_RUN_STATE_RUNNING", gatewayUrl: "http://127.0.0.1:1410", gatewayToken: ensureToken(ensured.length) });
+    }
+    if (target.includes("/aiserver.v1.GrokBotService/")) {
+      return json(target.endsWith("/ListGrokBotAgents") ? { agents: [{ agentId: "bot-1", name: "Bot" }] } : {});
+    }
+    const method = target.split("/api/")[1];
+    gateway.push(method);
+    const bearer = String(init?.headers?.authorization ?? "");
+    const answer = gatewayAnswer(bearer);
+    if (answer) return answer;
+    return json(method === "listAgents" ? { agents: [{ id: "bot-1", name: "Bot" }] } : { workflows: [] });
+  });
+  return { ensured, gateway };
+}
+
 test("a saved-login session is rebuilt once after 401", async (t) => {
   const sub = "user_synthetic_r2_refresh";
   const scope = scopeFor(sub);
-  const home = homeWith({
-    secrets: accountsDoc({
-      [scope]: savedEntry(jwt(sub), "refresh@example.com"),
-    }, scope),
-  }, process.platform);
-  const ensured = [];
-  let gatewayCalls = 0;
+  const home = homeWith({ secrets: accountsDoc({ [scope]: savedEntry(jwt(sub), "refresh@example.com") }, scope) }, process.platform);
   let failFresh = false;
-  t.mock.method(globalThis, "fetch", async (url, init) => {
-    const target = String(url);
-    if (target.includes("EnsureSandBox")) {
-      ensured.push(JSON.parse(init.body));
-      const token = ensured.length === 1 ? "gateway-stale" : ensured.length === 2 ? "gateway-fresh" : "gateway-again";
-      return new Response(JSON.stringify({
-        runState: "SAND_BOX_RUN_STATE_RUNNING",
-        gatewayUrl: "http://127.0.0.1:1410",
-        gatewayToken: token,
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    gatewayCalls += 1;
-    const bearer = String(init?.headers?.authorization ?? "");
-    if (bearer.includes("gateway-stale") || (failFresh && bearer.includes("gateway-fresh")) || bearer.includes("gateway-again")) {
-      return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
-    }
-    if (bearer.includes("could-not-route")) {
-      return new Response("request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
-    }
-    return new Response(JSON.stringify({ id: "bot-1", name: "Bot" }), { status: 200, headers: { "content-type": "application/json" } });
+  const { ensured, gateway } = rebuildFake(t, {
+    ensureToken: (n) => (n === 1 ? "gateway-stale" : n === 2 ? "gateway-fresh" : "gateway-again"),
+    gatewayAnswer: (bearer) => (bearer.includes("gateway-stale") || (failFresh && bearer.includes("gateway-fresh")) || bearer.includes("gateway-again")
+      ? new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } }) : null),
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
     assert.equal(session.gatewayToken, "gateway-stale");
-    // createAgent stays a box gateway call for a saved login (the backend owns sends and rooms).
-    const created = await createAgent(session, { name: "Bot" });
-    assert.equal(created.id, "bot-1");
+    assert.deepEqual(await listSkills(session), []);
     assert.equal(session.gatewayToken, "gateway-fresh");
-    assert.equal(ensured.length, 2);
-    assert.equal(gatewayCalls, 2);
+    assert.equal(ensured.length, 2, "one rebuild");
+    assert.equal(gateway[0], "listAgents");
+    assert.equal(gateway.at(-1), "getAgentWorkflows");
     failFresh = true;
-    await assert.rejects(createAgent(session, { name: "Bot" }), (error) => error.status === 401 && error.kind === "auth");
-    assert.equal(ensured.length, 3);
-    assert.equal(gatewayCalls, 4);
+    await assert.rejects(listSkills(session), (error) => error.status === 401 && error.kind === "auth");
+    assert.equal(ensured.length, 3, "one more rebuild, then the error");
     assert.equal(session.gatewayToken, "gateway-again");
   });
 });
@@ -917,40 +918,18 @@ test("a saved-login session is rebuilt once after 401", async (t) => {
 test("a saved-login session is rebuilt once after a routing failure", async (t) => {
   const sub = "user_synthetic_r2_route";
   const scope = scopeFor(sub);
-  const home = homeWith({
-    secrets: accountsDoc({
-      [scope]: savedEntry(jwt(sub), "route@example.com"),
-    }, scope),
-  }, process.platform);
-  const ensured = [];
-  let gatewayCalls = 0;
-  t.mock.method(globalThis, "fetch", async (url, init) => {
-    const target = String(url);
-    if (target.includes("EnsureSandBox")) {
-      ensured.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({
-        runState: "SAND_BOX_RUN_STATE_RUNNING",
-        gatewayUrl: "http://127.0.0.1:1411",
-        gatewayToken: ensured.length === 1 ? "gateway-moved" : "gateway-moved-ok",
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    gatewayCalls += 1;
-    const bearer = String(init?.headers?.authorization ?? "");
-    if (bearer.includes("gateway-moved-ok")) {
-      return new Response(JSON.stringify({ id: "bot-1", name: "Bot" }), { status: 200 });
-    }
-    return new Response("the request could not be routed", {
-      status: 404,
-      headers: { "content-type": "text/plain" },
-    });
+  const home = homeWith({ secrets: accountsDoc({ [scope]: savedEntry(jwt(sub), "route@example.com") }, scope) }, process.platform);
+  const { ensured, gateway } = rebuildFake(t, {
+    ensureToken: (n) => (n === 1 ? "gateway-moved" : "gateway-moved-ok"),
+    gatewayAnswer: (bearer) => (bearer.includes("gateway-moved-ok") ? null
+      : new Response("the request could not be routed", { status: 404, headers: { "content-type": "text/plain" } })),
   });
   await withEnv(gatewayEnv(home), async () => {
     const session = await connectGateway();
-    const created = await createAgent(session, { name: "Bot" });
-    assert.equal(created.id, "bot-1");
+    assert.deepEqual(await listSkills(session), []);
     assert.equal(session.gatewayToken, "gateway-moved-ok");
-    assert.equal(ensured.length, 2);
-    assert.equal(gatewayCalls, 2);
+    assert.equal(ensured.length, 2, "one rebuild");
+    assert.equal(gateway.at(-1), "getAgentWorkflows");
   });
 });
 

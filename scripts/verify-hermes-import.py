@@ -1,4 +1,4 @@
-"""Hermes contracts for gbot's migration. Usage: verify-hermes-import.py [helper|official] (default: both).
+"""Hermes contracts for gbot's migration. Usage: verify-hermes-import.py [helper|official|real] (default: helper, official).
 
 helper    Offline. gbot's own import path: applyHermes/verifyHermes run the real helper ops
           (preflight, memory-add, import-history, readback) through `hermes --print-runtime-command`,
@@ -8,8 +8,14 @@ helper    Offline. gbot's own import path: applyHermes/verifyHermes run the real
 official  Downloads the official Hermes grok-bot importer, pinned by commit and Git blob IDs, and runs
           it on the grok-bot-export.json gbot bundles in the profile workspace. gbot itself does not
           use that importer; this only shows the bundled export is accepted by it.
+real      Local only (needs an installed Hermes; CI has none). The helper store ops (preflight,
+          memory-add, import-history, readback) against the installed Hermes' own MemoryStore,
+          SessionDB, cron store and skills tool, in a scratch HERMES_HOME under the Hermes root that is
+          removed afterwards. Hermes provisions a whole runtime for a HERMES_HOME outside its root, so
+          the scratch home's root is resolved first and the run refuses unless it is the existing root.
+          No profile, cron job or account state is created; `hermes cron create` is not covered.
 
-No installed Hermes account or runtime is touched. A failed check exits non-zero; nothing is skipped.
+helper and official touch no installed Hermes. A failed check exits non-zero; nothing is skipped.
 """
 from __future__ import annotations
 
@@ -18,12 +24,15 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import types
 import urllib.request
+import uuid
 
 REVISION = "13b2c1c9c8204bf333df240b2aacf98c3e6250b7"
 BLOBS = {
@@ -331,12 +340,54 @@ def official_contract() -> None:
     print(f"PASS official importer contract (bundled export only): 4 checks; upstream={REVISION}")
 
 
+def real_contract() -> None:
+    hermes = shutil.which("hermes") or sys.exit("real: no installed hermes on PATH (this contract is local only)")
+    run = lambda *args: subprocess.run([hermes, *args], check=True, capture_output=True, text=True, timeout=120).stdout  # noqa: E731
+    root = Path(run("-p", "default", "config", "path").strip().splitlines()[-1]).parent.resolve()
+    argv = json.loads(run("--print-runtime-command"))
+    repo = re.search(r"sys\.path\.insert\(0, '([^']+)'\)", argv[-1]).group(1)
+    home = root / f".gbot-contract-{uuid.uuid4().hex[:12]}"
+    # Resolve the scratch home's root without starting Hermes (no bootstrap): it must be the existing root.
+    resolved = subprocess.run(
+        [argv[0], "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from hermes_constants import get_default_hermes_root; print(get_default_hermes_root())", repo],
+        env={**os.environ, "HERMES_HOME": str(home)}, check=True, capture_output=True, text=True, timeout=60).stdout.strip()
+    if Path(resolved).resolve() != root:
+        sys.exit(f"real: HERMES_HOME={home} would resolve to the root {resolved}, not {root}; not run")
+    home.mkdir(mode=0o700)
+    try:
+        with tempfile.TemporaryDirectory(prefix="gbot-hermes-real-") as directory:
+            (Path(directory) / "fixture").mkdir()
+            out = subprocess.run(["node", str(FIXTURE), str(Path(directory) / "fixture"), "--real", hermes, str(home)],
+                                 capture_output=True, text=True, encoding="utf-8", timeout=600)
+        assert out.returncode == 0, out.stderr[-2000:]
+        result = json.loads(out.stdout)
+        first, second, rb, want = result["first"], result["second"], result["readback"], result["expected"]
+        assert set(first["memory"]) == {"added"}, first["memory"]
+        assert first["history"] == [False] * len(want["sessions"])
+        print(f"PASS real Hermes {result['versions']}: MemoryStore added {len(first['memory'])} entries, SessionDB imported {len(want['sessions'])} sessions")
+        assert set(second["memory"]) == {"present"} and second["history"] == [True] * len(want["sessions"])
+        print("PASS real Hermes: a second run adds nothing (entries present, sessions already imported)")
+        assert all(m in rb["memory"] for m in want["memory"]) and all(u in rb["user"] for u in want["user"])
+        got = {s["foreign_id"]: s for s in rb["sessions"]}
+        for s in want["sessions"]:
+            assert got[s["foreign_id"]]["messages"] == s["messages"], s
+            assert got[s["foreign_id"]]["digest"] == s["digest"], f"history digest differs for {s['foreign_id']}"
+        assert {"ci-fixer", "same-name"} <= set(rb["skills"]), rb["skills"]
+        assert rb["cron"] == [] and isinstance(rb["timezone"], str) and rb["limits"]["memory"] > 0
+        print("PASS real Hermes readback: memory and user entries, per-session content digests, skills, cron store, time zone and limits")
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    assert not home.exists()
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["helper", "official"]
-    unknown = set(which) - {"helper", "official"}
+    unknown = set(which) - {"helper", "official", "real"}
     if unknown:
-        sys.exit("usage: verify-hermes-import.py [helper|official]")
+        sys.exit("usage: verify-hermes-import.py [helper|official|real]")
     if "helper" in which:
         helper_contract()
     if "official" in which:
         official_contract()
+    if "real" in which:
+        real_contract()

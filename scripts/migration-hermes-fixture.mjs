@@ -2,14 +2,18 @@
 //   (no flag)          prints the grok-bot-export.json the Hermes destination bundles, for the
 //                      official importer contract;
 //   --hermes BIN       imports it twice through gbot's own path (applyHermes + verifyHermes, the
-//                      helper ops over `BIN --print-runtime-command`) and prints both reports.
+//                      helper ops over `BIN --print-runtime-command`) and prints both reports;
+//   --real BIN HOME    runs the helper store ops twice against the installed Hermes with HERMES_HOME=HOME
+//                      (a scratch home under the Hermes root; no profile or cron job is created) and
+//                      prints what Hermes read back next to what the plan expects.
 // Used by scripts/verify-hermes-import.py.
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { writeArchive, openArchive } from '../src/core/migration-archive.js';
 import { Hermes, applyHermes, buildHermesPlan, inspectHermes, verifyHermes } from '../src/core/migration-hermes.js';
 
-const [, , out, flag, bin] = process.argv;
+const [, , out, flag, bin, scratchHome] = process.argv;
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const file = (boxPath, text, reason) => { const bytes = Buffer.from(text); return { boxPath, reason, kind: 'file', size: bytes.length, sha256: sha(bytes), mode: 420, bytes }; };
 const entries = (texts) => texts.map(([role, text], i) => {
@@ -51,6 +55,23 @@ if (flag === '--hermes') {
   };
   const first = await once();
   process.stdout.write(JSON.stringify({ first, second: await once() }));
+} else if (flag === '--real') {
+  const hermes = new Hermes({ bin });
+  const home = scratchHome;
+  const preflight = await hermes.preflight(await hermes.rootDir());
+  const plan = buildHermesPlan(archive, { profile: 'grok-contract', profileDir: home });
+  for (const s of plan.skills) for (const f of s.files) { mkdirSync(dirname(f.dest), { recursive: true }); writeFileSync(f.dest, f.bytes); }
+  const entries = [...plan.user.map((content) => ({ target: 'user', content })), ...plan.memory.map((content) => ({ target: 'memory', content }))];
+  const sessions = plan.history.map(({ digest, ...s }) => ({ ...s, path: plan.historyPath, cwd: home }));
+  const once = async () => ({
+    memory: (await hermes.helper('memory-add', { memory_char_limit: plan.limits.memory, user_char_limit: plan.limits.user, entries }, { home })).results.map((r) => r.status),
+    history: (await hermes.helper('import-history', { profile: 'grok-contract', sessions }, { home })).results.map((r) => r.already_imported),
+  });
+  const first = await once(), second = await once();
+  const rb = await hermes.helper('readback', { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath }, { home });
+  process.stdout.write(JSON.stringify({ versions: preflight.versions, first, second,
+    readback: { memory: rb.memory, user: rb.user, limits: rb.limits, timezone: rb.timezone, cron: rb.cron, skills: rb.skills, sessions: rb.sessions },
+    expected: { memory: plan.memory, user: plan.user, sessions: plan.history.map((s) => ({ foreign_id: s.foreign_id, messages: s.messages.length, digest: s.digest })) } }));
 } else {
   const plan = buildHermesPlan(archive, { profileDir: join(out, 'profile') });
   const exportPath = [...plan.docs.keys()].find((p) => p.endsWith('grok-bot-export.json'));

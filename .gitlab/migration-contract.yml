@@ -4,6 +4,7 @@
 #    store APIs the helper calls. It checks gbot's calls and JSON contract, not real store behaviour.
 # 2. official (network, test only): the official Hermes grok-bot importer, pinned by commit AND Git
 #    blob IDs, accepts the grok-bot-export.json gbot bundles. gbot does not import through it.
+# The third mode, `real` (the installed Hermes' own stores), needs a Hermes install and runs locally only.
 # A failed download/check/import fails the job; nothing is skipped.
 migration:hermes-contract:
   tags: [$LINUX_RUNNER_TAG]

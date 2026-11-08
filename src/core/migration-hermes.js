@@ -16,7 +16,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { MigrationError, parseBytes, regularBytes } from './migration.js';
 import { HERMES_HELPER } from './migration-hermes-helper.js';
@@ -29,6 +29,8 @@ const DEFAULT_USER_LIMIT = 1375;
 const ENTRY_DELIMITER = '\n§\n';
 const HISTORY_SESSION_BYTES = 4 * 1024 * 1024;
 const HISTORY_SESSION_MESSAGES = 9000;
+// At most 3 MiB as JSON even when every UTF-16 unit is escaped (\u0000): one part fits one session.
+const HISTORY_PART_CHARS = 512 * 1024;
 const SKILL_CATEGORY = 'grok-bot-imports';
 const MARKER = '.gbot-migration.json';
 const RUNTIME_MARKER = "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)";
@@ -80,6 +82,20 @@ function historyDigest(messages) {
   const h = createHash('sha256');
   for (const m of messages) h.update(`${m.role}\n${Buffer.byteLength(m.content)}\n${m.content}\n`);
   return h.digest('hex');
+}
+
+/** A message larger than one import session, as consecutive messages marked with their part. */
+function splitMessage(m) {
+  if (Buffer.byteLength(JSON.stringify(m)) <= HISTORY_SESSION_BYTES) return [m];
+  const pieces = [];
+  for (let at = 0; at < m.content.length;) {
+    let end = Math.min(m.content.length, at + HISTORY_PART_CHARS);
+    const unit = m.content.charCodeAt(end - 1);
+    if (end < m.content.length && unit >= 0xd800 && unit <= 0xdbff) end--; // keep a surrogate pair whole
+    pieces.push(m.content.slice(at, end));
+    at = end;
+  }
+  return pieces.map((content, i) => ({ ...m, content: `[Grok Bot message, part ${i + 1}/${pieces.length}]\n${content}` }));
 }
 
 function historySessions(messages, title, foreignId) {
@@ -190,8 +206,11 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
     if (other) omit(`${other} row(s) of ${label} that are not user or assistant text`, 'tool calls and system events are not chat turns; Hermes sessions hold user and assistant messages', 'they stay in the private archive (transcript/*.raw.jsonl)');
     if (held) omit(`${held} message(s) of ${label}`, SECRET_REASON, SECRET_ALT);
     if (t.unreadable) omit(`${t.unreadable} unreadable row(s) of ${label}`, 'the Grok Bot server could not return them', 'capture again');
+    let split = 0;
+    const imported = messages.flatMap((m) => { const parts = splitMessage(m); if (parts.length > 1) split++; return parts; });
+    if (split) omit(`${split} message(s) of ${label} larger than one Hermes import`, 'split into consecutive messages marked "[Grok Bot message, part i/n]"', `the whole text is in ${join(base, 'history', key + '.md')}`);
     const sessionTitle = `Grok Bot · ${botName} · ${main ? 'history' : label}`;
-    history.push(...historySessions(messages, sessionTitle, `${cap.bot.id}:${main ? 'main' : key}`));
+    history.push(...historySessions(imported, sessionTitle, `${cap.bot.id}:${main ? 'main' : key}`));
     docs.set(join(base, 'history', key + '.md'), Buffer.from(`# ${sessionTitle}\n\n` + messages.map((m) =>
       `## ${m.role === 'user' ? 'You' : 'Bot'} · ${m.timestamp ? new Date(m.timestamp * 1000).toISOString() : 'time unknown'}\n\n${m.content}\n`).join('\n')));
     if (main) {
@@ -440,12 +459,7 @@ export class Hermes {
    * existing Hermes root (a new directory as HERMES_HOME would make Hermes provision a runtime there).
    */
   async preflight(root) {
-    const pf = await this.helper('preflight', {}, { home: root });
-    const limits = pf.import_limits ?? {};
-    if ((limits.session_messages ?? Infinity) < HISTORY_SESSION_MESSAGES || (limits.session_bytes ?? Infinity) < HISTORY_SESSION_BYTES) {
-      throw new MigrationError('This Hermes imports smaller sessions than gbot writes; update gbot or Hermes.');
-    }
-    return pf;
+    return this.helper('preflight', {}, { home: root });
   }
 }
 
@@ -462,10 +476,12 @@ export async function inspectHermes(hermes, { profile }) {
 /**
  * Write `bytes` to `path` under `root` without following links: every parent from `root` down is
  * a real directory and an existing file is a regular file with one link. A new file is created
- * exclusively; a different existing file is replaced only when `mayUpdate(currentSha256)` allows
- * it, otherwise it is left as a 'conflict'. Returns 'written' | 'present' | 'updated' | 'conflict'.
+ * exclusively. A different existing file is read, judged and rewritten through one descriptor, so
+ * `mayUpdate(currentSha256)` decides about the very inode that is written; when it refuses, or the
+ * path no longer names that inode (the file was saved over meanwhile), it is a 'conflict'.
+ * Returns 'written' | 'present' | 'updated' | 'conflict'.
  */
-function writeInside(root, path, bytes, mode, mayUpdate) {
+export function writeInside(root, path, bytes, mode, mayUpdate) {
   const parts = relative(root, path).split(sep);
   if (parts.some((p) => !p || p === '..')) throw new MigrationError('Refusing to write outside the profile: ' + path);
   let dir = realpathSync(root);
@@ -476,28 +492,41 @@ function writeInside(root, path, bytes, mode, mayUpdate) {
     if (!st.isDirectory() || st.isSymbolicLink()) throw new MigrationError('Refusing to write through a link or a non-directory: ' + dir);
   }
   const target = join(dir, parts.at(-1));
-  let fd, status = 'written';
+  const sameInode = (st) => { try { const now = lstatSync(target); return now.ino === st.ino && now.dev === st.dev; } catch { return false; } };
+  const unchanged = (fd) => { const st = fstatSync(fd); return st.isFile() && st.nlink === 1 && sameInode(st) && realpathSync(dir) === dir; };
+  let fd;
   try { fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, mode); } catch (e) {
     if (e.code !== 'EEXIST') throw e;
-    const st = lstatSync(target);
-    if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1) throw new MigrationError('Refusing to write over a link or a non-file: ' + target);
-    const current = regularBytes(target, st.size);
-    if (current.equals(bytes)) return 'present';
-    if (!mayUpdate(sha256(current))) return 'conflict';
-    fd = openSync(target, constants.O_WRONLY | NOFOLLOW | (constants.O_NONBLOCK ?? 0));
-    status = 'updated';
+  }
+  if (fd !== undefined) {
+    try {
+      // A parent swapped for a link after the checks: nothing is written.
+      if (!unchanged(fd)) throw new MigrationError('Refusing to write: the destination changed while writing ' + target);
+      writeFileSync(fd, bytes);
+      fchmodSync(fd, mode);
+    } finally { closeSync(fd); }
+    return 'written';
+  }
+  let writable = true;
+  try { fd = openSync(target, constants.O_RDWR | NOFOLLOW | (constants.O_NONBLOCK ?? 0)); } catch (e) {
+    if (e.code === 'ELOOP' || e.code === 'EMLINK') throw new MigrationError('Refusing to write over a link or a non-file: ' + target);
+    if (e.code !== 'EACCES') throw e;
+    fd = openSync(target, constants.O_RDONLY | NOFOLLOW | (constants.O_NONBLOCK ?? 0)); // read-only: compared, never rewritten
+    writable = false;
   }
   try {
-    const st = fstatSync(fd), now = lstatSync(target);
-    // A parent or the file swapped for a link after the checks: nothing is written.
-    if (!st.isFile() || st.nlink !== 1 || st.ino !== now.ino || st.dev !== now.dev || realpathSync(dir) !== dir) {
-      throw new MigrationError('Refusing to write: the destination changed while writing ' + target);
-    }
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1 || !sameInode(st)) throw new MigrationError('Refusing to write over a link or a non-file: ' + target);
+    const current = Buffer.alloc(st.size);
+    for (let at = 0, n; at < st.size; at += n) if (!(n = readSync(fd, current, at, st.size - at, at))) break;
+    if (current.equals(bytes)) return 'present';
+    if (!writable || !mayUpdate(sha256(current)) || !unchanged(fd)) return 'conflict';
     ftruncateSync(fd, 0);
-    writeFileSync(fd, bytes);
+    for (let at = 0; at < bytes.length;) at += writeSync(fd, bytes, at, bytes.length - at, at);
     fchmodSync(fd, mode);
+    // Saved over between the last check and the write: the bytes went to the replaced inode only.
+    return unchanged(fd) ? 'updated' : 'conflict';
   } finally { closeSync(fd); }
-  return status;
 }
 
 function readMarker(path) {
@@ -505,7 +534,7 @@ function readMarker(path) {
 }
 
 /** The text Hermes compares when it decides whether SOUL.md is still its seeded default. */
-const normSoul = (t) => t.replace(/\r\n?/g, '\n').replace(/^﻿/, '').trim();
+const normSoul = (t) => t.replace(/\r\n?/g, '\n').replace(/^\ufeff/, '').trim();
 
 /**
  * Apply a plan. Every step is idempotent: re-running after a failure resumes where it stopped.
@@ -519,6 +548,14 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   const step = (name, status, detail = {}) => { steps.push({ step: name, status, ...detail }); onProgress(`${name}: ${status}`); };
   const dest = await inspectHermes(hermes, { profile: plan.profile });
   const pf = await hermes.preflight(dest.root);
+  // Every planned session must fit one import of this Hermes, before anything changes.
+  const limit = pf.import_limits ?? {};
+  for (const s of plan.history) {
+    const size = Buffer.byteLength(JSON.stringify(s));
+    if (s.messages.length > (limit.session_messages ?? Infinity) || size > (limit.session_bytes ?? Infinity)) {
+      throw new MigrationError(`History session "${s.title}" (${s.messages.length} messages, ${size} bytes) is larger than this Hermes imports (${limit.session_messages} messages, ${limit.session_bytes} bytes); nothing was changed.`);
+    }
+  }
   const botId = archive.capture.bot.id;
   const markerPath = join(plan.base, MARKER);
   const marker = dest.profileExists ? readMarker(markerPath) : null;
@@ -623,6 +660,17 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   return { profile: plan.profile, profileDir, steps };
 }
 
+/** Null when `path` is a regular file with this sha256, else what is wrong with it. */
+function fileIssue(path, digest) {
+  let st;
+  try { st = lstatSync(path); } catch { return `${path}: missing`; }
+  if (!st.isFile()) return `${path}: not a regular file`;
+  return sha256(readFileSync(path)) === digest ? null : `${path}: digest differs`;
+}
+
+/** Every entry under `dir` that is not a directory (links are listed, not followed). */
+const listTree = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? listTree(join(dir, e.name)) : [join(dir, e.name)]));
+
 /** Read the destination back through Hermes and compare with the plan. */
 export async function verifyHermes(hermes, archive, plan) {
   const checks = [];
@@ -636,8 +684,15 @@ export async function verifyHermes(hermes, archive, plan) {
   const missingMem = plan.memory.filter((e) => !rb.memory.includes(e));
   check('user-facts', !missingUser.length && !rb.user_prompt.includes('[BLOCKED'), { expected: plan.user.length, missing: missingUser });
   check('memory', !missingMem.length && !rb.memory_prompt.includes('[BLOCKED'), { expected: plan.memory.length, missing: missingMem });
+  // The files Hermes loads, byte for byte, and nothing else in a migrated skill folder.
   const missingSkills = plan.skills.filter((s) => !rb.skills.includes(s.slug) && !rb.skills.includes(skillName(s)));
-  check('skills', !missingSkills.length, { expected: plan.skills.length, visibleToHermes: plan.skills.length - missingSkills.length, missing: missingSkills.map((s) => s.slug) });
+  const skillIssues = [];
+  for (const s of plan.skills) {
+    const planned = new Set(s.files.map((f) => f.dest));
+    for (const f of s.files) { const issue = fileIssue(f.dest, sha256(f.bytes)); if (issue) skillIssues.push(issue); }
+    if (existsSync(s.dir)) for (const p of listTree(s.dir)) if (!planned.has(p)) skillIssues.push(`${p}: not part of the migrated skill`);
+  }
+  check('skills', !missingSkills.length && !skillIssues.length, { expected: plan.skills.length, visibleToHermes: plan.skills.length - missingSkills.length, missing: missingSkills.map((s) => s.slug), issues: skillIssues });
   const cronIssues = [];
   for (const job of plan.cron) {
     const found = rb.cron.filter((j) => String(j.name ?? '').endsWith(job.tag));
@@ -660,12 +715,11 @@ export async function verifyHermes(hermes, archive, plan) {
     else if (got.digest !== s.digest) histIssues.push(`${s.foreign_id}: message content differs from the archive`);
   }
   check('history', !histIssues.length, { sessions: plan.history.length, messages: plan.history.reduce((n, s) => n + s.messages.length, 0), issues: histIssues });
+  // A conflict left at apply time (or a later change) shows here, so the import is not ok.
   const fileIssues = [];
-  for (const f of plan.files) {
-    if (!existsSync(f.dest)) { fileIssues.push(`${f.dest}: missing`); continue; }
-    if (sha256(readFileSync(f.dest)) !== f.destSha256) fileIssues.push(`${f.dest}: digest differs`);
-  }
-  check('files', !fileIssues.length, { expected: plan.files.length, issues: fileIssues });
+  for (const f of plan.files) { const issue = fileIssue(f.dest, f.destSha256); if (issue) fileIssues.push(issue); }
+  for (const [path, bytes] of plan.docs) { const issue = fileIssue(path, sha256(bytes)); if (issue) fileIssues.push(issue); }
+  check('files', !fileIssues.length, { expected: plan.files.length, docs: plan.docs.size, issues: fileIssues });
   return { ok: checks.every((c) => c.ok), checks };
 }
 
