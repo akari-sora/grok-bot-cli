@@ -66891,6 +66891,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         const SCOPE_RE = /^[0-9a-f]{64}$/;
         const GROK_BOT_SERVICE = "/aiserver.v1.GrokBotService/";
+        const DASHBOARD_SERVICE = "/aiserver.v1.DashboardService/";
         const ROOM_TIMEOUT_MS = 45000;
         const ROOM_MEMBERS_TIMEOUT_MS = 20000;
         const backendAuths = new WeakMap();
@@ -67028,7 +67029,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             });
         }
-        async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false } = {}) {
+        async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false, service = GROK_BOT_SERVICE } = {}) {
             assertGatewayActive(signal);
             let token, url;
             try {
@@ -67037,7 +67038,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 url = (0, _url_policy_js__rspack_import_8.Re)(backendBase(), {
                     kind: "backend",
                     ignoreAllowAny: credential.appLogin
-                }) + GROK_BOT_SERVICE + rpc;
+                }) + service + rpc;
             } catch (error) {
                 const failed = scrubOutbound(error, token ? [
                     token
@@ -67118,6 +67119,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     timeoutMs
                 } : {}
             });
+        }
+        async function usageStatus(session, { signal } = {}) {
+            const data = await backendCall(session, "GetSandUsageStatus", {}, {
+                signal,
+                service: DASHBOARD_SERVICE
+            });
+            const text = (value)=>typeof value === "string" && value ? value : null;
+            const percent = Number(data?.usagePercent ?? 0);
+            return {
+                usagePercent: Number.isFinite(percent) ? percent : 0,
+                periodStart: text(data?.currentPeriodStart),
+                resetsAt: text(data?.nextResetTimestampUtc),
+                hasAvailableUsage: data?.hasAvailableUsage === true,
+                plan: text(data?.cursorPlanName),
+                planLabel: text(data?.grokPlanLabel),
+                unified: data?.isUnified === true,
+                onDemandEligible: data?.onDemandSettings?.eligible === true
+            };
         }
         async function setAutomationEnabled(session, { agentId, automationId, isEnabled, timeZone = deviceTimeZone() }) {
             return backendCall(session, "SetGrokBotAgentAutomationEnabled", {

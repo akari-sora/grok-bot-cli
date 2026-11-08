@@ -27,6 +27,7 @@
 - **Move to Hermes**：一個 Grok Bot bot，在你的電腦上跑 `gbot migrate`，每條命令先徵求同意；可以用 Grok Bot 範本分享。[docs/move-to-hermes.zh-TW.md](docs/move-to-hermes.zh-TW.md)
 - **Grok Bot 0.78：bot 在伺服器上執行**：送訊、名單、群組、修改、刪除、核准與 `bots create` 都改走 0.78 App 用的後端 RPC。[Grok Bot 0.78](#grok-bot-078)
 - **多個登入**：`gbot accounts` 列出 App 登入過的每個帳號，可設別名、預設，並用 `gbot config export`／`import`（不含 token）搬到另一台機器。[參考](docs/reference.zh-TW.md#多個登入)
+- **這週用量**（`gbot usage`）：一個登入這週已用掉多少內含的 Grok Bot 用量、何時重置、什麼方案，讀法跟 App 相同（只讀）。用到 80% 以上時會指向 `gbot migrate`。[參考](docs/reference.zh-TW.md#命令總覽)
 - **喚醒睡眠中的雲端電腦**：呼叫遇到 `BOX_ASLEEP` 時自動喚醒並重試一次；也有 `gbot wake` 與 `gbot wake --check`。[FORK.zh-TW.md](FORK.zh-TW.md#喚醒睡眠中的雲端電腦gbot-wake)
 - **給腳本用的送訊與讀取**：`send --stdin`（UTF-8 原樣送出，不出現在行程參數裡）、`--json thread --normalized`、`thread --after`，以及送達狀態不明時用的 `gbot reconcile`。[FORK.zh-TW.md](FORK.zh-TW.md#fork-命令)
 - **Wear OS 手錶**：`gbot wear pair` 把一個登入的 gateway session 送到同一個 Wi-Fi 上的 [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) 手錶 App。[FORK.zh-TW.md](FORK.zh-TW.md#配對-wear-os-手錶gbot-wear-pair)

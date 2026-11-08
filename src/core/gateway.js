@@ -944,6 +944,7 @@ async function performGatewayCall(session, method, body = {}, { signal } = {}) {
 // ---------------------------------------------------------------------------------------------
 const SCOPE_RE = /^[0-9a-f]{64}$/;
 const GROK_BOT_SERVICE = "/aiserver.v1.GrokBotService/";
+const DASHBOARD_SERVICE = "/aiserver.v1.DashboardService/";
 const ROOM_TIMEOUT_MS = 45_000;
 const ROOM_MEMBERS_TIMEOUT_MS = 20_000;
 const backendAuths = new WeakMap();
@@ -1061,21 +1062,22 @@ function backendFailure(rpc, res, data, token) {
 }
 
 /**
- * One unary GrokBotService call. `send` marks a call that may land: the caller's signal stops it only
- * before transmission, and a timeout or transport loss says the effect is unknown.
+ * One unary backend call, GrokBotService unless `service` says otherwise. `send` marks a call that may
+ * land: the caller's signal stops it only before transmission, and a timeout or transport loss says the
+ * effect is unknown.
  * @param {any} session
  * @param {string} rpc
  * @param {Record<string, unknown>} [body]
- * @param {{ signal?: AbortSignal, timeoutMs?: number, headers?: Record<string, string>, send?: boolean }} [options]
+ * @param {{ signal?: AbortSignal, timeoutMs?: number, headers?: Record<string, string>, send?: boolean, service?: string }} [options]
  */
-async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false } = {}) {
+async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false, service = GROK_BOT_SERVICE } = {}) {
   assertGatewayActive(signal);
   let token, url;
   try {
     const credential = backendCredential(session);
     token = credential.token;
     // The app login token is an account credential gbot reads itself, like EnsureSandBox.
-    url = assertAllowedCredentialUrl(backendBase(), { kind: "backend", ignoreAllowAny: credential.appLogin }) + GROK_BOT_SERVICE + rpc;
+    url = assertAllowedCredentialUrl(backendBase(), { kind: "backend", ignoreAllowAny: credential.appLogin }) + service + rpc;
   } catch (error) {
     const failed = scrubOutbound(error, token ? [token] : []);
     // Nothing left the machine.
@@ -1149,6 +1151,29 @@ export const BACKEND_READ_RPCS = Object.freeze([
 export async function backendRead(session, rpc, body = {}, { signal, timeoutMs } = {}) {
   if (!BACKEND_READ_RPCS.includes(rpc)) throw new GatewayError(rpc + " is not a read-only migration RPC.", { code: "RPC_NOT_ALLOWED" });
   return backendCall(session, rpc, body, { signal, ...(timeoutMs ? { timeoutMs } : {}) });
+}
+
+/**
+ * This period's Grok Bot usage, read as the app reads it: DashboardService/GetSandUsageStatus `{}`.
+ * The only DashboardService RPC gbot calls, and a read. Only the fields below leave this function;
+ * the rest of the answer stays here (`onDemandSettings.dashboardUrl` carries the user id). Connect
+ * JSON leaves out false and 0, so a missing flag is false and a missing percent is 0.
+ * @param {any} session @param {{ signal?: AbortSignal }} [options]
+ */
+export async function usageStatus(session, { signal } = {}) {
+  const data = await backendCall(session, "GetSandUsageStatus", {}, { signal, service: DASHBOARD_SERVICE });
+  const text = (value) => (typeof value === "string" && value ? value : null);
+  const percent = Number(data?.usagePercent ?? 0);
+  return {
+    usagePercent: Number.isFinite(percent) ? percent : 0,
+    periodStart: text(data?.currentPeriodStart),
+    resetsAt: text(data?.nextResetTimestampUtc),
+    hasAvailableUsage: data?.hasAvailableUsage === true,
+    plan: text(data?.cursorPlanName),
+    planLabel: text(data?.grokPlanLabel),
+    unified: data?.isUnified === true,
+    onDemandEligible: data?.onDemandSettings?.eligible === true,
+  };
 }
 
 /**

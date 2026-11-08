@@ -30,6 +30,8 @@ gbot config import gbot-accounts.json --replace
 gbot doctor
 gbot wake
 gbot wake --check --json
+gbot usage
+gbot usage --account work --json
 
 # bot、群組與 skill
 gbot bots list
@@ -85,6 +87,8 @@ gbot wear pair 192.168.1.23:40123
 
 `update` 欄位：`--name`、`--description`（App 的 Instructions 欄）、`--title`、`--avatar-shape`、`--avatar-color`、`--notify on|off`、`--hidden on|off`。`gbot skills` 管理這個登入所有 bot 共用的同一個 Skills 庫；`remove` 接受 id 或完整名稱，團隊、plugin 與排程來源的項目會被拒絕。`--normalized` 必須搭配 `--json`，回傳 `{ target, messages: [{ id, role, text }] }`；bot 的回覆常常是 `role: "unknown"`，那仍然是回覆。`send --stdin`、`thread --after` 與 `bots template` 的完整說明見 [FORK.zh-TW.md](../FORK.zh-TW.md#fork-命令)。
 
+`gbot usage` 跟 App 一樣讀取一個登入這週的 Grok Bot 用量（`aiserver.v1.DashboardService/GetSandUsageStatus`，只讀，不會喚醒雲端電腦）：內含用量已用的百分比、何時重置（本地時間）、方案，以及這個登入是否符合 on-demand 用量資格。`--json` 回傳 `{ account, usagePercent, periodStart, resetsAt, hasAvailableUsage, plan, planLabel, unified, onDemandEligible }`。用到 80% 以上，或內含用量已用完時，會多印一行 `Moving bots elsewhere: gbot migrate (docs/migration.md).`
+
 ## 多個登入
 
 ```sh
@@ -130,6 +134,7 @@ Grok Bot 0.78.4（2026-11-03）把每個 bot 都放到伺服器上執行。2026-
 | --- | --- |
 | 大部分命令 | 0 完成（送出可能是 `delivery: "unknown"` 但仍是 0）；1 參數錯誤或 gateway 失敗（加 `--json` 時，`send`、`wake` 與 `codex` 命令會把失敗以帶 `exitCode` 的 JSON 印在 stdout）；2 未知選項，包括寫在子命令前面的 `--account` |
 | `gbot wake` | 0 運作中，或 `--check` 成功；2 參數錯誤；3 喚醒失敗；4 雲端電腦就緒前逾時 |
+| `gbot usage` | 0 讀取成功；2 選不到登入（`--account` 不存在或對到多個）；1 其他錯誤，例如後端失敗或沒有存下的 access token |
 | `gbot bots template` | 0 看到範本了，或 `--status`、`--show`、`--publish` 成功；3 訊息已送出（或送達未知）但 `--wait` 內沒有出現範本：稍後跑 `--status`，不要再送；1 被拒絕，或什麼都沒送出 |
 | `gbot migrate` | 0 搬完並驗證；3 搬了但有項目沒驗過（或 `--move-routines` 有排程沒關掉）；2 選項不合法（什麼都沒做）；1 其他錯誤，包括沒加 `--yes`（什麼都沒匯入） |
 | `gbot config import` | 0 已匯入；2 檔案無效（什麼都沒寫）；3 已匯入，但有別名對應的登入不在這台機器上 |
