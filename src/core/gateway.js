@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import { z } from "zod";
 import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
 import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
 import { ensureSandboxHeaders, headersFromEnsureSandbox, headersFromEnv, mergeGatewayHeaders, normalizeHeaderMap, requestHeaders } from "./headers.js";
@@ -1132,6 +1133,8 @@ export const BACKEND_READ_RPCS = Object.freeze([
   "ResolveGrokBotAttachmentReads",
   "ReadGrokBotAgentAttachmentChunk",
   "GetGrokBotRuntimeCapabilities",
+  "GetGrokBotTemplateForSourceAgent",
+  "GetGrokBotTemplateVersion",
   "ListSandBoxStoreObjects",
   "StatSandBoxStoreObject",
   "PresignSandBoxStoreReads",
@@ -1381,19 +1384,36 @@ function refusedSend(refusal, rec, secrets) {
 // Connect codes that do not prove the server turned the message away: it may have landed.
 const MAYBE_LANDED_CODES = new Set(["canceled", "deadline_exceeded", "unavailable", "unknown", "internal"]);
 
+// The GrokBotUserMessageInitiator values gbot sends. The app sends TEMPLATE_SHARE when it asks a bot
+// to create or update its shared template.
+const SEND_INITIATORS = new Map([
+  ["user", "GROK_BOT_USER_MESSAGE_INITIATOR_USER"],
+  ["template_share", "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"],
+]);
+
 // SendGrokBotUserMessage, the call the 0.78.x app makes. Same delivery rules as the gateway send:
 // a definite answer is accepted or rejected; a timeout, transport loss, 408, 499 (canceled), 5xx, or a
 // Connect code in MAYBE_LANDED_CODES stays unknown and is never resent. Like the app, an unknown send
 // asks GetGrokBotSendStatus for the same nonce, but only to settle the answer: unlike the app, gbot
 // never resends after NOT_FOUND.
 async function backendSend(session, rec, prompt, extra, clientNonce) {
+  const initiator = SEND_INITIATORS.get(extra.initiator ?? "user");
+  if (!initiator) {
+    const error = new GatewayError("Unknown send initiator \"" + extra.initiator + "\". Use: " + [...SEND_INITIATORS.keys()].join(" "), {
+      method: "SendGrokBotUserMessage",
+      code: "INVALID_INITIATOR",
+    });
+    // Nothing left the machine.
+    error.delivery = "rejected";
+    throw error;
+  }
   const body = {
     agentId: rec.id,
     messageId: clientNonce,
     text: prompt,
     sentAtMs: String(Date.now()),
     source: "GROK_BOT_CLIENT_SURFACE_DESKTOP",
-    initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_USER",
+    initiator,
     sendSource: "GROK_BOT_SEND_SOURCE_CHAT",
     ...(extra.replyToId ? { replyToId: extra.replyToId } : {}),
   };
@@ -1869,7 +1889,7 @@ function transcriptRows(data) {
  * @param {any} session
  * @param {string} ref
  * @param {string} prompt
- * @param {{ signal?: AbortSignal, clientNonce?: string, replyToId?: string }} [extra]
+ * @param {{ signal?: AbortSignal, clientNonce?: string, replyToId?: string, initiator?: "user" | "template_share" }} [extra]
  * @returns {Promise<{ target: any, result: Record<string, any>, delivery: "accepted" | "unknown", messageId?: string, clientNonce: string }>}
  */
 export async function sendPrompt(session, ref, prompt, extra = {}) {
@@ -2075,6 +2095,225 @@ export async function reconcileDelivery(session, ref, clientNonce) {
     scanned: entries.length,
     ...sendStatusField,
   };
+}
+
+// The texts the Grok Bot 0.78 app sends a bot, with the TEMPLATE_SHARE initiator, to create or update
+// its shared template. The bot builds the template on the server.
+const TEMPLATE_CREATE_TEXT = "Create a public template of yourself that I can share with somebody else";
+const TEMPLATE_UPDATE_TEXT = "Update the shared template of yourself.";
+
+// The bot a template is read or made for. The app has no box path for templates: a session without an
+// access token, a box-only bot (or a box roster) and a group are refused before anything is sent.
+async function templateBot(session, ref, signal) {
+  if (!hasBackend(session)) {
+    throw new GatewayError("Bot templates need the Grok Bot backend, and this session has no access token. Sign in to the Grok Bot app (0.78+) on this computer; GROK_BOT_GATEWAY_URL and GROK_BOT_GATEWAY_TOKEN must be unset.", { code: "NO_ACCESS_TOKEN" });
+  }
+  const rec = await resolveRef(session, ref, { signal });
+  if (boxOnlyRecords.has(rec)) {
+    throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") is on the box roster only; Grok Bot shares templates of server-hosted bots only.", { code: "TEMPLATE_NOT_SERVER_BOT" });
+  }
+  if (rec.isGroup) {
+    throw new GatewayError(rec.name + " (" + rec.id + ") is a group; a template is shared for one bot.", { code: "TEMPLATE_NOT_BOT" });
+  }
+  return rec;
+}
+
+// A GrokBotTemplate in gbot's shape, or null when there is none. int64 fields arrive as strings and
+// proto3 JSON leaves false out.
+function templateFrom(template) {
+  if (!template || typeof template !== "object" || typeof template.shareId !== "string" || !template.shareId) return null;
+  return {
+    shareId: template.shareId,
+    link: "https://x.ai/bot/" + encodeURIComponent(template.shareId),
+    name: typeof template.name === "string" ? template.name : "",
+    published: template.published === true,
+    visibility: typeof template.visibility === "string" ? template.visibility : "",
+    activeVersion: Number(template.activeVersion) || 0,
+    updatedAtMs: Number(template.updatedAtMs) || 0,
+  };
+}
+
+async function readTemplate(session, rec, signal) {
+  const data = await backendRead(session, "GetGrokBotTemplateForSourceAgent", { sourceAgentId: rec.id }, { signal });
+  return {
+    template: templateFrom(data?.template),
+    ...(typeof data?.exportPolicy === "string" && data.exportPolicy ? { exportPolicy: data.exportPolicy } : {}),
+    hasTeam: data?.hasTeam === true,
+  };
+}
+
+/** The bot's shared template, read only. @param {any} session @param {string} ref @param {{ signal?: AbortSignal }} [options] */
+export async function getBotTemplate(session, ref, { signal } = {}) {
+  const rec = await templateBot(session, ref, signal);
+  return { target: rec, ...(await readTemplate(session, rec, signal)) };
+}
+
+/**
+ * Asks the bot to create its template, or to update the one it has, as the app does: one chat message
+ * with the TEMPLATE_SHARE initiator. A rejected message is an error. After an accepted or unknown one,
+ * GetGrokBotTemplateForSourceAgent is read every pollSeconds until a template appears (or one newer
+ * than before), for at most waitSeconds. The message is never sent again; `template` is null when none
+ * was seen in time.
+ * @param {any} session
+ * @param {string} ref
+ * @param {{ waitSeconds?: number, pollSeconds?: number, signal?: AbortSignal, clientNonce?: string }} [options]
+ */
+export async function shareBotTemplate(session, ref, { waitSeconds = 600, pollSeconds = 10, signal, clientNonce = randomUUID() } = {}) {
+  const rec = await templateBot(session, ref, signal);
+  const before = (await readTemplate(session, rec, signal)).template;
+  let delivery;
+  try {
+    const sent = await backendSend(session, rec, before ? TEMPLATE_UPDATE_TEXT : TEMPLATE_CREATE_TEXT, { signal, initiator: "template_share" }, clientNonce);
+    delivery = sent.delivery;
+  } catch (err) {
+    if (err && typeof err === "object") {
+      if (err.targetId == null) err.targetId = rec.id;
+      if (err.clientNonce == null) err.clientNonce = clientNonce;
+    }
+    if (err?.delivery !== "unknown") throw err;
+    debug("template message delivery unknown, waiting for the template without resending: " + (err instanceof Error ? err.message : String(err)));
+    delivery = "unknown";
+  }
+  const fresh = (t) => Boolean(t) && (!before || t.shareId !== before.shareId || t.updatedAtMs > before.updatedAtMs);
+  const deadline = Date.now() + Math.max(0, Number(waitSeconds) || 0) * 1000;
+  const pollMs = Math.max(10, (Number(pollSeconds) || 10) * 1000);
+  let template = null;
+  while (!template && Date.now() < deadline) {
+    await abortableSleep(Math.min(pollMs, deadline - Date.now()), signal);
+    try {
+      const after = (await readTemplate(session, rec, signal)).template;
+      if (fresh(after)) template = after;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      debug("GetGrokBotTemplateForSourceAgent failed while waiting: " + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+  return { target: rec, delivery, clientNonce, action: before ? "updated" : "created", template };
+}
+
+// The recipe a template version keeps in the store, checked as the app's parser does (cb): 1 byte to
+// 25 MiB of UTF-8 JSON in this shape; keys outside it are dropped. Avatar shapes are the app's full list.
+const RECIPE_MAX_BYTES = 26_214_400;
+const RECIPE_TIMEOUT_MS = 20_000;
+// GetGrokBotTemplateVersion's blobGetUrl is a presigned read in this bucket (live 2026-11-08).
+const RECIPE_BUCKET = "grok-bot-templates";
+const RECIPE_AVATAR_SHAPES = [
+  "blob", "pebble", "bean", "egg", "squircle", "tablet", "capsule", "cylinder", "hex", "gem", "crystal", "wedge", "shield",
+  "dome", "arch", "cloud", "teardrop", "leaf", "square", "sparkle", "clover", "flower", "heart", "house", "star",
+];
+const absentWhenNull = (value) => (value === null ? undefined : value);
+const recipeSchema = z.object({
+  profile: z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    avatarColor: z.enum(AVATAR_COLORS).optional(),
+    avatarShape: z.enum(RECIPE_AVATAR_SHAPES).optional(),
+  }),
+  memory: z.array(z.object({
+    kind: z.preprocess(absentWhenNull, z.enum(["profile", "log"]).optional()),
+    createdAt: z.preprocess(absentWhenNull, z.string().optional()),
+    content: z.string().min(1),
+  })),
+  skills: z.array(z.object({ name: z.string().min(1), description: z.string().min(1), content: z.string().min(1) })),
+  routines: z.array(z.object({ name: z.string().min(1), slug: z.string().min(1), description: z.string().min(1), content: z.string().min(1) })),
+  plugins: z.array(z.object({ name: z.string().min(1), description: z.string().min(1).optional(), pluginId: z.string().min(1) })),
+  gettingStarted: z.object({ skill: z.string().min(1) }).optional(),
+}).superRefine((recipe, ctx) => {
+  const skill = recipe.gettingStarted?.skill;
+  if (skill !== undefined && !recipe.skills.some((s) => s.name === skill)) {
+    ctx.addIssue({ code: "custom", path: ["gettingStarted", "skill"], message: "gettingStarted.skill must name one of this recipe's skills" });
+  }
+});
+
+function parseRecipe(bytes) {
+  if (bytes.byteLength < 1 || bytes.byteLength > RECIPE_MAX_BYTES) {
+    throw new GatewayError("Grok Bot template recipe refused: size " + bytes.byteLength + " bytes", { code: "RECIPE_INVALID" });
+  }
+  let value;
+  try {
+    value = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new GatewayError("Grok Bot template recipe is invalid: not JSON", { code: "RECIPE_INVALID" });
+  }
+  const parsed = recipeSchema.safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new GatewayError("Grok Bot template recipe is invalid: " + (issue ? (issue.path.join(".") || "recipe") + " " + issue.message : "unexpected shape"), { code: "RECIPE_INVALID" });
+  }
+  return parsed.data;
+}
+
+// The template a version is read or published for: it must exist.
+async function existingTemplate(session, rec, signal) {
+  const { template } = await readTemplate(session, rec, signal);
+  if (!template) {
+    throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") has no template yet; gbot bots template creates one.", { code: "TEMPLATE_MISSING" });
+  }
+  return template;
+}
+
+// The version to read or publish: the one asked for; else the newest bot-template-share card the bot
+// posted for this template in the last 200 transcript entries (the card the app asks to confirm); else
+// the active version.
+async function templateVersionFor(session, rec, template, version) {
+  if (version !== undefined) {
+    if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", { code: "TEMPLATE_NO_VERSION" });
+    return { version, versionFrom: "option" };
+  }
+  const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    const card = entry && typeof entry === "object" ? entry.message : undefined;
+    if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
+    const cardVersion = Number(card.version);
+    if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return { version: cardVersion, versionFrom: "card" };
+  }
+  if (template.activeVersion >= 1) return { version: template.activeVersion, versionFrom: "active" };
+  throw new GatewayError(
+    "No template version to use: the last 200 transcript entries of " + rec.name + " have no template card for " + template.shareId + ", and no version is active. Give the version (--template-version N).",
+    { code: "TEMPLATE_NO_VERSION" },
+  );
+}
+
+/**
+ * One version of the bot's template and its recipe, read only, as the app's review dialog reads it:
+ * GetGrokBotTemplateVersion, then its presigned blobGetUrl (no credentials, size-capped).
+ * @param {any} session @param {string} ref @param {{ version?: number, signal?: AbortSignal }} [options]
+ */
+export async function getBotTemplateVersion(session, ref, { version, signal } = {}) {
+  const rec = await templateBot(session, ref, signal);
+  const template = await existingTemplate(session, rec, signal);
+  const chosen = await templateVersionFor(session, rec, template, version);
+  const data = await backendRead(session, "GetGrokBotTemplateVersion", { shareId: template.shareId, version: chosen.version }, { signal });
+  const url = typeof data?.blobGetUrl === "string" ? data.blobGetUrl.trim() : "";
+  if (!url) throw new GatewayError("GetGrokBotTemplateVersion returned no recipe url", { code: "RECIPE_MISSING" });
+  const { bytes } = await fetchStoreBytes(url, { cap: RECIPE_MAX_BYTES, timeoutMs: RECIPE_TIMEOUT_MS, bucket: RECIPE_BUCKET });
+  const createdAtMs = Number(data?.createdAtMs);
+  return {
+    target: rec,
+    template,
+    version: Number(data?.version) || chosen.version,
+    versionFrom: chosen.versionFrom,
+    active: data?.active === true,
+    ...(Number.isFinite(createdAtMs) && createdAtMs > 0 ? { createdAtMs } : {}),
+    visibility: typeof data?.visibility === "string" ? data.visibility : "",
+    recipe: parseRecipe(bytes),
+  };
+}
+
+/**
+ * Publishes a version of the bot's template, as confirming the app's review card does:
+ * ActivateGrokBotTemplateVersion { shareId, version }.
+ * @param {any} session @param {string} ref @param {{ version?: number, signal?: AbortSignal }} [options]
+ */
+export async function publishBotTemplate(session, ref, { version, signal } = {}) {
+  const rec = await templateBot(session, ref, signal);
+  const template = await existingTemplate(session, rec, signal);
+  const chosen = await templateVersionFor(session, rec, template, version);
+  const data = await backendCall(session, "ActivateGrokBotTemplateVersion", { shareId: template.shareId, version: chosen.version });
+  const published = templateFrom(data?.template);
+  if (!published) throw new GatewayError("ActivateGrokBotTemplateVersion returned no template", { code: "TEMPLATE_MISSING" });
+  return { target: rec, version: chosen.version, versionFrom: chosen.versionFrom, template: published };
 }
 
 export async function getThread(session, ref, rootId) {

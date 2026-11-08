@@ -6,7 +6,7 @@ Its instructions are [templates/move-to-hermes.md](../templates/move-to-hermes.m
 
 ## Get it
 
-- **From a template link** (when one is published): open the `https://x.ai/bot/<share id>` link, choose **Add to Grok Bot**. You get your own copy in your account.
+- **From the template link**: open **https://x.ai/bot/y2AFnYLdbz5T66loRBHar** ("Move to Hermes by ImL1s", published 2026-11-08) and choose **Add to Grok Bot**. You get your own copy in your account.
 - **Create it yourself with gbot**:
 
   ```sh
@@ -26,7 +26,21 @@ Then say "move my bots to Hermes". It checks `hermes` and `node`, checks `gbot m
 
 ## Share it
 
-Grok Bot shares a bot as a template: in the bot's chat ask it to "Create a public template of yourself that I can share with somebody else", then share the `https://x.ai/bot/<share id>` link. A template is a copy for each person: they never get your computer, logins, memory or conversation history. A template does not carry scripts, so the bot installs gbot from the release named in its instructions.
+Grok Bot shares a bot as a template. From a terminal, in three steps:
+
+```sh
+gbot bots template "Move to Hermes"            # 1. the bot builds a draft template
+gbot bots template "Move to Hermes" --show     # 2. review what a copy gets
+gbot bots template "Move to Hermes" --publish  # 3. publish it
+```
+
+1. The first command asks the bot to create its template (or to update the one it has) with the same message the app sends, waits for the template (up to 10 minutes; `--wait <seconds>` changes that), and prints the `https://x.ai/bot/<share id>` link on its own line. The template is a draft (not published) until step 3. When it ends with exit 3 (no template yet), run `gbot bots template "Move to Hermes" --status` later instead of asking again.
+2. `--show` prints the draft's recipe, the version the bot posted in its chat as a review card: name, description, memory entries, skills, routines, plugins. It sends nothing.
+3. `--publish` publishes that version, as confirming the review card in the app does, and prints the link. If `--publish` times out or gets a server error it may still have gone through: check with `--status` before running it again.
+
+Without a terminal: in the bot's chat ask it to "Create a public template of yourself that I can share with somebody else", confirm the review card it posts, then share the link.
+
+A template is a copy for each person: they never get your computer, logins, memory or conversation history. A template does not carry scripts, so the bot installs gbot from the release named in its instructions.
 
 ## Limits
 

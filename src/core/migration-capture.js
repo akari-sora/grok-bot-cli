@@ -37,8 +37,8 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** The presigned store host. Only that host (or loopback in tests) may receive a fetch. */
-export function assertStoreUrl(raw, env = process.env) {
+/** The presigned store host: the bucket's S3 host (or loopback in tests) is the only one that may receive a fetch. */
+export function assertStoreUrl(raw, env = process.env, bucket = 'sand-box-stores') {
   let url;
   try { url = new URL(raw); } catch { throw new MigrationError('The store returned an invalid read URL.'); }
   const test = env.GROK_BOT_TEST === '1' || env.NODE_ENV === 'test';
@@ -46,15 +46,15 @@ export function assertStoreUrl(raw, env = process.env) {
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new MigrationError('Store URL must be loopback in test mode.');
     return url.href;
   }
-  if (url.protocol !== 'https:' || !/^sand-box-stores\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/.test(url.hostname)) {
+  if (url.protocol !== 'https:' || !new RegExp(`^${bucket}\\.s3(?:\\.[a-z0-9-]+)?\\.amazonaws\\.com$`).test(url.hostname)) {
     throw new MigrationError('The store returned a read URL for an unexpected host; nothing was fetched.');
   }
   return url.href;
 }
 
 /** GET a presigned URL with a byte cap, no redirects and no credentials. */
-export async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120_000 } = {}) {
-  const res = await fetchImpl(assertStoreUrl(url), { redirect: 'error', headers, signal: AbortSignal.timeout(timeoutMs) });
+export async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120_000, bucket } = {}) {
+  const res = await fetchImpl(assertStoreUrl(url, process.env, bucket), { redirect: 'error', headers, signal: AbortSignal.timeout(timeoutMs) });
   if (!(res.status === 200 || res.status === 206)) {
     await res.body?.cancel?.();
     const error = new MigrationError(`Store read failed (HTTP ${res.status}).`);

@@ -80,3 +80,9 @@ While a sub-agent tested the new Hermes preflight, running the Hermes runtime wi
 - grok-bot-cli: `npm run check` (validate, build, artifact validation, typecheck, 856 unit tests, 96 route tests); Hermes helper contract 3/3 against a fake runtime with the real API names, 3/3 against the installed Hermes stores in a scratch home; official importer (bundled export) 4/4.
 - trinity-cli: 234 tests (7 platform skips).
 - muse-web-cli: 139 passed, 2 skipped. chatgpt-dot-cli: 122 tests, all new ones pass; one redirect test (`test_cli_usage_redirect_exits_three`) fails as it did before these changes.
+
+## Release, Windows and sharing (2026-11-08)
+
+- Released: grok-bot-cli `v0.11.2-iml1s.7` (package file on the GitLab release, SHA-256 `8be6875aa96f7f3908ba6826a4d6e880df776379b5a4518f258e256a32498676`; installed into a scratch prefix, `gbot migrate bots` listed the real bots), trinity-cli `v0.5.0`, muse-web-cli `v0.1.6`, chatgpt-dot-cli `v0.2.6`.
+- Windows: the project Windows runner was offline, so each suite was run by hand on a Windows 11 PC (Node 24.22, Python 3.12) at the merged commit. This found Windows-only test assumptions (fixed): muse-web-cli expected `application/zip` (Windows maps `.zip` to `application/x-zip-compressed`, the type a browser there reports too), and three Hermes tests assumed `/` paths and a rename over an open file. Final: grok-bot-cli 537 pass / 0 fail (POSIX-only tests skipped), muse-web-cli 142 pass, chatgpt-dot-cli 124 OK, trinity-cli 234 OK.
+- Move to Hermes is a public Grok Bot template: `gbot bots template "Move to Hermes"` sent the app's message with the template-share initiator, the bot drafted version 1, `--show` printed the recipe (seven instruction entries, the description, no memory, skills, routines or plugins of the account), `--publish` activated it. https://x.ai/bot/y2AFnYLdbz5T66loRBHar answers 200 with "Move to Hermes by ImL1s".

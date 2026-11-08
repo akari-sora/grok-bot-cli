@@ -7152,6 +7152,349 @@ var __webpack_modules__ = {
             resultSchema: resultSchema
         });
     },
+    "./src/cli/bots/template.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
+        var _agent_bundle_runtime__rspack_import_4 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_codex_contract_js__rspack_import_1 = __webpack_require__("./src/core/codex/contract.js");
+        var _shared_js__rspack_import_2 = __webpack_require__("./src/cli/_shared.ts");
+        const config = {
+            description: 'Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.',
+            exitCode: 'result',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    dir: {
+                        description: 'Agents directory for --files mode',
+                        type: 'string'
+                    },
+                    files: {
+                        description: 'Force the on-disk agents store',
+                        type: 'boolean'
+                    },
+                    gateway: {
+                        description: 'Force the live gateway',
+                        type: 'boolean'
+                    },
+                    account: {
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
+                        type: 'string'
+                    },
+                    ref: {
+                        description: 'Bot id or name',
+                        type: 'string'
+                    },
+                    publish: {
+                        description: 'Publish a template version (ActivateGrokBotTemplateVersion), as confirming the app\'s review card does',
+                        type: 'boolean'
+                    },
+                    show: {
+                        description: 'Show a template version\'s recipe (instructions, memory, skills, routines, plugins); sends nothing',
+                        type: 'boolean'
+                    },
+                    status: {
+                        description: 'Show the current template and link; sends nothing',
+                        type: 'boolean'
+                    },
+                    templateVersion: {
+                        description: 'Template version for --show or --publish (default: the newest template card in the bot\'s chat, else the active version)',
+                        type: 'number'
+                    },
+                    wait: {
+                        description: 'Seconds to wait for the template after the message (default 600; 0 does not wait)',
+                        type: 'number'
+                    }
+                },
+                required: [
+                    'ref'
+                ],
+                type: 'object'
+            },
+            positionals: [
+                'ref'
+            ]
+        };
+        const inputSchema = _shared_js__rspack_import_2.lK.extend({
+            publish: zod__rspack_import_3.zMY().optional(),
+            ref: zod__rspack_import_3.YjP().min(1),
+            show: zod__rspack_import_3.zMY().optional(),
+            status: zod__rspack_import_3.zMY().optional(),
+            templateVersion: zod__rspack_import_3.aig().int().min(1).optional(),
+            wait: zod__rspack_import_3.aig().int().min(0).optional()
+        }).strict().refine((input)=>[
+                input.status,
+                input.show,
+                input.publish
+            ].filter(Boolean).length <= 1, 'Use one of --status, --show and --publish.').refine((input)=>!((input.status || input.show || input.publish) && input.wait !== undefined), '--wait applies to sending, not to --status, --show or --publish.').refine((input)=>input.templateVersion === undefined || Boolean(input.show || input.publish), '--template-version applies to --show and --publish.');
+        const templateSchema = zod__rspack_import_3.Ikc({
+            activeVersion: zod__rspack_import_3.aig(),
+            link: zod__rspack_import_3.YjP(),
+            name: zod__rspack_import_3.YjP(),
+            published: zod__rspack_import_3.zMY(),
+            shareId: zod__rspack_import_3.YjP(),
+            updatedAtMs: zod__rspack_import_3.aig(),
+            visibility: zod__rspack_import_3.YjP()
+        }).strict();
+        const botFields = {
+            id: zod__rspack_import_3.YjP(),
+            kind: zod__rspack_import_3.euz('bot'),
+            name: zod__rspack_import_3.YjP()
+        };
+        const statusSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            exitCode: zod__rspack_import_3.euz(0),
+            exportPolicy: zod__rspack_import_3.YjP().optional(),
+            hasTeam: zod__rspack_import_3.zMY(),
+            template: templateSchema.nullable()
+        }).strict();
+        const sharedSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            action: zod__rspack_import_3.k5n([
+                'created',
+                'updated'
+            ]),
+            clientNonce: zod__rspack_import_3.YjP(),
+            delivery: zod__rspack_import_3.k5n([
+                'accepted',
+                'unknown'
+            ]),
+            exitCode: zod__rspack_import_3.euz(0),
+            template: templateSchema
+        }).strict();
+        const notYetSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            action: zod__rspack_import_3.k5n([
+                'created',
+                'updated'
+            ]),
+            clientNonce: zod__rspack_import_3.YjP(),
+            delivery: zod__rspack_import_3.k5n([
+                'accepted',
+                'unknown'
+            ]),
+            exitCode: zod__rspack_import_3.euz(3),
+            hint: zod__rspack_import_3.YjP(),
+            template: zod__rspack_import_3.chJ()
+        }).strict();
+        const recipeSchema = zod__rspack_import_3.Ikc({
+            gettingStarted: zod__rspack_import_3.Ikc({
+                skill: zod__rspack_import_3.YjP()
+            }).optional(),
+            memory: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                createdAt: zod__rspack_import_3.YjP().optional(),
+                kind: zod__rspack_import_3.YjP().optional()
+            })),
+            plugins: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                description: zod__rspack_import_3.YjP().optional(),
+                name: zod__rspack_import_3.YjP(),
+                pluginId: zod__rspack_import_3.YjP()
+            })),
+            profile: zod__rspack_import_3.Ikc({
+                avatarColor: zod__rspack_import_3.YjP().optional(),
+                avatarShape: zod__rspack_import_3.YjP().optional(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP()
+            }),
+            routines: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP(),
+                slug: zod__rspack_import_3.YjP()
+            })),
+            skills: zod__rspack_import_3.YOg(zod__rspack_import_3.Ikc({
+                content: zod__rspack_import_3.YjP(),
+                description: zod__rspack_import_3.YjP(),
+                name: zod__rspack_import_3.YjP()
+            }))
+        });
+        const versionFromSchema = zod__rspack_import_3.k5n([
+            'option',
+            'card',
+            'active'
+        ]);
+        const asVersionFrom = (from)=>from === 'card' || from === 'active' ? from : 'option';
+        const showSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            active: zod__rspack_import_3.zMY(),
+            createdAtMs: zod__rspack_import_3.aig().optional(),
+            exitCode: zod__rspack_import_3.euz(0),
+            link: zod__rspack_import_3.YjP(),
+            recipe: recipeSchema,
+            shareId: zod__rspack_import_3.YjP(),
+            version: zod__rspack_import_3.aig(),
+            versionFrom: versionFromSchema,
+            visibility: zod__rspack_import_3.YjP()
+        }).strict();
+        const publishedSchema = zod__rspack_import_3.Ikc({
+            ...botFields,
+            exitCode: zod__rspack_import_3.euz(0),
+            template: templateSchema,
+            version: zod__rspack_import_3.aig(),
+            versionFrom: versionFromSchema
+        }).strict();
+        const resultSchema = zod__rspack_import_3.KCZ([
+            statusSchema,
+            sharedSchema,
+            notYetSchema,
+            showSchema,
+            publishedSchema,
+            _shared_js__rspack_import_2.R9
+        ]);
+        const DEFAULT_WAIT_SECONDS = 600;
+        const describe = (template)=>`${template.published ? 'published' : 'not published'}${template.visibility ? `, ${template.visibility}` : ''}${template.activeVersion ? `, version ${template.activeVersion}` : ''}`;
+        const whoOf = (target)=>`bot ${target.name} (${target.id})`;
+        const firstLine = (text)=>{
+            const line = text.trim().split('\n')[0] ?? '';
+            return line.length > 80 ? `${line.slice(0, 80)}…` : line;
+        };
+        const recipeText = (recipe)=>{
+            const list = (label, names)=>`${label} (${names.length})${names.map((name)=>`\n  ${name}`).join('')}`;
+            return [
+                `Name: ${recipe.profile.name}`,
+                `Description: ${recipe.profile.description.trim()}`,
+                list('Memory', recipe.memory.map((item)=>`${item.kind ?? 'memory'}: ${firstLine(item.content)}`)),
+                list('Skills', recipe.skills.map((skill)=>skill.name)),
+                list('Routines', recipe.routines.map((routine)=>`${routine.name} (${routine.slug})`)),
+                list('Plugins', recipe.plugins.map((plugin)=>`${plugin.name} (${plugin.pluginId})`)),
+                `Getting started: ${recipe.gettingStarted ? `skill ${recipe.gettingStarted.skill}` : 'none'}`
+            ];
+        };
+        const run = async (input, signal)=>{
+            const backend = await (0, _shared_js__rspack_import_2.FS)(input);
+            if (input.status) {
+                const found = await backend.template(input.ref, {
+                    signal
+                });
+                const who = whoOf(found.target);
+                return {
+                    value: {
+                        id: found.target.id,
+                        kind: 'bot',
+                        name: found.target.name,
+                        template: found.template,
+                        ...found.exportPolicy ? {
+                            exportPolicy: found.exportPolicy
+                        } : {},
+                        hasTeam: found.hasTeam,
+                        exitCode: 0
+                    },
+                    text: found.template ? `Template of ${who}: ${found.template.name || found.template.shareId} (${describe(found.template)})\n${found.template.link}` : `${who[0].toUpperCase()}${who.slice(1)} has no template yet.`
+                };
+            }
+            if (input.show) {
+                const found = await backend.templateVersion(input.ref, {
+                    signal,
+                    version: input.templateVersion
+                });
+                return {
+                    value: {
+                        id: found.target.id,
+                        kind: 'bot',
+                        name: found.target.name,
+                        shareId: found.template.shareId,
+                        link: found.template.link,
+                        version: found.version,
+                        versionFrom: asVersionFrom(found.versionFrom),
+                        active: found.active,
+                        ...found.createdAtMs !== undefined ? {
+                            createdAtMs: found.createdAtMs
+                        } : {},
+                        visibility: found.visibility,
+                        recipe: found.recipe,
+                        exitCode: 0
+                    },
+                    text: [
+                        `Template ${found.template.shareId} of ${whoOf(found.target)}, version ${found.version} (${found.active ? 'active' : 'not active'}${found.visibility ? `, ${found.visibility}` : ''})`,
+                        ...recipeText(found.recipe),
+                        found.template.link
+                    ].join('\n')
+                };
+            }
+            if (input.publish) {
+                const out = await backend.publishTemplate(input.ref, {
+                    signal,
+                    version: input.templateVersion
+                });
+                return {
+                    value: {
+                        id: out.target.id,
+                        kind: 'bot',
+                        name: out.target.name,
+                        version: out.version,
+                        versionFrom: asVersionFrom(out.versionFrom),
+                        template: out.template,
+                        exitCode: 0
+                    },
+                    text: `Published version ${out.version} of the template of ${whoOf(out.target)}: ${describe(out.template)}\n${out.template.link}`
+                };
+            }
+            const waitSeconds = input.wait ?? DEFAULT_WAIT_SECONDS;
+            const out = await backend.shareTemplate(input.ref, {
+                signal,
+                waitSeconds
+            });
+            const action = out.action === 'updated' ? 'updated' : 'created';
+            const delivery = out.delivery === 'accepted' ? 'accepted' : 'unknown';
+            const fields = {
+                id: out.target.id,
+                kind: 'bot',
+                name: out.target.name,
+                action,
+                clientNonce: out.clientNonce,
+                delivery
+            };
+            const who = whoOf(out.target);
+            if (out.template) {
+                return {
+                    value: {
+                        ...fields,
+                        template: out.template,
+                        exitCode: 0
+                    },
+                    text: `Template of ${who} ${action}: ${out.template.name || out.template.shareId} (${describe(out.template)})\n${out.template.link}`
+                };
+            }
+            const shown = /[\s"]/.test(input.ref) ? JSON.stringify(input.ref) : input.ref;
+            const hint = `No ${action === 'updated' ? 'newer ' : ''}template within ${waitSeconds} s. Check later with gbot bots template ${shown} --status; sending again would ask the bot again.`;
+            return {
+                value: {
+                    ...fields,
+                    template: null,
+                    hint,
+                    exitCode: 3
+                },
+                text: `Asked ${who} to ${action === 'updated' ? 'update' : 'create'} its template (delivery ${delivery}, nonce ${out.clientNonce}).\n${hint}`
+            };
+        };
+        async function botsTemplate({ input, signal }) {
+            let outcome;
+            try {
+                outcome = await run(input, signal);
+            } catch (error) {
+                const value = (0, _core_codex_contract_js__rspack_import_1.DG)(error);
+                const nonce = typeof value.clientNonce === 'string' && value.clientNonce ? value.clientNonce : '';
+                outcome = {
+                    value,
+                    text: nonce ? `${value.error}\nnonce ${nonce}` : value.error
+                };
+            }
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
+                value: outcome.value,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
+                    children: outcome.text
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>botsTemplate
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/cli/bots/update.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
@@ -35511,9 +35854,9 @@ var __webpack_modules__ = {
                 reverseTransform: def.transform
             });
         }
-        const ZodPreprocess = null && core.$constructor("ZodPreprocess", (inst, def)=>{
+        const ZodPreprocess = _core_index_js__rspack_import_0.xI("ZodPreprocess", (inst, def)=>{
             ZodPipe.init(inst, def);
-            core.$ZodPreprocess.init(inst, def);
+            _core_index_js__rspack_import_3.KX.init(inst, def);
         });
         const ZodReadonly = _core_index_js__rspack_import_0.xI("ZodReadonly", (inst, def)=>{
             _core_index_js__rspack_import_3.Sb.init(inst, def);
@@ -35662,10 +36005,12 @@ var __webpack_modules__ = {
             YOg: ()=>array,
             YjP: ()=>string,
             aig: ()=>number,
+            chJ: ()=>_null,
             euz: ()=>literal,
             g1P: ()=>record,
             k5n: ()=>_enum,
             rej: ()=>strictObject,
+            vkY: ()=>preprocess,
             zMY: ()=>boolean
         });
     },
@@ -41437,7 +41782,7 @@ var __webpack_modules__ = {
                 issues: left.issues
             }, ctx);
         }
-        const $ZodPreprocess = null && core.$constructor("$ZodPreprocess", (inst, def)=>{
+        const $ZodPreprocess = _core_js__rspack_import_0.xI("$ZodPreprocess", (inst, def)=>{
             $ZodPipe.init(inst, def);
         });
         const $ZodReadonly = _core_js__rspack_import_0.xI("$ZodReadonly", (inst, def)=>{
@@ -41702,6 +42047,7 @@ var __webpack_modules__ = {
             GP: $ZodUnknown,
             GY: $ZodKSUID,
             I: $ZodNumberFormat,
+            KX: $ZodPreprocess,
             Ko: $ZodISODateTime,
             LJ: $ZodIntersection,
             Lc: $ZodIPv4,
@@ -43305,9 +43651,9 @@ var __webpack_modules__ = {
             try {
                 var agent_bundle_launch_env_layer__rspack_import_0 = __webpack_require__("./.agent-bundle-virtual/bin-gbot-0.mjs");
                 var agent_bundle_cli_entry__rspack_import_1 = __webpack_require__("./node_modules/agent-bundle/dist/cli-entry.js");
-                var _agent_bundle_runtime__rspack_import_60 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-                var _agent_bundle_runtime__rspack_import_61 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
-                var _agent_bundle_runtime__rspack_import_62 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
+                var _agent_bundle_runtime__rspack_import_61 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+                var _agent_bundle_runtime__rspack_import_62 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+                var _agent_bundle_runtime__rspack_import_63 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/index.js");
                 var node_url__rspack_import_2 = __webpack_require__("node:url");
                 var node_worker_threads__rspack_import_3 = __webpack_require__("node:worker_threads");
                 var _src_cli_accounts_tsx__rspack_import_4 = __webpack_require__("./src/cli/accounts.tsx");
@@ -43317,55 +43663,56 @@ var __webpack_modules__ = {
                 var _src_cli_bots_delete_tsx__rspack_import_8 = __webpack_require__("./src/cli/bots/delete.tsx");
                 var _src_cli_bots_get_tsx__rspack_import_9 = __webpack_require__("./src/cli/bots/get.tsx");
                 var _src_cli_bots_list_tsx__rspack_import_10 = __webpack_require__("./src/cli/bots/list.tsx");
-                var _src_cli_bots_update_tsx__rspack_import_11 = __webpack_require__("./src/cli/bots/update.tsx");
-                var _src_cli_chatgpt_desktop_hosts_tsx__rspack_import_12 = __webpack_require__("./src/cli/chatgpt-desktop/hosts.tsx");
-                var _src_cli_chatgpt_desktop_read_tsx__rspack_import_13 = __webpack_require__("./src/cli/chatgpt-desktop/read.tsx");
-                var _src_cli_chatgpt_desktop_search_tsx__rspack_import_14 = __webpack_require__("./src/cli/chatgpt-desktop/search.tsx");
-                var _src_cli_chatgpt_desktop_send_tsx__rspack_import_15 = __webpack_require__("./src/cli/chatgpt-desktop/send.tsx");
-                var _src_cli_chatgpt_desktop_status_tsx__rspack_import_16 = __webpack_require__("./src/cli/chatgpt-desktop/status.tsx");
-                var _src_cli_chatgpt_desktop_threads_tsx__rspack_import_17 = __webpack_require__("./src/cli/chatgpt-desktop/threads.tsx");
-                var _src_cli_claude_send_tsx__rspack_import_18 = __webpack_require__("./src/cli/claude/send.tsx");
-                var _src_cli_codex_bridge_respond_tsx__rspack_import_19 = __webpack_require__("./src/cli/codex/bridge/respond.tsx");
-                var _src_cli_codex_bridge_run_tsx__rspack_import_20 = __webpack_require__("./src/cli/codex/bridge/run.tsx");
-                var _src_cli_codex_bridge_start_tsx__rspack_import_21 = __webpack_require__("./src/cli/codex/bridge/start.tsx");
-                var _src_cli_codex_bridge_status_tsx__rspack_import_22 = __webpack_require__("./src/cli/codex/bridge/status.tsx");
-                var _src_cli_codex_bridge_stop_tsx__rspack_import_23 = __webpack_require__("./src/cli/codex/bridge/stop.tsx");
-                var _src_cli_codex_desktop_shim_tsx__rspack_import_24 = __webpack_require__("./src/cli/codex/desktop-shim.tsx");
-                var _src_cli_codex_list_threads_tsx__rspack_import_25 = __webpack_require__("./src/cli/codex/list-threads.tsx");
-                var _src_cli_codex_new_tsx__rspack_import_26 = __webpack_require__("./src/cli/codex/new.tsx");
-                var _src_cli_codex_queue_tsx__rspack_import_27 = __webpack_require__("./src/cli/codex/queue.tsx");
-                var _src_cli_codex_send_tsx__rspack_import_28 = __webpack_require__("./src/cli/codex/send.tsx");
-                var _src_cli_codex_status_tsx__rspack_import_29 = __webpack_require__("./src/cli/codex/status.tsx");
-                var _src_cli_codex_wait_tsx__rspack_import_30 = __webpack_require__("./src/cli/codex/wait.tsx");
-                var _src_cli_codex_watch_tsx__rspack_import_31 = __webpack_require__("./src/cli/codex/watch.tsx");
-                var _src_cli_config_export_tsx__rspack_import_32 = __webpack_require__("./src/cli/config/export.tsx");
-                var _src_cli_config_import_tsx__rspack_import_33 = __webpack_require__("./src/cli/config/import.tsx");
-                var _src_cli_config_path_tsx__rspack_import_34 = __webpack_require__("./src/cli/config/path.tsx");
-                var _src_cli_doctor_tsx__rspack_import_35 = __webpack_require__("./src/cli/doctor.tsx");
-                var _src_cli_groups_add_tsx__rspack_import_36 = __webpack_require__("./src/cli/groups/add.tsx");
-                var _src_cli_groups_create_tsx__rspack_import_37 = __webpack_require__("./src/cli/groups/create.tsx");
-                var _src_cli_groups_delete_tsx__rspack_import_38 = __webpack_require__("./src/cli/groups/delete.tsx");
-                var _src_cli_groups_get_tsx__rspack_import_39 = __webpack_require__("./src/cli/groups/get.tsx");
-                var _src_cli_groups_list_tsx__rspack_import_40 = __webpack_require__("./src/cli/groups/list.tsx");
-                var _src_cli_groups_members_tsx__rspack_import_41 = __webpack_require__("./src/cli/groups/members.tsx");
-                var _src_cli_groups_remove_tsx__rspack_import_42 = __webpack_require__("./src/cli/groups/remove.tsx");
-                var _src_cli_groups_set_tsx__rspack_import_43 = __webpack_require__("./src/cli/groups/set.tsx");
-                var _src_cli_groups_update_tsx__rspack_import_44 = __webpack_require__("./src/cli/groups/update.tsx");
-                var _src_cli_history_tsx__rspack_import_45 = __webpack_require__("./src/cli/history.tsx");
-                var _src_cli_migrate_bots_tsx__rspack_import_46 = __webpack_require__("./src/cli/migrate/bots.tsx");
-                var _src_cli_migrate_capture_tsx__rspack_import_47 = __webpack_require__("./src/cli/migrate/capture.tsx");
-                var _src_cli_migrate_check_tsx__rspack_import_48 = __webpack_require__("./src/cli/migrate/check.tsx");
-                var _src_cli_migrate_import_tsx__rspack_import_49 = __webpack_require__("./src/cli/migrate/import.tsx");
-                var _src_cli_migrate_preview_tsx__rspack_import_50 = __webpack_require__("./src/cli/migrate/preview.tsx");
-                var _src_cli_migrate_run_tsx__rspack_import_51 = __webpack_require__("./src/cli/migrate/run.tsx");
-                var _src_cli_reconcile_tsx__rspack_import_52 = __webpack_require__("./src/cli/reconcile.tsx");
-                var _src_cli_send_tsx__rspack_import_53 = __webpack_require__("./src/cli/send.tsx");
-                var _src_cli_skills_add_tsx__rspack_import_54 = __webpack_require__("./src/cli/skills/add.tsx");
-                var _src_cli_skills_list_tsx__rspack_import_55 = __webpack_require__("./src/cli/skills/list.tsx");
-                var _src_cli_skills_remove_tsx__rspack_import_56 = __webpack_require__("./src/cli/skills/remove.tsx");
-                var _src_cli_thread_tsx__rspack_import_57 = __webpack_require__("./src/cli/thread.tsx");
-                var _src_cli_wake_tsx__rspack_import_58 = __webpack_require__("./src/cli/wake.tsx");
-                var _src_cli_wear_pair_tsx__rspack_import_59 = __webpack_require__("./src/cli/wear/pair.tsx");
+                var _src_cli_bots_template_tsx__rspack_import_11 = __webpack_require__("./src/cli/bots/template.tsx");
+                var _src_cli_bots_update_tsx__rspack_import_12 = __webpack_require__("./src/cli/bots/update.tsx");
+                var _src_cli_chatgpt_desktop_hosts_tsx__rspack_import_13 = __webpack_require__("./src/cli/chatgpt-desktop/hosts.tsx");
+                var _src_cli_chatgpt_desktop_read_tsx__rspack_import_14 = __webpack_require__("./src/cli/chatgpt-desktop/read.tsx");
+                var _src_cli_chatgpt_desktop_search_tsx__rspack_import_15 = __webpack_require__("./src/cli/chatgpt-desktop/search.tsx");
+                var _src_cli_chatgpt_desktop_send_tsx__rspack_import_16 = __webpack_require__("./src/cli/chatgpt-desktop/send.tsx");
+                var _src_cli_chatgpt_desktop_status_tsx__rspack_import_17 = __webpack_require__("./src/cli/chatgpt-desktop/status.tsx");
+                var _src_cli_chatgpt_desktop_threads_tsx__rspack_import_18 = __webpack_require__("./src/cli/chatgpt-desktop/threads.tsx");
+                var _src_cli_claude_send_tsx__rspack_import_19 = __webpack_require__("./src/cli/claude/send.tsx");
+                var _src_cli_codex_bridge_respond_tsx__rspack_import_20 = __webpack_require__("./src/cli/codex/bridge/respond.tsx");
+                var _src_cli_codex_bridge_run_tsx__rspack_import_21 = __webpack_require__("./src/cli/codex/bridge/run.tsx");
+                var _src_cli_codex_bridge_start_tsx__rspack_import_22 = __webpack_require__("./src/cli/codex/bridge/start.tsx");
+                var _src_cli_codex_bridge_status_tsx__rspack_import_23 = __webpack_require__("./src/cli/codex/bridge/status.tsx");
+                var _src_cli_codex_bridge_stop_tsx__rspack_import_24 = __webpack_require__("./src/cli/codex/bridge/stop.tsx");
+                var _src_cli_codex_desktop_shim_tsx__rspack_import_25 = __webpack_require__("./src/cli/codex/desktop-shim.tsx");
+                var _src_cli_codex_list_threads_tsx__rspack_import_26 = __webpack_require__("./src/cli/codex/list-threads.tsx");
+                var _src_cli_codex_new_tsx__rspack_import_27 = __webpack_require__("./src/cli/codex/new.tsx");
+                var _src_cli_codex_queue_tsx__rspack_import_28 = __webpack_require__("./src/cli/codex/queue.tsx");
+                var _src_cli_codex_send_tsx__rspack_import_29 = __webpack_require__("./src/cli/codex/send.tsx");
+                var _src_cli_codex_status_tsx__rspack_import_30 = __webpack_require__("./src/cli/codex/status.tsx");
+                var _src_cli_codex_wait_tsx__rspack_import_31 = __webpack_require__("./src/cli/codex/wait.tsx");
+                var _src_cli_codex_watch_tsx__rspack_import_32 = __webpack_require__("./src/cli/codex/watch.tsx");
+                var _src_cli_config_export_tsx__rspack_import_33 = __webpack_require__("./src/cli/config/export.tsx");
+                var _src_cli_config_import_tsx__rspack_import_34 = __webpack_require__("./src/cli/config/import.tsx");
+                var _src_cli_config_path_tsx__rspack_import_35 = __webpack_require__("./src/cli/config/path.tsx");
+                var _src_cli_doctor_tsx__rspack_import_36 = __webpack_require__("./src/cli/doctor.tsx");
+                var _src_cli_groups_add_tsx__rspack_import_37 = __webpack_require__("./src/cli/groups/add.tsx");
+                var _src_cli_groups_create_tsx__rspack_import_38 = __webpack_require__("./src/cli/groups/create.tsx");
+                var _src_cli_groups_delete_tsx__rspack_import_39 = __webpack_require__("./src/cli/groups/delete.tsx");
+                var _src_cli_groups_get_tsx__rspack_import_40 = __webpack_require__("./src/cli/groups/get.tsx");
+                var _src_cli_groups_list_tsx__rspack_import_41 = __webpack_require__("./src/cli/groups/list.tsx");
+                var _src_cli_groups_members_tsx__rspack_import_42 = __webpack_require__("./src/cli/groups/members.tsx");
+                var _src_cli_groups_remove_tsx__rspack_import_43 = __webpack_require__("./src/cli/groups/remove.tsx");
+                var _src_cli_groups_set_tsx__rspack_import_44 = __webpack_require__("./src/cli/groups/set.tsx");
+                var _src_cli_groups_update_tsx__rspack_import_45 = __webpack_require__("./src/cli/groups/update.tsx");
+                var _src_cli_history_tsx__rspack_import_46 = __webpack_require__("./src/cli/history.tsx");
+                var _src_cli_migrate_bots_tsx__rspack_import_47 = __webpack_require__("./src/cli/migrate/bots.tsx");
+                var _src_cli_migrate_capture_tsx__rspack_import_48 = __webpack_require__("./src/cli/migrate/capture.tsx");
+                var _src_cli_migrate_check_tsx__rspack_import_49 = __webpack_require__("./src/cli/migrate/check.tsx");
+                var _src_cli_migrate_import_tsx__rspack_import_50 = __webpack_require__("./src/cli/migrate/import.tsx");
+                var _src_cli_migrate_preview_tsx__rspack_import_51 = __webpack_require__("./src/cli/migrate/preview.tsx");
+                var _src_cli_migrate_run_tsx__rspack_import_52 = __webpack_require__("./src/cli/migrate/run.tsx");
+                var _src_cli_reconcile_tsx__rspack_import_53 = __webpack_require__("./src/cli/reconcile.tsx");
+                var _src_cli_send_tsx__rspack_import_54 = __webpack_require__("./src/cli/send.tsx");
+                var _src_cli_skills_add_tsx__rspack_import_55 = __webpack_require__("./src/cli/skills/add.tsx");
+                var _src_cli_skills_list_tsx__rspack_import_56 = __webpack_require__("./src/cli/skills/list.tsx");
+                var _src_cli_skills_remove_tsx__rspack_import_57 = __webpack_require__("./src/cli/skills/remove.tsx");
+                var _src_cli_thread_tsx__rspack_import_58 = __webpack_require__("./src/cli/thread.tsx");
+                var _src_cli_wake_tsx__rspack_import_59 = __webpack_require__("./src/cli/wake.tsx");
+                var _src_cli_wear_pair_tsx__rspack_import_60 = __webpack_require__("./src/cli/wear/pair.tsx");
                 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_4, 'default'), _src_cli_accounts_tsx__rspack_import_4);
                 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_5, 'default'), _src_cli_approvals_list_tsx__rspack_import_5);
                 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_6, 'default'), _src_cli_approvals_respond_tsx__rspack_import_6);
@@ -43373,56 +43720,57 @@ var __webpack_modules__ = {
                 const route4 = Object.assign({}, Reflect.get(_src_cli_bots_delete_tsx__rspack_import_8, 'default'), _src_cli_bots_delete_tsx__rspack_import_8);
                 const route5 = Object.assign({}, Reflect.get(_src_cli_bots_get_tsx__rspack_import_9, 'default'), _src_cli_bots_get_tsx__rspack_import_9);
                 const route6 = Object.assign({}, Reflect.get(_src_cli_bots_list_tsx__rspack_import_10, 'default'), _src_cli_bots_list_tsx__rspack_import_10);
-                const route7 = Object.assign({}, Reflect.get(_src_cli_bots_update_tsx__rspack_import_11, 'default'), _src_cli_bots_update_tsx__rspack_import_11);
-                const route8 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_hosts_tsx__rspack_import_12, 'default'), _src_cli_chatgpt_desktop_hosts_tsx__rspack_import_12);
-                const route9 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_read_tsx__rspack_import_13, 'default'), _src_cli_chatgpt_desktop_read_tsx__rspack_import_13);
-                const route10 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_search_tsx__rspack_import_14, 'default'), _src_cli_chatgpt_desktop_search_tsx__rspack_import_14);
-                const route11 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_send_tsx__rspack_import_15, 'default'), _src_cli_chatgpt_desktop_send_tsx__rspack_import_15);
-                const route12 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_status_tsx__rspack_import_16, 'default'), _src_cli_chatgpt_desktop_status_tsx__rspack_import_16);
-                const route13 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_threads_tsx__rspack_import_17, 'default'), _src_cli_chatgpt_desktop_threads_tsx__rspack_import_17);
-                const route14 = Object.assign({}, Reflect.get(_src_cli_claude_send_tsx__rspack_import_18, 'default'), _src_cli_claude_send_tsx__rspack_import_18);
-                const route15 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_respond_tsx__rspack_import_19, 'default'), _src_cli_codex_bridge_respond_tsx__rspack_import_19);
-                const route16 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_run_tsx__rspack_import_20, 'default'), _src_cli_codex_bridge_run_tsx__rspack_import_20);
-                const route17 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_start_tsx__rspack_import_21, 'default'), _src_cli_codex_bridge_start_tsx__rspack_import_21);
-                const route18 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_status_tsx__rspack_import_22, 'default'), _src_cli_codex_bridge_status_tsx__rspack_import_22);
-                const route19 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_stop_tsx__rspack_import_23, 'default'), _src_cli_codex_bridge_stop_tsx__rspack_import_23);
-                const route20 = Object.assign({}, Reflect.get(_src_cli_codex_desktop_shim_tsx__rspack_import_24, 'default'), _src_cli_codex_desktop_shim_tsx__rspack_import_24);
-                const route21 = Object.assign({}, Reflect.get(_src_cli_codex_list_threads_tsx__rspack_import_25, 'default'), _src_cli_codex_list_threads_tsx__rspack_import_25);
-                const route22 = Object.assign({}, Reflect.get(_src_cli_codex_new_tsx__rspack_import_26, 'default'), _src_cli_codex_new_tsx__rspack_import_26);
-                const route23 = Object.assign({}, Reflect.get(_src_cli_codex_queue_tsx__rspack_import_27, 'default'), _src_cli_codex_queue_tsx__rspack_import_27);
-                const route24 = Object.assign({}, Reflect.get(_src_cli_codex_send_tsx__rspack_import_28, 'default'), _src_cli_codex_send_tsx__rspack_import_28);
-                const route25 = Object.assign({}, Reflect.get(_src_cli_codex_status_tsx__rspack_import_29, 'default'), _src_cli_codex_status_tsx__rspack_import_29);
-                const route26 = Object.assign({}, Reflect.get(_src_cli_codex_wait_tsx__rspack_import_30, 'default'), _src_cli_codex_wait_tsx__rspack_import_30);
-                const route27 = Object.assign({}, Reflect.get(_src_cli_codex_watch_tsx__rspack_import_31, 'default'), _src_cli_codex_watch_tsx__rspack_import_31);
-                const route28 = Object.assign({}, Reflect.get(_src_cli_config_export_tsx__rspack_import_32, 'default'), _src_cli_config_export_tsx__rspack_import_32);
-                const route29 = Object.assign({}, Reflect.get(_src_cli_config_import_tsx__rspack_import_33, 'default'), _src_cli_config_import_tsx__rspack_import_33);
-                const route30 = Object.assign({}, Reflect.get(_src_cli_config_path_tsx__rspack_import_34, 'default'), _src_cli_config_path_tsx__rspack_import_34);
-                const route31 = Object.assign({}, Reflect.get(_src_cli_doctor_tsx__rspack_import_35, 'default'), _src_cli_doctor_tsx__rspack_import_35);
-                const route32 = Object.assign({}, Reflect.get(_src_cli_groups_add_tsx__rspack_import_36, 'default'), _src_cli_groups_add_tsx__rspack_import_36);
-                const route33 = Object.assign({}, Reflect.get(_src_cli_groups_create_tsx__rspack_import_37, 'default'), _src_cli_groups_create_tsx__rspack_import_37);
-                const route34 = Object.assign({}, Reflect.get(_src_cli_groups_delete_tsx__rspack_import_38, 'default'), _src_cli_groups_delete_tsx__rspack_import_38);
-                const route35 = Object.assign({}, Reflect.get(_src_cli_groups_get_tsx__rspack_import_39, 'default'), _src_cli_groups_get_tsx__rspack_import_39);
-                const route36 = Object.assign({}, Reflect.get(_src_cli_groups_list_tsx__rspack_import_40, 'default'), _src_cli_groups_list_tsx__rspack_import_40);
-                const route37 = Object.assign({}, Reflect.get(_src_cli_groups_members_tsx__rspack_import_41, 'default'), _src_cli_groups_members_tsx__rspack_import_41);
-                const route38 = Object.assign({}, Reflect.get(_src_cli_groups_remove_tsx__rspack_import_42, 'default'), _src_cli_groups_remove_tsx__rspack_import_42);
-                const route39 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_43, 'default'), _src_cli_groups_set_tsx__rspack_import_43);
-                const route40 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_44, 'default'), _src_cli_groups_update_tsx__rspack_import_44);
-                const route41 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_45, 'default'), _src_cli_history_tsx__rspack_import_45);
-                const route42 = Object.assign({}, Reflect.get(_src_cli_migrate_bots_tsx__rspack_import_46, 'default'), _src_cli_migrate_bots_tsx__rspack_import_46);
-                const route43 = Object.assign({}, Reflect.get(_src_cli_migrate_capture_tsx__rspack_import_47, 'default'), _src_cli_migrate_capture_tsx__rspack_import_47);
-                const route44 = Object.assign({}, Reflect.get(_src_cli_migrate_check_tsx__rspack_import_48, 'default'), _src_cli_migrate_check_tsx__rspack_import_48);
-                const route45 = Object.assign({}, Reflect.get(_src_cli_migrate_import_tsx__rspack_import_49, 'default'), _src_cli_migrate_import_tsx__rspack_import_49);
-                const route46 = Object.assign({}, Reflect.get(_src_cli_migrate_preview_tsx__rspack_import_50, 'default'), _src_cli_migrate_preview_tsx__rspack_import_50);
-                const route47 = Object.assign({}, Reflect.get(_src_cli_migrate_run_tsx__rspack_import_51, 'default'), _src_cli_migrate_run_tsx__rspack_import_51);
-                const route48 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_52, 'default'), _src_cli_reconcile_tsx__rspack_import_52);
-                const route49 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_53, 'default'), _src_cli_send_tsx__rspack_import_53);
-                const route50 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_54, 'default'), _src_cli_skills_add_tsx__rspack_import_54);
-                const route51 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_55, 'default'), _src_cli_skills_list_tsx__rspack_import_55);
-                const route52 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_56, 'default'), _src_cli_skills_remove_tsx__rspack_import_56);
-                const route53 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_57, 'default'), _src_cli_thread_tsx__rspack_import_57);
-                const route54 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_58, 'default'), _src_cli_wake_tsx__rspack_import_58);
-                const route55 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_59, 'default'), _src_cli_wear_pair_tsx__rspack_import_59);
-                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_60.E7)({
+                const route7 = Object.assign({}, Reflect.get(_src_cli_bots_template_tsx__rspack_import_11, 'default'), _src_cli_bots_template_tsx__rspack_import_11);
+                const route8 = Object.assign({}, Reflect.get(_src_cli_bots_update_tsx__rspack_import_12, 'default'), _src_cli_bots_update_tsx__rspack_import_12);
+                const route9 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_hosts_tsx__rspack_import_13, 'default'), _src_cli_chatgpt_desktop_hosts_tsx__rspack_import_13);
+                const route10 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_read_tsx__rspack_import_14, 'default'), _src_cli_chatgpt_desktop_read_tsx__rspack_import_14);
+                const route11 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_search_tsx__rspack_import_15, 'default'), _src_cli_chatgpt_desktop_search_tsx__rspack_import_15);
+                const route12 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_send_tsx__rspack_import_16, 'default'), _src_cli_chatgpt_desktop_send_tsx__rspack_import_16);
+                const route13 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_status_tsx__rspack_import_17, 'default'), _src_cli_chatgpt_desktop_status_tsx__rspack_import_17);
+                const route14 = Object.assign({}, Reflect.get(_src_cli_chatgpt_desktop_threads_tsx__rspack_import_18, 'default'), _src_cli_chatgpt_desktop_threads_tsx__rspack_import_18);
+                const route15 = Object.assign({}, Reflect.get(_src_cli_claude_send_tsx__rspack_import_19, 'default'), _src_cli_claude_send_tsx__rspack_import_19);
+                const route16 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_respond_tsx__rspack_import_20, 'default'), _src_cli_codex_bridge_respond_tsx__rspack_import_20);
+                const route17 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_run_tsx__rspack_import_21, 'default'), _src_cli_codex_bridge_run_tsx__rspack_import_21);
+                const route18 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_start_tsx__rspack_import_22, 'default'), _src_cli_codex_bridge_start_tsx__rspack_import_22);
+                const route19 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_status_tsx__rspack_import_23, 'default'), _src_cli_codex_bridge_status_tsx__rspack_import_23);
+                const route20 = Object.assign({}, Reflect.get(_src_cli_codex_bridge_stop_tsx__rspack_import_24, 'default'), _src_cli_codex_bridge_stop_tsx__rspack_import_24);
+                const route21 = Object.assign({}, Reflect.get(_src_cli_codex_desktop_shim_tsx__rspack_import_25, 'default'), _src_cli_codex_desktop_shim_tsx__rspack_import_25);
+                const route22 = Object.assign({}, Reflect.get(_src_cli_codex_list_threads_tsx__rspack_import_26, 'default'), _src_cli_codex_list_threads_tsx__rspack_import_26);
+                const route23 = Object.assign({}, Reflect.get(_src_cli_codex_new_tsx__rspack_import_27, 'default'), _src_cli_codex_new_tsx__rspack_import_27);
+                const route24 = Object.assign({}, Reflect.get(_src_cli_codex_queue_tsx__rspack_import_28, 'default'), _src_cli_codex_queue_tsx__rspack_import_28);
+                const route25 = Object.assign({}, Reflect.get(_src_cli_codex_send_tsx__rspack_import_29, 'default'), _src_cli_codex_send_tsx__rspack_import_29);
+                const route26 = Object.assign({}, Reflect.get(_src_cli_codex_status_tsx__rspack_import_30, 'default'), _src_cli_codex_status_tsx__rspack_import_30);
+                const route27 = Object.assign({}, Reflect.get(_src_cli_codex_wait_tsx__rspack_import_31, 'default'), _src_cli_codex_wait_tsx__rspack_import_31);
+                const route28 = Object.assign({}, Reflect.get(_src_cli_codex_watch_tsx__rspack_import_32, 'default'), _src_cli_codex_watch_tsx__rspack_import_32);
+                const route29 = Object.assign({}, Reflect.get(_src_cli_config_export_tsx__rspack_import_33, 'default'), _src_cli_config_export_tsx__rspack_import_33);
+                const route30 = Object.assign({}, Reflect.get(_src_cli_config_import_tsx__rspack_import_34, 'default'), _src_cli_config_import_tsx__rspack_import_34);
+                const route31 = Object.assign({}, Reflect.get(_src_cli_config_path_tsx__rspack_import_35, 'default'), _src_cli_config_path_tsx__rspack_import_35);
+                const route32 = Object.assign({}, Reflect.get(_src_cli_doctor_tsx__rspack_import_36, 'default'), _src_cli_doctor_tsx__rspack_import_36);
+                const route33 = Object.assign({}, Reflect.get(_src_cli_groups_add_tsx__rspack_import_37, 'default'), _src_cli_groups_add_tsx__rspack_import_37);
+                const route34 = Object.assign({}, Reflect.get(_src_cli_groups_create_tsx__rspack_import_38, 'default'), _src_cli_groups_create_tsx__rspack_import_38);
+                const route35 = Object.assign({}, Reflect.get(_src_cli_groups_delete_tsx__rspack_import_39, 'default'), _src_cli_groups_delete_tsx__rspack_import_39);
+                const route36 = Object.assign({}, Reflect.get(_src_cli_groups_get_tsx__rspack_import_40, 'default'), _src_cli_groups_get_tsx__rspack_import_40);
+                const route37 = Object.assign({}, Reflect.get(_src_cli_groups_list_tsx__rspack_import_41, 'default'), _src_cli_groups_list_tsx__rspack_import_41);
+                const route38 = Object.assign({}, Reflect.get(_src_cli_groups_members_tsx__rspack_import_42, 'default'), _src_cli_groups_members_tsx__rspack_import_42);
+                const route39 = Object.assign({}, Reflect.get(_src_cli_groups_remove_tsx__rspack_import_43, 'default'), _src_cli_groups_remove_tsx__rspack_import_43);
+                const route40 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_44, 'default'), _src_cli_groups_set_tsx__rspack_import_44);
+                const route41 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_45, 'default'), _src_cli_groups_update_tsx__rspack_import_45);
+                const route42 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_46, 'default'), _src_cli_history_tsx__rspack_import_46);
+                const route43 = Object.assign({}, Reflect.get(_src_cli_migrate_bots_tsx__rspack_import_47, 'default'), _src_cli_migrate_bots_tsx__rspack_import_47);
+                const route44 = Object.assign({}, Reflect.get(_src_cli_migrate_capture_tsx__rspack_import_48, 'default'), _src_cli_migrate_capture_tsx__rspack_import_48);
+                const route45 = Object.assign({}, Reflect.get(_src_cli_migrate_check_tsx__rspack_import_49, 'default'), _src_cli_migrate_check_tsx__rspack_import_49);
+                const route46 = Object.assign({}, Reflect.get(_src_cli_migrate_import_tsx__rspack_import_50, 'default'), _src_cli_migrate_import_tsx__rspack_import_50);
+                const route47 = Object.assign({}, Reflect.get(_src_cli_migrate_preview_tsx__rspack_import_51, 'default'), _src_cli_migrate_preview_tsx__rspack_import_51);
+                const route48 = Object.assign({}, Reflect.get(_src_cli_migrate_run_tsx__rspack_import_52, 'default'), _src_cli_migrate_run_tsx__rspack_import_52);
+                const route49 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_53, 'default'), _src_cli_reconcile_tsx__rspack_import_53);
+                const route50 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_54, 'default'), _src_cli_send_tsx__rspack_import_54);
+                const route51 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_55, 'default'), _src_cli_skills_add_tsx__rspack_import_55);
+                const route52 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_56, 'default'), _src_cli_skills_list_tsx__rspack_import_56);
+                const route53 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_57, 'default'), _src_cli_skills_remove_tsx__rspack_import_57);
+                const route54 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_58, 'default'), _src_cli_thread_tsx__rspack_import_58);
+                const route55 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_59, 'default'), _src_cli_wake_tsx__rspack_import_59);
+                const route56 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_60, 'default'), _src_cli_wear_pair_tsx__rspack_import_60);
+                const pluginRoot = (0, _agent_bundle_runtime__rspack_import_61.E7)({
                     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
                     stateAnchor: 'user-data'
                 });
@@ -43453,152 +43801,155 @@ var __webpack_modules__ = {
                     "cli:bots/list": Object.freeze({
                         module: route6
                     }),
-                    "cli:bots/update": Object.freeze({
+                    "cli:bots/template": Object.freeze({
                         module: route7
                     }),
-                    "cli:chatgpt-desktop/hosts": Object.freeze({
+                    "cli:bots/update": Object.freeze({
                         module: route8
                     }),
-                    "cli:chatgpt-desktop/read": Object.freeze({
+                    "cli:chatgpt-desktop/hosts": Object.freeze({
                         module: route9
                     }),
-                    "cli:chatgpt-desktop/search": Object.freeze({
+                    "cli:chatgpt-desktop/read": Object.freeze({
                         module: route10
                     }),
-                    "cli:chatgpt-desktop/send": Object.freeze({
+                    "cli:chatgpt-desktop/search": Object.freeze({
                         module: route11
                     }),
-                    "cli:chatgpt-desktop/status": Object.freeze({
+                    "cli:chatgpt-desktop/send": Object.freeze({
                         module: route12
                     }),
-                    "cli:chatgpt-desktop/threads": Object.freeze({
+                    "cli:chatgpt-desktop/status": Object.freeze({
                         module: route13
                     }),
-                    "cli:claude/send": Object.freeze({
+                    "cli:chatgpt-desktop/threads": Object.freeze({
                         module: route14
                     }),
-                    "cli:codex/bridge/respond": Object.freeze({
+                    "cli:claude/send": Object.freeze({
                         module: route15
                     }),
-                    "cli:codex/bridge/run": Object.freeze({
+                    "cli:codex/bridge/respond": Object.freeze({
                         module: route16
                     }),
-                    "cli:codex/bridge/start": Object.freeze({
+                    "cli:codex/bridge/run": Object.freeze({
                         module: route17
                     }),
-                    "cli:codex/bridge/status": Object.freeze({
+                    "cli:codex/bridge/start": Object.freeze({
                         module: route18
                     }),
-                    "cli:codex/bridge/stop": Object.freeze({
+                    "cli:codex/bridge/status": Object.freeze({
                         module: route19
                     }),
-                    "cli:codex/desktop-shim": Object.freeze({
+                    "cli:codex/bridge/stop": Object.freeze({
                         module: route20
                     }),
-                    "cli:codex/list-threads": Object.freeze({
+                    "cli:codex/desktop-shim": Object.freeze({
                         module: route21
                     }),
-                    "cli:codex/new": Object.freeze({
+                    "cli:codex/list-threads": Object.freeze({
                         module: route22
                     }),
-                    "cli:codex/queue": Object.freeze({
+                    "cli:codex/new": Object.freeze({
                         module: route23
                     }),
-                    "cli:codex/send": Object.freeze({
+                    "cli:codex/queue": Object.freeze({
                         module: route24
                     }),
-                    "cli:codex/status": Object.freeze({
+                    "cli:codex/send": Object.freeze({
                         module: route25
                     }),
-                    "cli:codex/wait": Object.freeze({
+                    "cli:codex/status": Object.freeze({
                         module: route26
                     }),
-                    "cli:codex/watch": Object.freeze({
+                    "cli:codex/wait": Object.freeze({
                         module: route27
                     }),
-                    "cli:config/export": Object.freeze({
+                    "cli:codex/watch": Object.freeze({
                         module: route28
                     }),
-                    "cli:config/import": Object.freeze({
+                    "cli:config/export": Object.freeze({
                         module: route29
                     }),
-                    "cli:config/path": Object.freeze({
+                    "cli:config/import": Object.freeze({
                         module: route30
                     }),
-                    "cli:doctor": Object.freeze({
+                    "cli:config/path": Object.freeze({
                         module: route31
                     }),
-                    "cli:groups/add": Object.freeze({
+                    "cli:doctor": Object.freeze({
                         module: route32
                     }),
-                    "cli:groups/create": Object.freeze({
+                    "cli:groups/add": Object.freeze({
                         module: route33
                     }),
-                    "cli:groups/delete": Object.freeze({
+                    "cli:groups/create": Object.freeze({
                         module: route34
                     }),
-                    "cli:groups/get": Object.freeze({
+                    "cli:groups/delete": Object.freeze({
                         module: route35
                     }),
-                    "cli:groups/list": Object.freeze({
+                    "cli:groups/get": Object.freeze({
                         module: route36
                     }),
-                    "cli:groups/members": Object.freeze({
+                    "cli:groups/list": Object.freeze({
                         module: route37
                     }),
-                    "cli:groups/remove": Object.freeze({
+                    "cli:groups/members": Object.freeze({
                         module: route38
                     }),
-                    "cli:groups/set": Object.freeze({
+                    "cli:groups/remove": Object.freeze({
                         module: route39
                     }),
-                    "cli:groups/update": Object.freeze({
+                    "cli:groups/set": Object.freeze({
                         module: route40
                     }),
-                    "cli:history": Object.freeze({
+                    "cli:groups/update": Object.freeze({
                         module: route41
                     }),
-                    "cli:migrate/bots": Object.freeze({
+                    "cli:history": Object.freeze({
                         module: route42
                     }),
-                    "cli:migrate/capture": Object.freeze({
+                    "cli:migrate/bots": Object.freeze({
                         module: route43
                     }),
-                    "cli:migrate/check": Object.freeze({
+                    "cli:migrate/capture": Object.freeze({
                         module: route44
                     }),
-                    "cli:migrate/import": Object.freeze({
+                    "cli:migrate/check": Object.freeze({
                         module: route45
                     }),
-                    "cli:migrate/preview": Object.freeze({
+                    "cli:migrate/import": Object.freeze({
                         module: route46
                     }),
-                    "cli:migrate/run": Object.freeze({
+                    "cli:migrate/preview": Object.freeze({
                         module: route47
                     }),
-                    "cli:reconcile": Object.freeze({
+                    "cli:migrate/run": Object.freeze({
                         module: route48
                     }),
-                    "cli:send": Object.freeze({
+                    "cli:reconcile": Object.freeze({
                         module: route49
                     }),
-                    "cli:skills/add": Object.freeze({
+                    "cli:send": Object.freeze({
                         module: route50
                     }),
-                    "cli:skills/list": Object.freeze({
+                    "cli:skills/add": Object.freeze({
                         module: route51
                     }),
-                    "cli:skills/remove": Object.freeze({
+                    "cli:skills/list": Object.freeze({
                         module: route52
                     }),
-                    "cli:thread": Object.freeze({
+                    "cli:skills/remove": Object.freeze({
                         module: route53
                     }),
-                    "cli:wake": Object.freeze({
+                    "cli:thread": Object.freeze({
                         module: route54
                     }),
-                    "cli:wear/pair": Object.freeze({
+                    "cli:wake": Object.freeze({
                         module: route55
+                    }),
+                    "cli:wear/pair": Object.freeze({
+                        module: route56
                     })
                 });
                 const commands = Object.freeze([
@@ -43947,6 +44298,100 @@ var __webpack_modules__ = {
                         ],
                         "rendered": true,
                         "routeId": "cli:bots/list"
+                    },
+                    {
+                        "aliases": [],
+                        "description": "Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.",
+                        "exitCode": "result",
+                        "options": [
+                            {
+                                "description": "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
+                                "key": "account",
+                                "kind": "string",
+                                "option": "account",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Agents directory for --files mode",
+                                "key": "dir",
+                                "kind": "string",
+                                "option": "dir",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Force the on-disk agents store",
+                                "key": "files",
+                                "kind": "boolean",
+                                "option": "files",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Force the live gateway",
+                                "key": "gateway",
+                                "kind": "boolean",
+                                "option": "gateway",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Publish a template version (ActivateGrokBotTemplateVersion), as confirming the app's review card does",
+                                "key": "publish",
+                                "kind": "boolean",
+                                "option": "publish",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Bot id or name",
+                                "key": "ref",
+                                "kind": "string",
+                                "option": "ref",
+                                "positional": 0,
+                                "repeated": false,
+                                "required": true
+                            },
+                            {
+                                "description": "Show a template version's recipe (instructions, memory, skills, routines, plugins); sends nothing",
+                                "key": "show",
+                                "kind": "boolean",
+                                "option": "show",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Show the current template and link; sends nothing",
+                                "key": "status",
+                                "kind": "boolean",
+                                "option": "status",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Template version for --show or --publish (default: the newest template card in the bot's chat, else the active version)",
+                                "key": "templateVersion",
+                                "kind": "number",
+                                "option": "template-version",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Seconds to wait for the template after the message (default 600; 0 does not wait)",
+                                "key": "wait",
+                                "kind": "number",
+                                "option": "wait",
+                                "repeated": false,
+                                "required": false
+                            }
+                        ],
+                        "path": [
+                            "bots",
+                            "template"
+                        ],
+                        "rendered": true,
+                        "routeId": "cli:bots/template"
                     },
                     {
                         "aliases": [],
@@ -47048,27 +47493,27 @@ var __webpack_modules__ = {
                         instanceId: processLifetime.instanceId,
                         pid: processLifetime.pid
                     };
-                    const result = await (0, _agent_bundle_runtime__rspack_import_61.iC)({
+                    const result = await (0, _agent_bundle_runtime__rspack_import_62.iC)({
                         capabilities: {
-                            command: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                            filesystem: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                            network: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                            projectRoot: (0, _agent_bundle_runtime__rspack_import_61.qC)({
+                            command: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                            filesystem: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                            network: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                            projectRoot: (0, _agent_bundle_runtime__rspack_import_62.qC)({
                                 root: cwd
                             }, 'derived')
                         },
-                        host: (0, _agent_bundle_runtime__rspack_import_61.hU)('unsupported-surface'),
+                        host: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
                         invocation: {
                             kind: 'cli',
                             operationId: command.routeId,
                             surface: command.path.join(' ')
                         },
-                        lineage: (0, _agent_bundle_runtime__rspack_import_61.hU)('unsupported-surface'),
+                        lineage: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
                         plugin: pluginRoot.identity,
                         process: processHit,
                         signal: context.signal,
-                        terminal: (0, _agent_bundle_runtime__rspack_import_61.qC)(context.terminal, 'native'),
-                        workspace: (0, _agent_bundle_runtime__rspack_import_61.qC)({
+                        terminal: (0, _agent_bundle_runtime__rspack_import_62.qC)(context.terminal, 'native'),
+                        workspace: (0, _agent_bundle_runtime__rspack_import_62.qC)({
                             root: cwd
                         }, 'derived')
                     }, async ()=>route.module.default({
@@ -47175,7 +47620,7 @@ var __webpack_modules__ = {
                             return stream;
                         }
                     });
-                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_62.jK)(host);
+                    const dispatcher = (0, _agent_bundle_runtime__rspack_import_63.jK)(host);
                     return Object.freeze({
                         close: async ()=>{
                             await worker.terminate();
@@ -50833,6 +51278,10 @@ var __webpack_modules__ = {
                     removeGroupMember: (group, bot)=>_gateway_js__rspack_import_1.A0(session, group, bot),
                     send: (ref, prompt, extra)=>_gateway_js__rspack_import_1.LV(session, ref, prompt, extra),
                     reconcile: (ref, clientNonce)=>_gateway_js__rspack_import_1.zk(session, ref, clientNonce),
+                    template: (ref, options)=>_gateway_js__rspack_import_1.Yy(session, ref, options),
+                    shareTemplate: (ref, options)=>_gateway_js__rspack_import_1.Bj(session, ref, options),
+                    templateVersion: (ref, options)=>_gateway_js__rspack_import_1.YA(session, ref, options),
+                    publishTemplate: (ref, options)=>_gateway_js__rspack_import_1.VZ(session, ref, options),
                     transcript: (ref, limit)=>_gateway_js__rspack_import_1.bA(session, ref, limit),
                     thread: (ref, rootId)=>_gateway_js__rspack_import_1.fG(session, ref, rootId),
                     skills: ()=>_gateway_js__rspack_import_1.bG(session),
@@ -50858,6 +51307,18 @@ var __webpack_modules__ = {
                 },
                 reconcile: async ()=>{
                     throw new _store_js__rspack_import_0.AD("reconcile requires the live gateway");
+                },
+                template: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
+                },
+                shareTemplate: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
+                },
+                templateVersion: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
+                },
+                publishTemplate: async ()=>{
+                    throw new _store_js__rspack_import_0.AD("bots template requires the live gateway");
                 },
                 transcript: async ()=>{
                     throw new _store_js__rspack_import_0.AD("thread requires the live gateway");
@@ -51511,6 +51972,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/gateway.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_os__rspack_import_1 = __webpack_require__("node:os");
+        var zod__rspack_import_12 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _app_auth_js__rspack_import_2 = __webpack_require__("./src/core/app-auth.js");
         var _client_version_js__rspack_import_3 = __webpack_require__("./src/core/client-version.js");
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
@@ -52650,6 +53112,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "ResolveGrokBotAttachmentReads",
             "ReadGrokBotAgentAttachmentChunk",
             "GetGrokBotRuntimeCapabilities",
+            "GetGrokBotTemplateForSourceAgent",
+            "GetGrokBotTemplateVersion",
             "ListSandBoxStoreObjects",
             "StatSandBoxStoreObject",
             "PresignSandBoxStoreReads"
@@ -52888,14 +53352,35 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             "unknown",
             "internal"
         ]);
+        const SEND_INITIATORS = new Map([
+            [
+                "user",
+                "GROK_BOT_USER_MESSAGE_INITIATOR_USER"
+            ],
+            [
+                "template_share",
+                "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"
+            ]
+        ]);
         async function backendSend(session, rec, prompt, extra, clientNonce) {
+            const initiator = SEND_INITIATORS.get(extra.initiator ?? "user");
+            if (!initiator) {
+                const error = new GatewayError("Unknown send initiator \"" + extra.initiator + "\". Use: " + [
+                    ...SEND_INITIATORS.keys()
+                ].join(" "), {
+                    method: "SendGrokBotUserMessage",
+                    code: "INVALID_INITIATOR"
+                });
+                error.delivery = "rejected";
+                throw error;
+            }
             const body = {
                 agentId: rec.id,
                 messageId: clientNonce,
                 text: prompt,
                 sentAtMs: String(Date.now()),
                 source: "GROK_BOT_CLIENT_SURFACE_DESKTOP",
-                initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_USER",
+                initiator,
                 sendSource: "GROK_BOT_SEND_SOURCE_CHAT",
                 ...extra.replyToId ? {
                     replyToId: extra.replyToId
@@ -53640,6 +54125,294 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...sendStatusField
             };
         }
+        const TEMPLATE_CREATE_TEXT = "Create a public template of yourself that I can share with somebody else";
+        const TEMPLATE_UPDATE_TEXT = "Update the shared template of yourself.";
+        async function templateBot(session, ref, signal) {
+            if (!hasBackend(session)) {
+                throw new GatewayError("Bot templates need the Grok Bot backend, and this session has no access token. Sign in to the Grok Bot app (0.78+) on this computer; GROK_BOT_GATEWAY_URL and GROK_BOT_GATEWAY_TOKEN must be unset.", {
+                    code: "NO_ACCESS_TOKEN"
+                });
+            }
+            const rec = await resolveRef(session, ref, {
+                signal
+            });
+            if (boxOnlyRecords.has(rec)) {
+                throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") is on the box roster only; Grok Bot shares templates of server-hosted bots only.", {
+                    code: "TEMPLATE_NOT_SERVER_BOT"
+                });
+            }
+            if (rec.isGroup) {
+                throw new GatewayError(rec.name + " (" + rec.id + ") is a group; a template is shared for one bot.", {
+                    code: "TEMPLATE_NOT_BOT"
+                });
+            }
+            return rec;
+        }
+        function templateFrom(template) {
+            if (!template || typeof template !== "object" || typeof template.shareId !== "string" || !template.shareId) return null;
+            return {
+                shareId: template.shareId,
+                link: "https://x.ai/bot/" + encodeURIComponent(template.shareId),
+                name: typeof template.name === "string" ? template.name : "",
+                published: template.published === true,
+                visibility: typeof template.visibility === "string" ? template.visibility : "",
+                activeVersion: Number(template.activeVersion) || 0,
+                updatedAtMs: Number(template.updatedAtMs) || 0
+            };
+        }
+        async function readTemplate(session, rec, signal) {
+            const data = await backendRead(session, "GetGrokBotTemplateForSourceAgent", {
+                sourceAgentId: rec.id
+            }, {
+                signal
+            });
+            return {
+                template: templateFrom(data?.template),
+                ...typeof data?.exportPolicy === "string" && data.exportPolicy ? {
+                    exportPolicy: data.exportPolicy
+                } : {},
+                hasTeam: data?.hasTeam === true
+            };
+        }
+        async function getBotTemplate(session, ref, { signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            return {
+                target: rec,
+                ...await readTemplate(session, rec, signal)
+            };
+        }
+        async function shareBotTemplate(session, ref, { waitSeconds = 600, pollSeconds = 10, signal, clientNonce = (0, node_crypto__rspack_import_0.randomUUID)() } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const before = (await readTemplate(session, rec, signal)).template;
+            let delivery;
+            try {
+                const sent = await backendSend(session, rec, before ? TEMPLATE_UPDATE_TEXT : TEMPLATE_CREATE_TEXT, {
+                    signal,
+                    initiator: "template_share"
+                }, clientNonce);
+                delivery = sent.delivery;
+            } catch (err) {
+                if (err && typeof err === "object") {
+                    if (err.targetId == null) err.targetId = rec.id;
+                    if (err.clientNonce == null) err.clientNonce = clientNonce;
+                }
+                if (err?.delivery !== "unknown") throw err;
+                debug("template message delivery unknown, waiting for the template without resending: " + (err instanceof Error ? err.message : String(err)));
+                delivery = "unknown";
+            }
+            const fresh = (t)=>Boolean(t) && (!before || t.shareId !== before.shareId || t.updatedAtMs > before.updatedAtMs);
+            const deadline = Date.now() + Math.max(0, Number(waitSeconds) || 0) * 1000;
+            const pollMs = Math.max(10, (Number(pollSeconds) || 10) * 1000);
+            let template = null;
+            while(!template && Date.now() < deadline){
+                await abortableSleep(Math.min(pollMs, deadline - Date.now()), signal);
+                try {
+                    const after = (await readTemplate(session, rec, signal)).template;
+                    if (fresh(after)) template = after;
+                } catch (error) {
+                    if (signal?.aborted) throw error;
+                    debug("GetGrokBotTemplateForSourceAgent failed while waiting: " + (error instanceof Error ? error.message : String(error)));
+                }
+            }
+            return {
+                target: rec,
+                delivery,
+                clientNonce,
+                action: before ? "updated" : "created",
+                template
+            };
+        }
+        const RECIPE_MAX_BYTES = 26214400;
+        const RECIPE_TIMEOUT_MS = 20000;
+        const RECIPE_BUCKET = "grok-bot-templates";
+        const RECIPE_AVATAR_SHAPES = [
+            "blob",
+            "pebble",
+            "bean",
+            "egg",
+            "squircle",
+            "tablet",
+            "capsule",
+            "cylinder",
+            "hex",
+            "gem",
+            "crystal",
+            "wedge",
+            "shield",
+            "dome",
+            "arch",
+            "cloud",
+            "teardrop",
+            "leaf",
+            "square",
+            "sparkle",
+            "clover",
+            "flower",
+            "heart",
+            "house",
+            "star"
+        ];
+        const absentWhenNull = (value)=>value === null ? undefined : value;
+        const recipeSchema = zod__rspack_import_12.Ikc({
+            profile: zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                avatarColor: zod__rspack_import_12.k5n(_store_js__rspack_import_7.T7).optional(),
+                avatarShape: zod__rspack_import_12.k5n(RECIPE_AVATAR_SHAPES).optional()
+            }),
+            memory: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                kind: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.k5n([
+                    "profile",
+                    "log"
+                ]).optional()),
+                createdAt: zod__rspack_import_12.vkY(absentWhenNull, zod__rspack_import_12.YjP().optional()),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            skills: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            routines: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                slug: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1),
+                content: zod__rspack_import_12.YjP().min(1)
+            })),
+            plugins: zod__rspack_import_12.YOg(zod__rspack_import_12.Ikc({
+                name: zod__rspack_import_12.YjP().min(1),
+                description: zod__rspack_import_12.YjP().min(1).optional(),
+                pluginId: zod__rspack_import_12.YjP().min(1)
+            })),
+            gettingStarted: zod__rspack_import_12.Ikc({
+                skill: zod__rspack_import_12.YjP().min(1)
+            }).optional()
+        }).superRefine((recipe, ctx)=>{
+            const skill = recipe.gettingStarted?.skill;
+            if (skill !== undefined && !recipe.skills.some((s)=>s.name === skill)) {
+                ctx.addIssue({
+                    code: "custom",
+                    path: [
+                        "gettingStarted",
+                        "skill"
+                    ],
+                    message: "gettingStarted.skill must name one of this recipe's skills"
+                });
+            }
+        });
+        function parseRecipe(bytes) {
+            if (bytes.byteLength < 1 || bytes.byteLength > RECIPE_MAX_BYTES) {
+                throw new GatewayError("Grok Bot template recipe refused: size " + bytes.byteLength + " bytes", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            let value;
+            try {
+                value = JSON.parse(new TextDecoder().decode(bytes));
+            } catch  {
+                throw new GatewayError("Grok Bot template recipe is invalid: not JSON", {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            const parsed = recipeSchema.safeParse(value);
+            if (!parsed.success) {
+                const issue = parsed.error.issues[0];
+                throw new GatewayError("Grok Bot template recipe is invalid: " + (issue ? (issue.path.join(".") || "recipe") + " " + issue.message : "unexpected shape"), {
+                    code: "RECIPE_INVALID"
+                });
+            }
+            return parsed.data;
+        }
+        async function existingTemplate(session, rec, signal) {
+            const { template } = await readTemplate(session, rec, signal);
+            if (!template) {
+                throw new GatewayError("Bot " + rec.name + " (" + rec.id + ") has no template yet; gbot bots template creates one.", {
+                    code: "TEMPLATE_MISSING"
+                });
+            }
+            return template;
+        }
+        async function templateVersionFor(session, rec, template, version) {
+            if (version !== undefined) {
+                if (!Number.isSafeInteger(version) || version < 1) throw new GatewayError("A template version is a positive integer.", {
+                    code: "TEMPLATE_NO_VERSION"
+                });
+                return {
+                    version,
+                    versionFrom: "option"
+                };
+            }
+            const entries = transcriptRows((await transcriptTail(session, rec, 200)).transcript);
+            for(let index = entries.length - 1; index >= 0; index -= 1){
+                const entry = entries[index];
+                const card = entry && typeof entry === "object" ? entry.message : undefined;
+                if (entry?.kind !== "send-message" || card?.type !== "bot-template-share" || card.shareId !== template.shareId) continue;
+                const cardVersion = Number(card.version);
+                if (Number.isSafeInteger(cardVersion) && cardVersion >= 1) return {
+                    version: cardVersion,
+                    versionFrom: "card"
+                };
+            }
+            if (template.activeVersion >= 1) return {
+                version: template.activeVersion,
+                versionFrom: "active"
+            };
+            throw new GatewayError("No template version to use: the last 200 transcript entries of " + rec.name + " have no template card for " + template.shareId + ", and no version is active. Give the version (--template-version N).", {
+                code: "TEMPLATE_NO_VERSION"
+            });
+        }
+        async function getBotTemplateVersion(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendRead(session, "GetGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            }, {
+                signal
+            });
+            const url = typeof data?.blobGetUrl === "string" ? data.blobGetUrl.trim() : "";
+            if (!url) throw new GatewayError("GetGrokBotTemplateVersion returned no recipe url", {
+                code: "RECIPE_MISSING"
+            });
+            const { bytes } = await (0, _migration_capture_js__rspack_import_10.$8)(url, {
+                cap: RECIPE_MAX_BYTES,
+                timeoutMs: RECIPE_TIMEOUT_MS,
+                bucket: RECIPE_BUCKET
+            });
+            const createdAtMs = Number(data?.createdAtMs);
+            return {
+                target: rec,
+                template,
+                version: Number(data?.version) || chosen.version,
+                versionFrom: chosen.versionFrom,
+                active: data?.active === true,
+                ...Number.isFinite(createdAtMs) && createdAtMs > 0 ? {
+                    createdAtMs
+                } : {},
+                visibility: typeof data?.visibility === "string" ? data.visibility : "",
+                recipe: parseRecipe(bytes)
+            };
+        }
+        async function publishBotTemplate(session, ref, { version, signal } = {}) {
+            const rec = await templateBot(session, ref, signal);
+            const template = await existingTemplate(session, rec, signal);
+            const chosen = await templateVersionFor(session, rec, template, version);
+            const data = await backendCall(session, "ActivateGrokBotTemplateVersion", {
+                shareId: template.shareId,
+                version: chosen.version
+            });
+            const published = templateFrom(data?.template);
+            if (!published) throw new GatewayError("ActivateGrokBotTemplateVersion returned no template", {
+                code: "TEMPLATE_MISSING"
+            });
+            return {
+                target: rec,
+                version: chosen.version,
+                versionFrom: chosen.versionFrom,
+                template: published
+            };
+        }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
             const data = await gatewayCall(session, "getAgentThread", {
@@ -53773,6 +54546,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         __webpack_require__.d(__webpack_exports__, {
             A0: ()=>removeGroupMember,
+            Bj: ()=>shareBotTemplate,
             Fe: ()=>GatewayError,
             JX: ()=>backendOnlySession,
             L5: ()=>addSkill,
@@ -53783,7 +54557,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             Sm: ()=>wakeSandbox,
             Sn: ()=>createAgent,
             Td: ()=>setGroupMembers,
+            VZ: ()=>publishBotTemplate,
             Vq: ()=>connectGateway,
+            YA: ()=>getBotTemplateVersion,
+            Yy: ()=>getBotTemplate,
             bA: ()=>getTranscriptTail,
             bG: ()=>listSkills,
             fG: ()=>getThread,
@@ -55032,7 +55809,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const n = typeof v === 'string' ? Number(v) : v;
             return Number.isFinite(n) ? n : null;
         };
-        function assertStoreUrl(raw, env = process.env) {
+        function assertStoreUrl(raw, env = process.env, bucket = 'sand-box-stores') {
             let url;
             try {
                 url = new URL(raw);
@@ -55048,13 +55825,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ].includes(url.hostname)) throw new _migration_js__rspack_import_1.Py('Store URL must be loopback in test mode.');
                 return url.href;
             }
-            if (url.protocol !== 'https:' || !/^sand-box-stores\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/.test(url.hostname)) {
+            if (url.protocol !== 'https:' || !new RegExp(`^${bucket}\\.s3(?:\\.[a-z0-9-]+)?\\.amazonaws\\.com$`).test(url.hostname)) {
                 throw new _migration_js__rspack_import_1.Py('The store returned a read URL for an unexpected host; nothing was fetched.');
             }
             return url.href;
         }
-        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000 } = {}) {
-            const res = await fetchImpl(assertStoreUrl(url), {
+        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000, bucket } = {}) {
+            const res = await fetchImpl(assertStoreUrl(url, process.env, bucket), {
                 redirect: 'error',
                 headers,
                 signal: AbortSignal.timeout(timeoutMs)

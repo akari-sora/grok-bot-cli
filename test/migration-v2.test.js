@@ -107,7 +107,7 @@ function world({ rows = 1203, omitEvery = 0, changeGenerationAt = 0 } = {}) {
 test('the migration source may only call allowlisted read RPCs', async () => {
   await assert.rejects(backendRead({}, 'SendGrokBotUserMessage', {}), /not a read-only migration RPC/);
   await assert.rejects(backendRead({}, 'DeleteGrokBotAgent', {}), /not a read-only/);
-  for (const rpc of BACKEND_READ_RPCS) assert.doesNotMatch(rpc, /^(Send|Delete|Update|Create|Set|Put|Mark|Dismiss|Commit|Presign.*Write|Begin|Finish)/);
+  for (const rpc of BACKEND_READ_RPCS) assert.doesNotMatch(rpc, /^(Send|Delete|Update|Create|Set|Put|Mark|Dismiss|Commit|Presign.*Write|Begin|Finish|Activate)/);
 });
 
 test('store URLs: only the presigned store host, or loopback in tests', () => {
@@ -115,6 +115,10 @@ test('store URLs: only the presigned store host, or loopback in tests', () => {
   assert.throws(() => assertStoreUrl('http://sand-box-stores.s3.us-east-1.amazonaws.com/x', {}), /unexpected host/);
   assert.ok(assertStoreUrl('https://sand-box-stores.s3.us-east-1.amazonaws.com/a?sig=1', {}));
   assert.throws(() => assertStoreUrl('https://sand-box-stores.s3.us-east-1.amazonaws.com/x', { GROK_BOT_TEST: '1' }), /loopback/);
+  // Template recipes (GetGrokBotTemplateVersion) are read from their own bucket, and only from it.
+  assert.ok(assertStoreUrl('https://grok-bot-templates.s3.us-east-1.amazonaws.com/r?sig=1', {}, 'grok-bot-templates'));
+  assert.throws(() => assertStoreUrl('https://grok-bot-templates.s3.us-east-1.amazonaws.com/r', {}), /unexpected host/);
+  assert.throws(() => assertStoreUrl('https://sand-box-stores.s3.us-east-1.amazonaws.com/r', {}, 'grok-bot-templates'), /unexpected host/);
 });
 
 test('fetchStoreBytes enforces the byte cap', async () => {
