@@ -40,6 +40,8 @@ The earlier test profile was exported (`~/.hermes/profile-exports/grok-deploy-qa
   3. the history question took its keyword from a message whose token was redacted in HISTORY.md (that also put a raw value into the local plan file); its second form ("the first message without a redacted part") had a different right answer than the one the plan picked.
 - After `d1a00bf` and `4ac07c4` (keywords only from delivered, redacted text; one message named by its minute), `gbot migrate check ARCHIVE --to muse|dot --accept` — which sends no migration message — gave **8/8 on Muse** (in a new side chat, deleted afterwards) and **8/8 on the dot**.
 
+Note: Deploy QA reached Muse and the dot before the folder name gained the bot-id suffix, so it lives in `~/grok-bot/Deploy-QA` there and its long-term pointer names that folder. With the final code its folder would be `~/grok-bot/Deploy-QA-bbb15179`; `gbot migrate check` with the final code reports it as not delivered until it is migrated again (2 messages and the questions per destination).
+
 ## A second real bot, recorded for the demo
 
 "Demo · Trip Planner" was created on account A with `gbot bots create` (backend, as the app does; verified live), given four plain-language messages (preferences, a Kyoto plan, a to-do, a routine left off) one at a time at least 20 s apart, then migrated with the guided `gbot migrate` and recorded (`demo/gbot-migrate-*.gif`):
