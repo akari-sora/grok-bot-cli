@@ -1,0 +1,23 @@
+# Runs actual upstream importer code pinned by commit AND Git blob IDs.
+# Network is test-only. A failed download/check/import fails the job; it is never a skip.
+migration:hermes-contract:
+  tags: [$LINUX_RUNNER_TAG]
+  image: node:22-slim
+  script:
+    - apt-get update -qq && apt-get install -y -qq python3 ca-certificates
+    - node --version
+    - python3 --version
+    - bash -o pipefail -c 'su node -s /bin/sh -c "python3 scripts/verify-hermes-import.py" 2>&1 | tee migration-hermes-contract.log'
+  artifacts:
+    when: always
+    paths:
+      - migration-hermes-contract.log
+    expire_in: 7 days
+  rules:
+    - changes:
+        - .gitlab-ci.yml
+        - .gitlab/migration-contract.yml
+        - src/core/migration*
+        - scripts/verify-hermes-import.py
+        - scripts/migration-hermes-fixture.mjs
+        - test/migration-targets*
