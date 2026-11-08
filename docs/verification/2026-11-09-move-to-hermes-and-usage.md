@@ -39,3 +39,13 @@ A one-line bot turn showed up on the meter 70–100 s after it was sent (+0.0054
 The full capture (transcript pages, memory, skills, routines, tasks, the box-store manifest and 321 files) did not move the meter in the 6 minutes after it, more than three times the delay a bot turn needs to show. This matches the code: the capture only calls read RPCs (`backendRead`) and never sends a message to a bot, so no bot runs. Only `--move-routines` writes to Grok Bot (the routine switch), and that is not a bot turn either.
 
 The Move to Hermes route is different: each step is a turn of that bot and uses Grok Bot usage.
+
+## A real bot, moved with the released v0.11.2-iml1s.16
+
+`gbot migrate run --account A --bot <Deploy QA> --to hermes --profile grok-dqa-check --yes` with the release package (Deploy QA is a working bot of the author's, not a demo; it has no routines, so nothing in Grok Bot was touched):
+
+- Capture: memory coverage `complete`, counted per file (3 of the bot's own memory files, 3 shared user-memory files, no project memory); the team-bot memory API answered 403 and is reported as unavailable, with the personal memory read from the box store instead.
+- Import into a new Hermes profile; read back 7/7; acceptance 7/7 (role, user facts, schedules, open tasks, history, skills, files). Exit 0, "migrated and verified".
+- Continuing the work: asked in Hermes (`hermes -p grok-dqa-check -z …`, read-only question) for its role and its unfinished task, it named its job (watch GitLab CI and deploys, fix failures, squash-merge green non-draft MRs) and the open item from its migrated memory (two Telltale merge requests waiting to leave draft, then merge them and wake the full check on main).
+
+The test profile and the local archive were deleted afterwards.
