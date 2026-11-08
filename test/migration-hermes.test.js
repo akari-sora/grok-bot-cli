@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, distinctiveTokens, verifyHermes, writeInside } from '../src/core/migration-hermes.js';
+import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, distinctiveTokens, inspectHermes, summarizeHermesPlan, verifyHermes, writeInside } from '../src/core/migration-hermes.js';
 import { hasSecret } from '../src/core/migration-redact.js';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -108,6 +108,7 @@ function fakeHermes(root, knobs = {}) {
           const x = s.sessions.find((y) => y.foreign_id === fid);
           return x ? { foreign_id: fid, session_id: x.id, messages: x.messages.length, digest: digest(x.messages) } : { foreign_id: fid, session_id: null, messages: 0 };
         }),
+        ...(req.grok_sessions ? { grok_sessions: s.sessions.map((x) => ({ foreign_id: x.foreign_id, messages: x.messages.length, digest: digest(x.messages) })) } : {}),
       };
       default: return { ok: false, error: 'unknown op' };
     }
@@ -640,4 +641,66 @@ test('r4-1: a long UTF-16 memory file whose first 8 KiB has no NUL is still not 
   assert.ok(!hasSecret(planText(plan)));
   assert.ok(!hasSecret(plan.user.join('\n').replace(/\0/g, '')), 'not even with the NULs removed');
   assert.ok(plan.notMigrated.some((n) => /profile\.md/.test(n.item)));
+});
+
+test('p1: the preview shows, before any change, what the import would create, keep, repair or leave as a conflict', async (t) => {
+  const root = tmp(t);
+  const fake = fakeHermes(root);
+  const v1 = archive({
+    automations: [AUTO],
+    box: [
+      { boxPath: '/home/box/f.txt', text: 'v1 f' }, { boxPath: '/home/box/g.txt', text: 'v1 g' },
+      { boxPath: `/home/box/sand-data/agents/${BOT}/memory/log/2026-10.md`, reason: 'bot-data', text: '- one fact about deploys\n' },
+    ],
+    transcripts: [{ rows: [{ seq: 1, role: 'user', text: 'first question' }, { seq: 2, role: 'assistant', text: 'first answer' }] }],
+  });
+  const p1 = buildPlan(v1, root);
+  await applyHermes(fake.hermes, v1, p1);
+  const f = join(p1.boxRoot, 'home', 'box', 'f.txt'), g = join(p1.boxRoot, 'home', 'box', 'g.txt'), h = join(p1.boxRoot, 'home', 'box', 'h.txt');
+  writeFileSync(f, 'edited by the user');
+  const v2 = archive({
+    automations: [AUTO],
+    box: [
+      { boxPath: '/home/box/f.txt', text: 'v2 f' }, { boxPath: '/home/box/g.txt', text: 'v2 g' }, { boxPath: '/home/box/h.txt', text: 'new h' },
+      { boxPath: `/home/box/sand-data/agents/${BOT}/memory/log/2026-10.md`, reason: 'bot-data', text: '- one fact about deploys\n- a second fact\n' },
+    ],
+    transcripts: [{ rows: [{ seq: 1, role: 'user', text: 'first question (edited)' }, { seq: 2, role: 'assistant', text: 'first answer' }] }],
+  });
+  const before = fake.calls.length;
+  const dest = await inspectHermes(fake.hermes, { profile: PROFILE });
+  const plan = buildPlan(v2, root);
+  const text = summarizeHermesPlan(plan, dest);
+  // f.txt was edited by the user; g.txt, the memory log, history copy and export still hold what the first run wrote.
+  assert.match(text, /^ {2}Files {6}→ 1 new, \d+ unchanged, 4 repaired, 1 conflict\(s\), 0 refused$/m);
+  assert.ok(text.includes(`    conflict  ${f}`), text);
+  assert.ok(text.includes(`    repair    ${g}`), text);
+  assert.match(text, /^ {2}SOUL\.md {4}→ unchanged$/m);
+  assert.match(text, /^ {2}Memory {5}→ MEMORY\.md: 1 new, \d+ already there; USER\.md: 0 new, 0 already there$/m);
+  assert.match(text, /^ {2}Schedules {2}→ 0 new, 1 already there$/m);
+  assert.match(text, /^ {2}History {4}→ 0 new session\(s\), 1 already imported, 1 of them with different content \(left as is; check reports it\)$/m);
+  // The preview changed nothing, and holds digests only: no memory text of the profile.
+  assert.ok(!fake.calls.slice(before).some((c) => /profile create|config set|cron create/.test(c.args.join(' ')) || /"op":"(memory-add|import-history)"/.test(c.input)));
+  assert.ok(!JSON.stringify(dest).includes('one fact about deploys'));
+  // Applying now does exactly what the preview said.
+  const applied = await applyHermes(fake.hermes, v2, plan);
+  assert.deepEqual(stepOf(applied, 'files').conflicts, [f]);
+  assert.equal(readFileSync(g, 'utf8'), 'v2 g');
+  assert.equal(readFileSync(h, 'utf8'), 'new h');
+});
+
+test('p1: the preview says when the import would refuse, keeps a customized SOUL, and caps long lists', async (t) => {
+  const root = tmp(t);
+  const fake = fakeHermes(root);
+  const dir = userProfile(fake, 'You are my own assistant.');
+  const box = Array.from({ length: 14 }, (_, i) => ({ boxPath: `/home/box/n${i}.txt`, text: 'ours ' + i }));
+  const a = archive({ box });
+  const plan = buildPlan(a, root);
+  for (const b of box) { mkdirSync(join(plan.boxRoot, 'home', 'box'), { recursive: true }); writeFileSync(join(plan.boxRoot, b.boxPath), 'mine'); }
+  mkdirSync(join(dir, 'skills'), { recursive: true });
+  const text = summarizeHermesPlan(plan, await inspectHermes(fake.hermes, { profile: PROFILE }));
+  assert.match(text, /^ {2}Import {5}→ refused without --into-existing: this profile was not created by this migration of this bot; with it, existing files are only added to$/m);
+  assert.match(text, /^ {2}SOUL\.md {4}→ kept \(customized\); the role goes to MEMORY\.md$/m);
+  assert.match(text, /, 14 conflict\(s\), 0 refused$/m);
+  assert.equal(text.split('\n').filter((l) => l.startsWith('    conflict  ')).length, 10);
+  assert.match(text, /^ {4}… and 4 more conflict\(s\)$/m);
 });

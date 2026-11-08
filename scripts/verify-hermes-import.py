@@ -9,11 +9,13 @@ official  Downloads the official Hermes grok-bot importer, pinned by commit and 
           it on the grok-bot-export.json gbot bundles in the profile workspace. gbot itself does not
           use that importer; this only shows the bundled export is accepted by it.
 real      Local only (needs an installed Hermes; CI has none). The helper store ops (preflight,
-          memory-add, import-history, readback) against the installed Hermes' own MemoryStore,
-          SessionDB, cron store and skills tool, in a scratch HERMES_HOME under the Hermes root that is
-          removed afterwards. Hermes provisions a whole runtime for a HERMES_HOME outside its root, so
-          the scratch home's root is resolved first and the run refuses unless it is the existing root.
-          No profile, cron job or account state is created; `hermes cron create` is not covered.
+          memory-add, import-history, readback with the imported-session listing) and gbot's own
+          `hermes cron create` arguments against the installed Hermes' MemoryStore, SessionDB, cron store
+          and skills tool, in a scratch HERMES_HOME under the Hermes root that is removed afterwards.
+          Hermes provisions a whole runtime for a HERMES_HOME outside its root, so the scratch home's root
+          is resolved first and the run refuses unless it is the existing root. The scratch home is not a
+          registered profile: a registered one joins the live kanban routing roster and the running
+          gateway, and its deletion leaves a tombstone, so `-p NAME` resolution itself is not covered.
 
 helper and official touch no installed Hermes. A failed check exits non-zero; nothing is skipped.
 """
@@ -156,6 +158,10 @@ FAKE_RUNTIME = {
                 return {"session_id": sid, "already_imported": False}
             def get_messages(self, session_id):
                 return list(self._data["sessions"][session_id]["messages"])
+            def _read_rows(self, sql, params=()):
+                # Only the foreign-import listing the helper runs: sessions of one source with an origin.
+                return [{"id": sid, "origin_json": json.dumps({"imported_from": s["origin"]})}
+                        for sid, s in self._data["sessions"].items() if s["origin"]["tool"] == params[0]]
             def close(self):
                 pass
     ''',
@@ -253,7 +259,11 @@ def helper_contract() -> None:
         assert two["profile"]["status"] == "exists" and two["soul"]["status"] == "present"
         assert two["memory"]["added"] == 0 and two["cron"]["created"] == 0 and two["files"]["written"] == 0
         assert all(s["already_imported"] for s in two["history"]["sessions"])
-        print("PASS gbot helper path: a second import changes nothing")
+        for line in ("Files      → 0 new,", " 0 repaired, 0 conflict(s), 0 refused", "SOUL.md    → unchanged",
+                     "Schedules  → 0 new, 1 already there", "History    → 0 new session(s), 2 already imported"):
+            assert line in second["summary"], (line, second["summary"])
+        assert "Existing profile" not in first["summary"]
+        print("PASS gbot helper path: a second import changes nothing, and its preview said so first")
 
         profile = Path(first["profileDir"])
         jobs = json.loads((profile / "cron" / "jobs.json").read_text())
@@ -373,8 +383,15 @@ def real_contract() -> None:
             assert got[s["foreign_id"]]["messages"] == s["messages"], s
             assert got[s["foreign_id"]]["digest"] == s["digest"], f"history digest differs for {s['foreign_id']}"
         assert {"ci-fixer", "same-name"} <= set(rb["skills"]), rb["skills"]
-        assert rb["cron"] == [] and isinstance(rb["timezone"], str) and rb["limits"]["memory"] > 0
-        print("PASS real Hermes readback: memory and user entries, per-session content digests, skills, cron store, time zone and limits")
+        assert isinstance(rb["timezone"], str) and rb["limits"]["memory"] > 0
+        assert sorted((s["foreign_id"], s["digest"]) for s in rb["grok_sessions"]) == sorted((s["foreign_id"], s["digest"]) for s in want["sessions"])
+        print("PASS real Hermes readback: memory and user entries, per-session content digests, imported-session listing, skills, time zone and limits")
+        job = want["job"]
+        assert len(rb["cron"]) == 1, rb["cron"]
+        got = rb["cron"][0]
+        assert got["name"].endswith(job["tag"]) and got["schedule"]["expr"] == job["schedule"], got
+        assert got["state"] == "paused" and got["enabled"] is False and got["prompt"] == job["prompt"] and got["workdir"] == job["workdir"], got
+        print("PASS real Hermes `cron create` with gbot's arguments: tagged name, schedule, paused state, prompt and workdir read back")
     finally:
         shutil.rmtree(home, ignore_errors=True)
     assert not home.exists()

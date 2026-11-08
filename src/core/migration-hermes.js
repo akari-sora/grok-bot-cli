@@ -32,6 +32,7 @@ const HISTORY_SESSION_MESSAGES = 9000;
 // At most 3 MiB as JSON even when every UTF-16 unit is escaped (\u0000): one part fits one session.
 const HISTORY_PART_CHARS = 512 * 1024;
 const SKILL_CATEGORY = 'grok-bot-imports';
+const PREVIEW_LIST = 10;
 const MARKER = '.gbot-migration.json';
 const RUNTIME_MARKER = "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)";
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -339,7 +340,7 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   const shown = (v) => { const r = sanitize(v); return r.clean ? r.text : '[withheld: holds an encoded token-shaped value]'; };
 
   return {
-    target: 'hermes', profile: name, profileDir, base, boxRoot, timezone, botName, historyPath,
+    target: 'hermes', profile: name, profileDir, base, boxRoot, timezone, botId: cap.bot.id, botName, historyPath,
     soul: `# ${botName}\n\nYou are ${botName}${title ? ' (' + title + ')' : ''}, migrated from Grok Bot to Hermes. Introduce yourself by this name and keep this role.\n\n${instructions.trim()}\n`,
     roleEntry, user, memory: memoryAll,
     limits: { memory: limitFor(roleEntry ? [roleEntry, ...memoryAll] : memoryAll, DEFAULT_MEMORY_LIMIT), user: limitFor(user, DEFAULT_USER_LIMIT) },
@@ -386,6 +387,26 @@ export function summarizeHermesPlan(plan, destination) {
     `  Files      → ${plan.files.length} box file(s) under ${plan.boxRoot}`,
     `  Secrets    → ${plan.redactedSecrets} token-shaped value(s) replaced with [redacted] (kept only in the private archive)`,
   ];
+  const preview = previewHermes(plan, destination);
+  if (preview) {
+    const list = (kind, paths, note) => {
+      for (const path of paths.slice(0, PREVIEW_LIST)) lines.push(`    ${kind.padEnd(9)} ${path}${note ? `  (${note})` : ''}`);
+      if (paths.length > PREVIEW_LIST) lines.push(`    … and ${paths.length - PREVIEW_LIST} more ${kind}(s)`);
+    };
+    const f = preview.files;
+    lines.push('Existing profile, compared now with the rules the import uses:');
+    if (!preview.created) lines.push('  Import     → refused without --into-existing: this profile was not created by this migration of this bot; with it, existing files are only added to');
+    lines.push(`  Files      → ${f.written.length} new, ${f.present.length} unchanged, ${f.updated.length} repaired, ${f.conflict.length} conflict(s), ${f.refused.length} refused`);
+    list('conflict', f.conflict, 'left as it is; check reports it');
+    list('repair', f.updated, 'still what an earlier run wrote');
+    list('refused', f.refused, 'a link or not a regular file: the import stops here');
+    lines.push(`  SOUL.md    → ${SOUL_PREVIEW[preview.soul]}`);
+    lines.push(`  Memory     → MEMORY.md: ${preview.memory.added} new, ${preview.memory.present} already there; USER.md: ${preview.user.added} new, ${preview.user.present} already there`);
+    lines.push(`  Schedules  → ${preview.cron.created} new, ${preview.cron.present} already there`);
+    const h = preview.history;
+    lines.push(h ? `  History    → ${h.imported} new session(s), ${h.present} already imported${h.differs.length ? `, ${h.differs.length} of them with different content (left as is; check reports it)` : ''}`
+      : '  History    → not checked (this Hermes cannot list imported sessions)');
+  }
   if (plan.notMigrated.length) {
     lines.push('Not migrated (with the alternative):');
     for (const n of groupNotMigrated(plan.notMigrated)) lines.push(`  - ${n.item}: ${n.reason} → ${n.alternative}`);
@@ -467,14 +488,107 @@ export class Hermes {
   }
 }
 
-/** Destination state used by plan and apply. Read-only. */
+/**
+ * Destination state used by preview, apply and check. Read-only: the capability preflight, and
+ * for an existing profile what it already holds, kept as digests and this migration's own tags and
+ * session ids (the preview compares the plan with them; no memory text or prompt is kept).
+ */
 export async function inspectHermes(hermes, { profile }) {
   const hermesVersion = await hermes.version();
   const profiles = await hermes.profiles();
   const root = await hermes.rootDir();
   const profileExists = profiles.includes(profile);
   const profileDir = profileExists ? await hermes.profileDir(profile) : join(root, 'profiles', profile);
-  return { hermesVersion, profileExists, profileDir, root };
+  const { versions, default_souls, import_limits } = await hermes.preflight(root);
+  let existing = null;
+  if (profileExists) {
+    const rb = await hermes.helper('readback', { foreign_ids: [], grok_sessions: true }, { home: profileDir });
+    existing = {
+      memory: rb.memory.map(sha256), user: rb.user.map(sha256),
+      cronTags: rb.cron.map((j) => /\[grok-bot [^\]]*\]$/.exec(String(j.name ?? ''))?.[0]).filter(Boolean),
+      sessions: rb.grok_sessions ?? null,
+    };
+  }
+  return { hermesVersion, profileExists, profileDir, root, preflight: { versions, default_souls, import_limits }, existing };
+}
+
+// The decisions apply makes, shared with the preview so both always agree.
+
+/** Who owns an existing profile: repairs only in one this migration of this bot created. */
+function ownershipFor(profileExists, marker, botId) {
+  const ours = marker?.botId === botId;
+  const created = ours && marker.createdProfile === true;
+  return { ours, created, owned: !profileExists || created, files: { ...(ours ? marker.files : {}) } };
+}
+
+/** What writing `bytes` over `current` (null: no file there) does. */
+function writeDecision(current, bytes, mayUpdate) {
+  if (current === null) return 'written';
+  if (current.equals(bytes)) return 'present';
+  return mayUpdate(sha256(current)) ? 'updated' : 'conflict';
+}
+
+/** SOUL.md: 'present', 'seeded' (Hermes' default: replaced, backup kept), 'ours' (repaired) or 'customized' (kept). */
+function soulDecision(current, plan, defaultSouls, owned, files) {
+  const text = current.toString('utf8');
+  if (text === plan.soul) return 'present';
+  if (!text.trim() || defaultSouls.includes(normSoul(text))) return 'seeded';
+  return owned && files['SOUL.md'] === sha256(current) ? 'ours' : 'customized';
+}
+const SOUL_PREVIEW = { present: 'unchanged', seeded: "replaced (it is Hermes' default; a backup is kept)", ours: 'repaired (still what an earlier run wrote)', customized: 'kept (customized); the role goes to MEMORY.md' };
+
+/** A cron job of this routine exists: matched by the routine id tag at the end of its name. */
+const jobExists = (names, job) => names.some((n) => String(n ?? '').endsWith(job.tag));
+
+/** What writeInside would do now with `bytes` at `path`, without writing. */
+function previewWrite(root, path, bytes, mayUpdate) {
+  let dir = resolve(root);
+  for (const part of relative(root, path).split(sep).slice(0, -1)) {
+    dir = join(dir, part);
+    let st;
+    try { st = lstatSync(dir); } catch { return 'written'; }
+    if (!st.isDirectory() || st.isSymbolicLink()) return 'refused';
+  }
+  let st;
+  try { st = lstatSync(path); } catch { return 'written'; }
+  if (!st.isFile() || st.nlink !== 1) return 'refused';
+  return writeDecision(readFileSync(path), bytes, mayUpdate);
+}
+
+/** The preview of an import into an existing profile (null for a new one). */
+function previewHermes(plan, dest) {
+  if (!dest.profileExists || !dest.existing) return null;
+  const own = ownershipFor(true, readMarker(join(plan.base, MARKER)), plan.botId);
+  const key = (path) => relative(plan.profileDir, path).split(sep).join('/');
+  const files = { written: [], present: [], updated: [], conflict: [], refused: [] };
+  const judge = (path, bytes) => files[previewWrite(plan.profileDir, path, bytes, (sha) => own.owned && own.files[key(path)] === sha)].push(path);
+  for (const s of plan.skills) for (const f of s.files) judge(f.dest, f.bytes);
+  for (const f of plan.files) judge(f.dest, f.bytes);
+  for (const [path, bytes] of plan.docs) judge(path, bytes);
+  const soulPath = join(plan.profileDir, 'SOUL.md');
+  const soul = soulDecision(existsSync(soulPath) ? readFileSync(soulPath) : Buffer.alloc(0), plan, dest.preflight.default_souls ?? [], own.owned, own.files);
+  const count = (have, entries) => {
+    const present = entries.filter((e) => have.includes(sha256(e))).length;
+    return { present, added: entries.length - present };
+  };
+  const ex = dest.existing;
+  const sessions = ex.sessions && new Map(ex.sessions.map((x) => [x.foreign_id, x]));
+  const there = sessions ? plan.history.filter((s) => sessions.has(s.foreign_id)) : [];
+  return {
+    created: own.created, files, soul,
+    memory: count(ex.memory, soul === 'customized' && plan.roleEntry !== null ? [plan.roleEntry, ...plan.memory] : plan.memory),
+    user: count(ex.user, plan.user),
+    cron: { present: plan.cron.filter((j) => jobExists(ex.cronTags, j)).length, created: plan.cron.filter((j) => !jobExists(ex.cronTags, j)).length },
+    history: sessions && { imported: plan.history.length - there.length, present: there.length,
+      differs: there.filter((s) => sessions.get(s.foreign_id).digest !== s.digest).map((s) => s.foreign_id) },
+  };
+}
+
+/** `hermes -p PROFILE cron create …` for one planned job, paused unless --activate-routines. */
+export function cronCreateArgs(plan, job) {
+  const args = ['-p', plan.profile, 'cron', 'create', '--name', job.name, '--workdir', plan.base];
+  if (job.paused) args.push('--paused', '--paused-reason', job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
+  return [...args, job.schedule, job.prompt];
 }
 
 /**
@@ -523,8 +637,9 @@ export function writeInside(root, path, bytes, mode, mayUpdate) {
     if (!st.isFile() || st.nlink !== 1 || !sameInode(st)) throw new MigrationError('Refusing to write over a link or a non-file: ' + target);
     const current = Buffer.alloc(st.size);
     for (let at = 0, n; at < st.size; at += n) if (!(n = readSync(fd, current, at, st.size - at, at))) break;
-    if (current.equals(bytes)) return 'present';
-    if (!writable || !mayUpdate(sha256(current)) || !unchanged(fd)) return 'conflict';
+    const decision = writeDecision(current, bytes, mayUpdate);
+    if (decision === 'present') return 'present';
+    if (decision === 'conflict' || !writable || !unchanged(fd)) return 'conflict';
     ftruncateSync(fd, 0);
     for (let at = 0; at < bytes.length;) at += writeSync(fd, bytes, at, bytes.length - at, at);
     fchmodSync(fd, mode);
@@ -551,7 +666,7 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   const steps = [];
   const step = (name, status, detail = {}) => { steps.push({ step: name, status, ...detail }); onProgress(`${name}: ${status}`); };
   const dest = await inspectHermes(hermes, { profile: plan.profile });
-  const pf = await hermes.preflight(dest.root);
+  const pf = dest.preflight;
   // Every planned session must fit one import of this Hermes, before anything changes.
   const limit = pf.import_limits ?? {};
   for (const s of plan.history) {
@@ -563,8 +678,7 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   const botId = archive.capture.bot.id;
   const markerPath = join(plan.base, MARKER);
   const marker = dest.profileExists ? readMarker(markerPath) : null;
-  const ours = marker?.botId === botId;
-  const created = ours && marker.createdProfile === true;
+  const { ours, created, owned, files: ownFiles } = ownershipFor(dest.profileExists, marker, botId);
   if (dest.profileExists && !allowExisting && !created) {
     throw new MigrationError(`Hermes profile "${plan.profile}" already exists and was not created by this migration of this bot. Pass --profile NEW_NAME, or --into-existing to add to it.`);
   }
@@ -574,9 +688,8 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   } else step('profile', 'exists', { profile: plan.profile });
   const profileDir = await hermes.profileDir(plan.profile);
   if (profileDir !== plan.profileDir) throw new MigrationError('The Hermes profile path differs from the plan; plan again.');
-  const owned = !dest.profileExists || created;
   // A marker of another bot is left as it is, and nothing of this run is recorded in it.
-  const record = marker && !ours ? null : { botId, createdProfile: owned, archive: plan.historyPath, capturedAt: archive.capture.capturedAt, files: { ...(ours ? marker.files : {}) } };
+  const record = marker && !ours ? null : { botId, createdProfile: owned, archive: plan.historyPath, capturedAt: archive.capture.capturedAt, files: ownFiles };
   const key = (path) => relative(profileDir, path).split(sep).join('/');
   const put = (path, bytes, mode = 0o600, mayUpdate = (sha) => owned && record?.files[key(path)] === sha) => {
     const r = writeInside(profileDir, path, bytes, mode, mayUpdate);
@@ -592,12 +705,11 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   // the one this migration wrote. A customized SOUL is left alone; the role goes to MEMORY.md.
   const soulPath = join(profileDir, 'SOUL.md');
   const soulBytes = existsSync(soulPath) ? readFileSync(soulPath) : Buffer.alloc(0);
-  const currentSoul = soulBytes.toString('utf8');
-  const seeded = !currentSoul.trim() || (pf.default_souls ?? []).includes(normSoul(currentSoul));
+  const soul = soulDecision(soulBytes, plan, pf.default_souls ?? [], owned, record?.files ?? {});
   let roleInMemory = false;
-  if (currentSoul === plan.soul) { put(soulPath, soulBytes); step('soul', 'present'); }
-  else if (seeded || (owned && record?.files['SOUL.md'] === sha256(soulBytes))) {
-    if (seeded && currentSoul.trim()) put(soulPath + '.bak.grok-bot', soulBytes, 0o600, () => false);
+  if (soul === 'present') { put(soulPath, soulBytes); step('soul', 'present'); }
+  else if (soul === 'seeded' || soul === 'ours') {
+    if (soul === 'seeded' && soulBytes.toString('utf8').trim()) put(soulPath + '.bak.grok-bot', soulBytes, 0o600, () => false);
     // Authorized only for the exact bytes judged above: a SOUL saved in between is a conflict.
     const judged = sha256(soulBytes);
     if (put(soulPath, Buffer.from(plan.soul), 0o600, (sha) => sha === judged) === 'conflict') {
@@ -650,11 +762,8 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
 
   let jobsCreated = 0;
   for (const job of plan.cron) {
-    if (before.cron.some((j) => String(j.name ?? '').endsWith(job.tag))) continue;
-    const args = ['-p', plan.profile, 'cron', 'create', '--name', job.name, '--workdir', plan.base];
-    if (job.paused) args.push('--paused', '--paused-reason', job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
-    args.push(job.schedule, job.prompt);
-    await hermes.run(args, { timeoutMs: 120_000 });
+    if (jobExists(before.cron.map((j) => j.name), job)) continue;
+    await hermes.run(cronCreateArgs(plan, job), { timeoutMs: 120_000 });
     jobsCreated++;
   }
   step('cron', 'done', { jobs: plan.cron.length, created: jobsCreated });

@@ -3,15 +3,15 @@
 //                      official importer contract;
 //   --hermes BIN       imports it twice through gbot's own path (applyHermes + verifyHermes, the
 //                      helper ops over `BIN --print-runtime-command`) and prints both reports;
-//   --real BIN HOME    runs the helper store ops twice against the installed Hermes with HERMES_HOME=HOME
-//                      (a scratch home under the Hermes root; no profile or cron job is created) and
-//                      prints what Hermes read back next to what the plan expects.
+//   --real BIN HOME    runs the helper store ops twice and gbot's `cron create` once against the installed
+//                      Hermes with HERMES_HOME=HOME (a scratch home under the Hermes root, not a registered
+//                      profile) and prints what Hermes read back next to what the plan expects.
 // Used by scripts/verify-hermes-import.py.
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { writeArchive, openArchive } from '../src/core/migration-archive.js';
-import { Hermes, applyHermes, buildHermesPlan, inspectHermes, verifyHermes } from '../src/core/migration-hermes.js';
+import { Hermes, applyHermes, buildHermesPlan, cronCreateArgs, inspectHermes, summarizeHermesPlan, verifyHermes } from '../src/core/migration-hermes.js';
 
 const [, , out, flag, bin, scratchHome] = process.argv;
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -50,8 +50,9 @@ if (flag === '--hermes') {
   const once = async () => {
     const dest = await inspectHermes(hermes, { profile: 'grok-deploy-qa' });
     const plan = buildHermesPlan(archive, { profile: 'grok-deploy-qa', profileDir: dest.profileDir });
+    const summary = summarizeHermesPlan(plan, dest);
     const applied = await applyHermes(hermes, archive, plan);
-    return { profileDir: applied.profileDir, steps: applied.steps, verify: await verifyHermes(hermes, archive, plan), sessions: plan.history.length };
+    return { profileDir: applied.profileDir, summary, steps: applied.steps, verify: await verifyHermes(hermes, archive, plan), sessions: plan.history.length };
   };
   const first = await once();
   process.stdout.write(JSON.stringify({ first, second: await once() }));
@@ -68,10 +69,15 @@ if (flag === '--hermes') {
     history: (await hermes.helper('import-history', { profile: 'grok-contract', sessions }, { home })).results.map((r) => r.already_imported),
   });
   const first = await once(), second = await once();
-  const rb = await hermes.helper('readback', { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath }, { home });
+  // gbot's own cron arguments; HERMES_HOME selects the scratch home instead of `-p PROFILE`.
+  const [job] = plan.cron;
+  mkdirSync(plan.base, { recursive: true });
+  await hermes.run(cronCreateArgs(plan, job).slice(2), { env: { HERMES_HOME: home }, timeoutMs: 120_000 });
+  const rb = await hermes.helper('readback', { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath, grok_sessions: true }, { home });
   process.stdout.write(JSON.stringify({ versions: preflight.versions, first, second,
-    readback: { memory: rb.memory, user: rb.user, limits: rb.limits, timezone: rb.timezone, cron: rb.cron, skills: rb.skills, sessions: rb.sessions },
-    expected: { memory: plan.memory, user: plan.user, sessions: plan.history.map((s) => ({ foreign_id: s.foreign_id, messages: s.messages.length, digest: s.digest })) } }));
+    readback: { memory: rb.memory, user: rb.user, limits: rb.limits, timezone: rb.timezone, cron: rb.cron, skills: rb.skills, sessions: rb.sessions, grok_sessions: rb.grok_sessions },
+    expected: { memory: plan.memory, user: plan.user, sessions: plan.history.map((s) => ({ foreign_id: s.foreign_id, messages: s.messages.length, digest: s.digest })),
+      job: { tag: job.tag, schedule: job.schedule, prompt: job.prompt, workdir: plan.base } } }));
 } else {
   const plan = buildHermesPlan(archive, { profileDir: join(out, 'profile') });
   const exportPath = [...plan.docs.keys()].find((p) => p.endsWith('grok-bot-export.json'));

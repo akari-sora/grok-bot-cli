@@ -29,7 +29,9 @@ Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check
 
 | 選項 | 預設 | 說明 |
 | --- | --- | --- |
-| `--via auto\|upload\|chat` | `auto` | `upload`：整個交接資料夾壓成一個 zip 附檔，對方解壓。`chat`：一個檔一則訊息。`auto`：放得下就 upload（Muse 256 MB、dot 20 MB），否則 chat |
+| `--via auto\|upload\|drive\|chat` | `auto` | `upload`：整個交接資料夾壓成一個 zip 附檔，對方解壓。`drive`：同一個 zip 用 rclone 放到你的 Google Drive（先比對 MD5），請對方用它的 Google Drive 連接器下載、解壓；驗證通過後刪掉 Drive 上那份（`--keep-drive` 保留）。`chat`：一個檔一則訊息。`auto`：附檔放得下就 upload（Muse 256 MB、dot 20 MB），否則有設 Drive 就 drive，再不然 chat |
+| `--drive-remote NAME:` | 環境變數 `GBOT_DRIVE_REMOTE` | 你 Google Drive 的 rclone remote（`rclone listremotes`）；`--via drive` 必填 |
+| `--drive-folder PATH` | `gbot-migrations` | Drive 上放 zip 的資料夾 |
 | `--history full\|recent:N\|none` | upload `full`，chat `recent:30` | 要帶多少對話 |
 | `--skills all\|index\|none\|名稱,名稱` | upload `all`，chat `index` | `index` 只帶名稱與用途；Hermes 只接受 `all`、`none` |
 | `--folder PATH` | `~/grok-bot/<bot>-<id 前 8 碼>` | 對方電腦上的資料夾（同名的 bot 也不會共用） |
@@ -57,7 +59,7 @@ Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check
 | --- | --- | --- | --- |
 | 一個 bot 變成 | 一個新的 Hermes profile（`grok-<bot>`），彼此獨立 | 同一個 Muse 裡的一個專用副聊天室（Muse 只有一個，記憶共用） | 同一個 dot（一個帳號一個收件匣） |
 | 持久存放 | profile 本身 | Muse 電腦上的交接資料夾 `~/grok-bot/<bot>-<id>/`，加一則明確要求長期記住的指標 | dot 電腦上的同樣資料夾，加同樣的指標 |
-| 怎麼送過去 | 直接寫進 Hermes 自己的 store | 預設一個 zip 附檔（`muse-web-cli send --attach`，在 Muse 視窗上傳，和手動附檔一樣）；或逐檔訊息 | 預設一個 zip 附檔（`chatgpt-dot-cli send --attach`，和 dot app 一樣先上傳到訊息房間再送）；或逐檔訊息 |
+| 怎麼送過去 | 直接寫進 Hermes 自己的 store | 預設一個 zip 附檔（`muse-web-cli send --attach`，在 Muse 視窗上傳，和手動附檔一樣）；或經你的 Google Drive（它用 Google 連接器取回）；或逐檔訊息 | 預設一個 zip 附檔（`chatgpt-dot-cli send --attach`，和 dot app 一樣先上傳到訊息房間再送）；或經你的 Google Drive；或逐檔訊息 |
 | 角色 | `SOUL.md` | `ROLE.md` | `ROLE.md` |
 | 記憶 | `USER.md`、`MEMORY.md`（用 Hermes 自己的 MemoryStore，必要時調高上限） | `MEMORY.md` | `MEMORY.md` |
 | 對話紀錄 | 全部（含副對話）匯入成可搜尋的 Hermes session，另有可讀副本 | zip：全部（`HISTORY.md`、`history/`）；逐檔：最近 30 則 | 同 Muse |
@@ -121,7 +123,7 @@ gbot migrate run --account A --bot "Deploy QA" --to hermes --yes
 
 `--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (a trinity-cli with `migrate --check-only`, plus `muse-web-cli` and `chatgpt-dot-cli` with `send --attach`).
 
-Muse/dot options (same on `preview`, `import`, `check`, `run`; give `check` the options of the import): `--via auto|upload|chat` (default `auto`: one zip attachment the agent unzips when it fits — Muse 256 MB, dot 20 MB — else file by file), `--history full|recent:N|none` (default: upload `full`, chat `recent:30`), `--skills all|index|none|a,b` (default: upload `all`, chat `index`; Hermes takes `all` or `none`), `--folder PATH` (default `~/grok-bot/<bot>-<first 8 of its id>`, so bots with one name never share a folder).
+Muse/dot options (same on `preview`, `import`, `check`, `run`; give `check` the options of the import): `--via auto|upload|drive|chat` (default `auto`: one zip attachment the agent unzips when it fits — Muse 256 MB, dot 20 MB — else your Google Drive when a remote is set, else file by file; `drive` puts the same zip in your Google Drive with rclone, checks its MD5, asks the agent to fetch it with its Google Drive connector, and removes the Drive copy after a verified migration unless `--keep-drive`), `--drive-remote NAME:` (an rclone remote for your Google Drive; default `GBOT_DRIVE_REMOTE`), `--drive-folder PATH` (default `gbot-migrations`), `--history full|recent:N|none` (default: upload `full`, chat `recent:30`), `--skills all|index|none|a,b` (default: upload `all`, chat `index`; Hermes takes `all` or `none`), `--folder PATH` (default `~/grok-bot/<bot>-<first 8 of its id>`, so bots with one name never share a folder).
 
 **Capture (read-only).** Identity from `ListGrokBotAgents`; the whole conversation through `ListGrokBotTranscriptEntries`, paged back with `beforeSeq` to the first row, omitted bodies filled from box-store blobs, server-deleted rows reported as sequence gaps; the three memory tiers from the box store (the bot's own `memory/`, every assistant's shared `user-memory/` shard, joined projects); the whole user skill library (`workflows/<name>/`, shared by all bots); automations with prompt, cron, time zone, trigger and enabled state; todos and tasks; the bot's attachments and assets plus `/home/box/…` and `/workspace/…` files named in its role, routines, memory or conversation (`--max-file-mb`, default 8). Groups, teammates, connectors and library docs are listed. Every area's status is in `REPORT.md` and `capture.json` → `coverage`. Every archived file has a SHA-256 and is re-verified when the archive is opened; extra or missing files are refused.
 

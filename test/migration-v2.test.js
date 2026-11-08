@@ -454,3 +454,37 @@ test('round 4: a long UTF-16 memory file never reaches a Muse/dot message or zip
   const zip = unzip(readFileSync(buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) }).steps[0].attach[0].path));
   for (const [name, b] of zip) assert.ok(!hasSecret(b.toString('latin1').replace(/\0/g, '')), name);
 });
+
+test('--via drive: the zip goes through Google Drive (rclone, MD5-checked) and the agent fetches it', async (t) => {
+  const a = await sampleArchive(t);
+  assert.throws(() => buildTrinityPlan(a, 'dot', { via: 'drive' }), /--drive-remote/);
+  const plan = buildTrinityPlan(a, 'dot', { via: 'drive', driveRemote: 'gdrive:', bundlePath: bundleIn(t, a) });
+  assert.equal(plan.delivery.via, 'drive');
+  assert.deepEqual(plan.steps.map((s) => s.id), ['bundle', 'remember']);
+  assert.ok(!plan.steps[0].attach, 'nothing attached');
+  const { name } = plan.delivery.bundle.drive;
+  assert.match(name, new RegExp(`-${plan.delivery.bundle.sha256.slice(0, 16)}\\.zip$`), 'the name binds the bytes');
+  assert.match(plan.steps[0].text, new RegExp(`Google Drive connector, download the file ${name.replace(/[.]/g, '\\.')} from my Google Drive folder gbot-migrations`));
+  assert.deepEqual(plan.delivery.units.map((u) => u.ids), plan.delivery.units.map(() => ['bundle']));
+
+  // The run: upload when Drive does not have the bytes, check the MD5, deliver, then remove the Drive copy.
+  const { importTrinity } = await import('../src/core/migration-trinity.js');
+  const { createHash } = await import('node:crypto');
+  const calls = [];
+  let onDrive = '';
+  const exec = async (bin, args) => {
+    calls.push([bin, ...args]);
+    if (bin === 'rclone' && args[0] === 'md5sum') return { code: onDrive ? 0 : 3, stdout: onDrive ? `${onDrive}  x\n` : '', stderr: '' };
+    if (bin === 'rclone' && args[0] === 'copyto') { onDrive = createHash('md5').update(readFileSync(args[1])).digest('hex'); return { code: 0, stdout: '', stderr: '' }; }
+    if (bin === 'rclone' && args[0] === 'deletefile') return { code: 0, stdout: '', stderr: '' };
+    if (args[0] === 'migrate' && args[1] === '--help') return { code: 0, stdout: '--check-only --redo', stderr: '' };
+    return { code: 0, stdout: JSON.stringify({ ok: true, steps: [{ id: 'bundle', state: 'replied', ok: true }, { id: 'remember', state: 'replied', ok: true }], checks: [], questions: [], state_path: '/tmp/x', stopped: null }), stderr: '' };
+  };
+  const r = await importTrinity({ archive: a.root, to: 'dot', via: 'drive', driveRemote: 'gdrive:', accept: false, exec, bin: 'trinity-cli' });
+  const verbs = calls.filter((c) => c[0] === 'rclone').map((c) => c[1]);
+  assert.deepEqual(verbs, ['md5sum', 'copyto', 'md5sum', 'deletefile']);
+  assert.match(calls.find((c) => c[1] === 'copyto')[3], /^gdrive:gbot-migrations\/grok-bot-.*\.zip$/);
+  assert.equal(r.driveCopy, null, 'removed after a verified migration');
+  const send = calls.findIndex((c) => c[1] === '--json');
+  assert.ok(send > calls.findIndex((c) => c[1] === 'copyto'), 'the agent is asked only after the upload is proven');
+});

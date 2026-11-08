@@ -332,7 +332,12 @@ async function migrateWizard(real) {
       say("\n   How to deliver it:");
       say("   1. One zip file the agent unzips (recommended: everything, fewest messages)");
       say("   2. File by file in chat messages (recent history and the skill list only)");
-      via = (await ask("   Delivery number: ", 2))[0] === 0 ? ["--via", "auto"] : ["--via", "chat"];
+      say("   3. Through your Google Drive: the zip goes to Drive with rclone and the agent fetches it");
+      const pick = (await ask("   Delivery number: ", 3))[0];
+      if (pick === 2) {
+        const remote = (await rl.question(`   rclone remote for your Google Drive [${process.env.GBOT_DRIVE_REMOTE || "gdrive:"}]: `)).trim() || process.env.GBOT_DRIVE_REMOTE || "gdrive:";
+        via = ["--via", "drive", "--drive-remote", remote.endsWith(":") ? remote : remote + ":"];
+      } else via = pick === 0 ? ["--via", "auto"] : ["--via", "chat"];
     }
     const results = [];
     for (const bot of chosen) {

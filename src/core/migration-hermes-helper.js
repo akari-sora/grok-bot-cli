@@ -125,6 +125,17 @@ elif op == "readback":
             else:
                 sessions.append({"foreign_id": fid, "session_id": None, "messages": 0})
         result["sessions"] = sessions
+        if req.get("grok_sessions"):
+            # Every session imported from Grok Bot (any bot), by foreign id, for the preview. This is the
+            # query SessionDB's own foreign-import lookup runs; without it the preview says "not checked".
+            rows = db._read_rows("SELECT id, origin_json FROM sessions WHERE source = ? AND origin_json IS NOT NULL", ("grok-bot",)) if hasattr(db, "_read_rows") else None
+            found = None if rows is None else []
+            for row in rows or []:
+                fid = ((json.loads(row["origin_json"] or "{}") or {}).get("imported_from") or {}).get("foreign_session_id")
+                if fid:
+                    msgs = db.get_messages(row["id"])
+                    found.append({"foreign_id": fid, "messages": len(msgs), "digest": history_digest(msgs)})
+            result["grok_sessions"] = found
     finally:
         db.close()
     out(result)

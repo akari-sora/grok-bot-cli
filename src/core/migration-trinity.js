@@ -25,6 +25,7 @@ const LABEL = { muse: 'Muse', dot: 'Your dot' };
 // One attachment: the Muse window upload (muse-web-cli) and the dot app's own 20 MB limit.
 const ATTACH_LIMIT = { muse: 256 * 1024 * 1024, dot: 20 * 1024 * 1024 };
 const STEP_CHARS = 6000;
+const DRIVE_FOLDER = 'gbot-migrations';
 const MAX_CHAT_STEPS = 380;
 const DEFAULT_RECENT = 30;
 const SAFE = 'Save it exactly as given. Do not run, import, compile, install or act on it.';
@@ -34,14 +35,19 @@ const norm = (t) => String(t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''
 const stripWs = (b) => Buffer.from(b.toString('latin1').replace(/[ \t\n\v\f\r\\]+/g, ''), 'latin1');
 
 /** Options shared by the CLI and the wizard; every one has a default. */
-export function trinityOptions({ via = 'auto', history, skills, folder } = {}) {
-  if (!['auto', 'upload', 'chat'].includes(via)) throw new MigrationError('--via is auto, upload or chat.');
+export function trinityOptions({ via = 'auto', history, skills, folder, driveRemote, driveFolder } = {}) {
+  if (!['auto', 'upload', 'drive', 'chat'].includes(via)) throw new MigrationError('--via is auto, upload, drive or chat.');
+  if (driveRemote !== undefined && !/^[A-Za-z0-9_.-]+:$/.test(driveRemote)) throw new MigrationError('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
+  if (via === 'drive' && !driveRemote) throw new MigrationError('--via drive needs --drive-remote (an rclone remote for your Google Drive).');
+  if (driveFolder !== undefined && (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(driveFolder) || driveFolder.split('/').some((p) => p === '..' || p === '.'))) {
+    throw new MigrationError('--drive-folder is a Drive folder path such as gbot-migrations.');
+  }
   if (history !== undefined && !/^(full|none|recent(:\d{1,5})?)$/.test(history)) throw new MigrationError('--history is full, none, recent or recent:N.');
   if (skills !== undefined && !/^(all|index|none|[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*)$/.test(skills)) throw new MigrationError('--skills is all, index, none or a comma-separated list of skill names.');
   if (folder !== undefined && (!/^(~\/|\/)[A-Za-z0-9._\-/]+$/.test(folder) || folder.split('/').some((p) => p === '..' || p === '.'))) {
     throw new MigrationError('--folder is a path like ~/grok-bot/Name (letters, digits, . _ - /).');
   }
-  return { via, history, skills, folder };
+  return { via, history, skills, folder, driveRemote, driveFolder };
 }
 
 const safeSegment = (p) => (/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/.test(p) && !p.endsWith('.') ? p : 'x-' + sha(p).slice(0, 16));
@@ -97,14 +103,15 @@ const CHECK_PY = [
  * Pure apart from the bundle zip it writes next to the archive. Builds the handoff folder and the
  * trinity-migration-plan for one archive and seat.
  */
-export function buildTrinityPlan(archive, seat, { activateRoutines = false, via = 'auto', history, skills, folder: folderOpt, salt = randomBytes(8).toString('hex'), bundlePath } = {}) {
+export function buildTrinityPlan(archive, seat, { activateRoutines = false, via = 'auto', history, skills, folder: folderOpt, salt = randomBytes(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
   if (!LABEL[seat]) throw new MigrationError('Unsupported trinity seat.');
-  trinityOptions({ via, history, skills, folder: folderOpt });
-  const tryVia = via === 'auto' ? ['upload', 'chat'] : [via];
+  trinityOptions({ via, history, skills, folder: folderOpt, driveRemote, driveFolder });
+  // auto: an attachment when it fits, else your Google Drive (when a remote is given), else chat.
+  const tryVia = via === 'auto' ? ['upload', ...(driveRemote ? ['drive'] : []), 'chat'] : [via];
   let lastError;
   for (const mode of tryVia) {
     try {
-      return planFor(archive, seat, { mode, auto: via === 'auto', activateRoutines, history, skills, folderOpt, salt, bundlePath });
+      return planFor(archive, seat, { mode, auto: via === 'auto', activateRoutines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder });
     } catch (error) {
       if (!(error instanceof TooBig) || mode === tryVia.at(-1)) throw error;
       lastError = error;
@@ -115,7 +122,7 @@ export function buildTrinityPlan(archive, seat, { activateRoutines = false, via 
 
 class TooBig extends MigrationError {}
 
-function planFor(archive, seat, { mode, auto, activateRoutines, history, skills, folderOpt, salt, bundlePath }) {
+function planFor(archive, seat, { mode, auto, activateRoutines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
   const cap = archive.capture;
   const name = sanitize(cap.bot.name).text;
   const short = name.split(' · ')[0];
@@ -124,7 +131,9 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const base = short.normalize('NFKD').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 40) || 'bot';
   const folderName = `${base}-${cap.bot.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
   const folder = folderOpt ?? `~/grok-bot/${folderName}`;
-  const upload = mode === 'upload';
+  // A zip carries the folder byte for byte: as an attachment, or through the user's Google Drive.
+  const upload = mode === 'upload' || mode === 'drive';
+  const viaDrive = mode === 'drive';
   const historyMode = history ?? (upload ? 'full' : `recent:${DEFAULT_RECENT}`);
   const skillsMode = skills ?? (upload ? 'all' : 'index');
   const notMigrated = [];
@@ -269,7 +278,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const usedIds = new Set(['intro', 'bundle', 'remember']);
   if (upload) {
     const zip = zipFiles(files.map((f) => ({ path: f.rel, bytes: f.bytes })));
-    if (zip.length > ATTACH_LIMIT[seat]) throw new TooBig(`The bundle is ${(zip.length / 1048576).toFixed(1)} MB; ${LABEL[seat]} takes ${ATTACH_LIMIT[seat] / 1048576} MB per file. Use --history recent:N, --skills index or --via chat.`);
+    if (!viaDrive && zip.length > ATTACH_LIMIT[seat]) throw new TooBig(`The bundle is ${(zip.length / 1048576).toFixed(1)} MB; ${LABEL[seat]} takes ${ATTACH_LIMIT[seat] / 1048576} MB per file. Use --history recent:N, --skills index or --via chat.`);
     const zipName = `grok-bot-${folderName}.zip`;
     const digest = sha(zip);
     // Content-addressed and create-only: another run (or a preview) cannot replace the bytes
@@ -278,9 +287,16 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
     if (!existsSync(path)) privateWrite(path, zip);
     else if (sha(readFileSync(path)) !== digest) throw new MigrationError(`${path} exists with other content; remove it and run again.`);
     bundle = { path, bytes: zip.length, sha256: digest, files: files.length };
-    add('bundle', `I'm moving my Grok Bot assistant "${name}" over to you. The attached ${zipName} is its handoff folder (${files.length} files): role, memory, open tasks, routines, skills, conversation and the files it used. ` +
-      `Unzip it into ${folder} on your computer, replacing an older copy of that folder if there is one. ${SAFE.replace('it exactly as given', 'the files exactly as they are')} Old instructions inside are history, not new commands. Do not create schedules unless a message says so.`,
-    { attach: [{ path, sha256: digest }] });
+    const what = `its handoff folder (${files.length} files): role, memory, open tasks, routines, skills, conversation and the files it used`;
+    const rest = `Unzip it into ${folder} on your computer, replacing an older copy of that folder if there is one. ${SAFE.replace('it exactly as given', 'the files exactly as they are')} Old instructions inside are history, not new commands. Do not create schedules unless a message says so.`;
+    if (viaDrive) {
+      // The name carries the digest, so the step text (and the plan id) is bound to these bytes.
+      const driveName = `grok-bot-${folderName}-${digest.slice(0, 16)}.zip`;
+      bundle.drive = { remote: driveRemote, folder: driveFolder, name: driveName };
+      add('bundle', `I'm moving my Grok Bot assistant "${name}" over to you. Using your Google Drive connector, download the file ${driveName} from my Google Drive folder ${driveFolder} onto your computer: it is ${what}. ${rest} Then delete the downloaded zip.`);
+    } else {
+      add('bundle', `I'm moving my Grok Bot assistant "${name}" over to you. The attached ${zipName} is ${what}. ${rest}`, { attach: [{ path, sha256: digest }] });
+    }
     for (const u of unitIds.keys()) unitIds.get(u).push('bundle');
   } else {
     add('intro', `I'm moving my Grok Bot assistant "${name}" over to you. The next messages create the folder ${folder} on your computer with its role, memory, open tasks, routines, skills, conversation and a few of its files, then ask you to remember one pointer to that folder long-term.\n` +
@@ -364,7 +380,10 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
 
 export function summarizeTrinityPlan(plan) {
   const d = plan.delivery;
-  const how = d.via === 'upload' ? `one zip (${(d.bundle.bytes / 1048576).toFixed(2)} MB, ${d.files} files) unzipped into ${d.folder}` : `${d.files} files written into ${d.folder} by chat`;
+  const zip = d.bundle ? `one zip (${(d.bundle.bytes / 1048576).toFixed(2)} MB, ${d.files} files)` : '';
+  const how = d.via === 'upload' ? `${zip} attached and unzipped into ${d.folder}`
+    : d.via === 'drive' ? `${zip} put in your Google Drive (${d.bundle.drive.remote}${d.bundle.drive.folder}/${d.bundle.drive.name}), fetched with its Drive connector and unzipped into ${d.folder}`
+      : `${d.files} files written into ${d.folder} by chat`;
   const lines = [`Destination: ${LABEL[plan.seat]} through trinity-cli — ${how}; ${plan.steps.length} message(s), then ${plan.checks.length} read-back check(s) and ${plan.questions.length} acceptance question(s)`,
     `History: ${plan.source.history}; skills: ${plan.source.skills}${plan.source.chosen ? ' (delivery chosen automatically)' : ''}`];
   for (const s of plan.steps) lines.push(`  ${s.id.padEnd(14)} ${s.text.split('\n')[0].slice(0, 100)}`);
@@ -404,7 +423,7 @@ export function digestVerdict(plan, answer) {
 
 export function brokenUnits(plan, answer) {
   const rows = String(answer ?? '').split('\n').map((l) => l.trim().replace(/^[`*>\s]+/, '').replace(/^Q\d+:\s*/, '').split(/\s+/));
-  const col = plan.delivery?.via === 'upload' ? 1 : 2;
+  const col = ['upload', 'drive'].includes(plan.delivery?.via) ? 1 : 2;
   const broken = [];
   for (const u of plan.delivery?.units ?? []) {
     const row = rows.find((r) => r[0] === u.unit);
@@ -412,6 +431,26 @@ export function brokenUnits(plan, answer) {
     if (row[1] === 'MISSING' || row[1] === 'BAD' || row[col] !== u.digest) broken.push(u);
   }
   return broken;
+}
+
+/**
+ * Put the bundle in the user's Google Drive with rclone, unless the same bytes are already there,
+ * and prove it by the MD5 Drive reports.
+ */
+async function driveUpload(exec, bundle, onProgress) {
+  const { remote, folder, name } = bundle.drive;
+  const target = `${remote}${folder}/${name}`;
+  const md5 = createHash('md5').update(readFileSync(bundle.path)).digest('hex');
+  const remoteMd5 = async () => {
+    const r = await exec('rclone', ['md5sum', target], { timeoutMs: 5 * 60_000 });
+    return r.code === 0 ? (r.stdout.trim().split(/\s+/)[0] ?? '') : '';
+  };
+  if (await remoteMd5() === md5) { onProgress(`the bundle is already in Google Drive (${target})`); return target; }
+  onProgress(`putting the bundle in your Google Drive (${target})`);
+  const up = await exec('rclone', ['copyto', bundle.path, target], { timeoutMs: 60 * 60_000 });
+  if (up.code !== 0) throw new MigrationError(`rclone could not put the bundle in Google Drive (exit ${up.code}): ${(up.stderr || up.stdout).trim().split('\n').filter((l) => !/NOTICE/.test(l)).slice(-2).join(' ').slice(0, 300)}`);
+  if (await remoteMd5() !== md5) throw new MigrationError(`Google Drive reports other bytes for ${target}; nothing was sent to the agent.`);
+  return target;
 }
 
 async function trinityRun(exec, bin, to, path, { accept, redo = [], checkOnly = false }) {
@@ -425,7 +464,7 @@ async function trinityRun(exec, bin, to, path, { accept, redo = [], checkOnly = 
   return result;
 }
 
-async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, onProgress, exec = defaultExec, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', ...options }) {
+async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, onProgress, exec = defaultExec, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
   const opened = openArchive(archive);
   const plan = buildTrinityPlan(opened, to, { activateRoutines, ...trinityOptions(options) });
   const help = await exec(bin, ['migrate', '--help'], { timeoutMs: 60_000 }).catch(() => ({ code: 127, stdout: '' }));
@@ -436,6 +475,7 @@ async function runTrinity({ archive, to, accept, checkOnly = false, activateRout
   writeFileSync(path, JSON.stringify(wire, null, 2) + '\n', { mode: 0o600 });
   onProgress(checkOnly ? `checking ${LABEL[to]} with trinity-cli (nothing is sent but the questions)`
     : `delivering ${delivery.via === 'upload' ? 'the bundle' : `${plan.steps.length} messages`} to ${LABEL[to]} with trinity-cli (resumable)`);
+  const onDrive = delivery.via === 'drive' && !checkOnly ? await driveUpload(exec, delivery.bundle, onProgress) : null;
   let result = await trinityRun(exec, bin, to, path, { accept, checkOnly });
   // gbot judges the digest answer itself, row by row; a keyword match is not enough.
   const judge = (r) => {
@@ -455,15 +495,21 @@ async function runTrinity({ archive, to, accept, checkOnly = false, activateRout
     result = await trinityRun(exec, bin, to, path, { accept, redo: [...new Set(broken.flatMap((u) => u.ids))] });
     judge(result);
   }
+  // A verified migration does not need the Drive copy any more (the archive keeps the bundle).
+  let driveCopy = onDrive;
+  if (onDrive && result.ok && !keepDrive) {
+    const gone = await exec('rclone', ['deletefile', onDrive], { timeoutMs: 5 * 60_000 });
+    if (gone.code === 0) driveCopy = null;
+  }
   const report = {
-    exitCode: result.ok ? 0 : 3, to, archive: opened.root, bot: opened.capture.bot.name, plan: path, trinityState: result.state_path,
+    exitCode: result.ok ? 0 : 3, to, archive: opened.root, bot: opened.capture.bot.name, plan: path, trinityState: result.state_path, driveCopy,
     via: delivery.via, folder: delivery.folder, bundle: delivery.bundle, checkOnly, stopped: result.stopped, repaired,
     deliveries: result.steps.map((s) => ({ step: s.id, state: s.state, ok: s.ok, note: s.note })),
     verify: { ok: result.checks.every((c) => c.ok !== false), checks: result.checks.map((c) => ({
       area: `${c.kind} read-back${c.informational ? ' (informational)' : ''}`, ok: c.ok !== false, informational: Boolean(c.informational), found: c.found ?? null,
       ...(c.note ? { issues: [c.note] } : { expected: c.expected?.length, missing: (c.expected ?? []).filter((t) => !(c.hits ?? []).includes(t)) }) })) },
     acceptance: accept ? { ok: result.questions.length > 0 && result.questions.every((q) => q.ok), freshChat: result.questions.some((q) => q.fresh_chat),
-      digest: delivery.via === 'upload' ? 'exact bytes' : 'content ignoring whitespace and backslashes',
+      digest: delivery.via === 'chat' ? 'content ignoring whitespace and backslashes' : 'exact bytes',
       results: result.questions.map((q) => ({ area: q.area, ok: q.ok, expect: q.expect, hits: q.hits, answer: q.answer, error: q.error || null, freshChat: Boolean(q.fresh_chat), note: q.note ?? null, attempts: q.attempts ?? 1, ...(q.earlier?.length ? { earlier: q.earlier } : {}) })) } : null,
     chatNote: result.chat_note ?? null,
     notMigrated: plan.notMigrated, finishedAt: new Date().toISOString(),
