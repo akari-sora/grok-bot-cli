@@ -18,7 +18,7 @@ gbot migrate check ARCHIVE --to hermes --accept                   # check again 
 gbot migrate run --account A --bot "Deploy QA" --to hermes --yes  # 2–4 in one go
 ```
 
-`--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (trinity-cli v0.5.2 or later, which reads an answer the agent gives in several messages, with muse-web-cli v0.1.6 or later and chatgpt-dot-cli v0.2.6 or later: they have `send --attach` and `--attach-sha256`). `--via drive` also needs [rclone](https://rclone.org) with a remote for your Google Drive, and the Google Drive connector set up in Muse or the dot.
+`--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (trinity-cli v0.5.2 or later, which reads an answer the agent gives in several messages, with muse-web-cli v0.1.8 or later and chatgpt-dot-cli v0.2.6 or later: they have `send --attach` and `--attach-sha256`). `--via drive` also needs [rclone](https://rclone.org) with a remote for your Google Drive, and the Google Drive connector set up in Muse or the dot.
 
 ![The same bot moved to Muse and to Your dot: one zip each, checked on their computer](../demo/gbot-migrate-muse-dot.gif)
 

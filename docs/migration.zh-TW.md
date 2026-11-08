@@ -18,7 +18,7 @@ gbot migrate check ARCHIVE --to hermes --accept                   # 之後隨時
 gbot migrate run --account A --bot "Deploy QA" --to hermes --yes  # 2–4 一次做完
 ```
 
-`--to` 可以是 `hermes`、`muse`、`dot`。Muse 和 dot 透過 `trinity-cli migrate` 傳送（需要 trinity-cli v0.5.2 以上，它會讀完對方分好幾則給的答案；加上 muse-web-cli v0.1.6 以上、chatgpt-dot-cli v0.2.6 以上：它們有 `send --attach` 與 `--attach-sha256`）。`--via drive` 另外要 [rclone](https://rclone.org) 和一個連到你 Google Drive 的 remote，以及在 Muse 或 dot 裡接好的 Google Drive 連接器。
+`--to` 可以是 `hermes`、`muse`、`dot`。Muse 和 dot 透過 `trinity-cli migrate` 傳送（需要 trinity-cli v0.5.2 以上，它會讀完對方分好幾則給的答案；加上 muse-web-cli v0.1.8 以上、chatgpt-dot-cli v0.2.6 以上：它們有 `send --attach` 與 `--attach-sha256`）。`--via drive` 另外要 [rclone](https://rclone.org) 和一個連到你 Google Drive 的 remote，以及在 Muse 或 dot 裡接好的 Google Drive 連接器。
 
 ![同一個 bot 搬到 Muse 和 Your dot：各一個 zip，在對方電腦上核對](../demo/gbot-migrate-muse-dot.gif)
 

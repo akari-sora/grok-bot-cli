@@ -63,3 +63,15 @@ The author's working bot "X Brief" has two routines on in Grok Bot: "Daily X bri
 
 - The report: weekly-x-recap "paused in Grok Bot, then on in Hermes", no rollback; daily-x-brief "off at the destination, unchanged in Grok Bot" (not named in `--routines`). Read back 7/7, acceptance 6/6; the transcript had 221 rows (131 messages) over seq 1–226, with 4 deleted rows reported as such.
 - Restored at 18:30:09: weekly-x-recap switched back on in Grok Bot and read back on; the test profile (with its cron jobs) deleted; the local archive deleted.
+
+## Muse with the final versions: Drive delivery and a routine switch-over
+
+gbot v0.11.2-iml1s.16, trinity-cli 0.5.3, muse-web-cli 0.1.7 then 0.1.8; the demo bot with its routine switched on for the test:
+
+`gbot migrate run --account A --bot <demo> --to muse --via drive --drive-remote trinity-gdrive: --move-routines --yes`
+
+- First run: one zip (4.00 MB, 329 files) put in Google Drive, fetched by Muse's Drive connector and unzipped into `~/grok-bot/Demo-d893d0cd`; read-back informational; acceptance 6/7. The memory question failed because Muse still followed an earlier instruction from the cleanup ("delete the Demo bot"), so it denied knowing it. As designed, the routine was **not** switched: still on in Grok Bot, not scheduled in Muse, exit 3.
+- Afterwards every muse-web-cli command answered `ui_changed`: Muse had left MEMORY.md open in its full-page editor over the chat. Fixed in muse-web-cli 0.1.8 (each command first closes that editor with its own close button); trinity-cli 0.5.4 pins it.
+- Muse was told the re-migration was intentional, the routine switched on again, and the same archive imported again (resumable; the bundle and the memory note were not sent twice): acceptance 7/7 in a new chat, then the switch-over: "paused in Grok Bot, then on in Muse". Read back: Grok Bot routine off; `muse-web-cli upcoming` (browser) lists "Kyoto fares below TWD 9,000" next to Muse's own two tasks. Exit 0, "migrated and verified". The Drive copy was deleted after the check (the folder is empty).
+- rclone printed its own notice that the shared Google Drive client_id it uses by default is being retired during 2026; `--via drive` needs a remote with your own client_id (see docs/migration.md).
+- Cleanup: Muse deleted the test schedule, the folder, the memory note and the day-log lines with ordinary edits (its forget tool would reset the Feed interest tags); `upcoming` shows only its own two tasks again. The Grok Bot demo routine is off, as before the test; the local archive was deleted.
