@@ -40,7 +40,14 @@ function createGateway(accountScope) {
     },
   };
 }
-/** Core owns policy and durable intents; its caller must hold the single-worker lock. */
+/**
+ * Core owns policy and durable intents; its caller must hold the single-worker lock.
+ * Explicit options preserve the existing JS injection contract for TypeScript callers.
+ * @param {{stateDir?: string, profile?: string, env?: NodeJS.ProcessEnv,
+ * gateway?: {resolve: Function, tail: Function, send: Function}, accountScope?: string,
+ * clock?: () => number, openSession?: Function, openConversation?: Function,
+ * limits?: Record<string, number>}} [options]
+ */
 export async function openRelayEngine({
   stateDir,
   profile,
