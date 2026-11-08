@@ -8755,6 +8755,9 @@ var __webpack_modules__ = {
         const config = {
             description: 'Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.',
             exitCode: 'result',
+            render: {
+                maxElapsedMs: 900000
+            },
             inputJsonSchema: {
                 additionalProperties: false,
                 properties: {
@@ -8938,6 +8941,7 @@ var __webpack_modules__ = {
         const DEFAULT_WAIT_SECONDS = 600;
         const describe = (template)=>`${template.published ? 'published' : 'not published'}${template.visibility ? `, ${template.visibility}` : ''}${template.activeVersion ? `, version ${template.activeVersion}` : ''}`;
         const whoOf = (target)=>`bot ${target.name} (${target.id})`;
+        const TEMPLATE_ENTRY_LIMIT = 500;
         const firstLine = (text)=>{
             const line = text.trim().split('\n')[0] ?? '';
             return line.length > 80 ? `${line.slice(0, 80)}…` : line;
@@ -8947,7 +8951,7 @@ var __webpack_modules__ = {
             return [
                 `Name: ${recipe.profile.name}`,
                 `Description: ${recipe.profile.description.trim()}`,
-                list('Memory', recipe.memory.map((item)=>`${item.kind ?? 'memory'}: ${firstLine(item.content)}`)),
+                list('Memory', recipe.memory.map((item)=>`${item.kind ?? 'memory'}: ${firstLine(item.content)}${item.content.length >= TEMPLATE_ENTRY_LIMIT ? `  [${item.content.length} characters: may be cut; keep each instruction step under ${TEMPLATE_ENTRY_LIMIT}]` : ''}`)),
                 list('Skills', recipe.skills.map((skill)=>skill.name)),
                 list('Routines', recipe.routines.map((routine)=>`${routine.name} (${routine.slug})`)),
                 list('Plugins', recipe.plugins.map((plugin)=>`${plugin.name} (${plugin.pluginId})`)),

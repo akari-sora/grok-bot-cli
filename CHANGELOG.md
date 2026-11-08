@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.13
+
+- `gbot bots template <bot>` waits up to `--wait` seconds as documented: its render budget was the default 60 s, so a template the bot drafted after a minute was reported as `render-failed` although the message had gone out. `--show` marks an instruction entry that reached 500 characters (a template cuts each entry there).
+- Move to Hermes instructions: the routine step is split so no step reaches 500 characters; the public template is version 3.
+
 ### 0.11.2-iml1s.12
 
 - `gbot migrate`: by default nothing in Grok Bot changes. The routines keep running there; gbot pauses one only with `--move-routines`, and the wizard, the preview and docs/migration.md say so.
