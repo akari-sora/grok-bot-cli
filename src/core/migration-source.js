@@ -1,6 +1,6 @@
 /** Read-only source adapter. Auth and roster selection stay with the existing gbot backend. */
 import { openBackend } from './commands.js';
-import { GATEWAY_TIMEOUT_MS, gatewayMaxResponseBytes } from './gateway.js';
+import { GATEWAY_TIMEOUT_MS, backendRead, connectGateway, gatewayMaxResponseBytes, hasBackend } from './gateway.js';
 import { requestHeaders } from './headers.js';
 import { normalizeTranscript } from './transcript.js';
 import { assertAllowedCredentialUrl } from './url-policy.js';
@@ -80,5 +80,35 @@ export async function openMigrationSource({ account, dir, files = false } = {}) 
       if (backend.kind !== 'gateway') throw new MigrationError('Workflow reads require the live gateway.');
       return readMigrationWorkflows(backend.session, agentId);
     },
+  };
+}
+
+/**
+ * Live, read-only IO for captureBot: allowlisted backend reads, presigned store reads and the
+ * box workflow reader. The session never leaves this object.
+ * @param {{account?: string, onProgress?: (text: string) => void}} [options]
+ */
+export async function openLiveCapture({ account, onProgress } = {}) {
+  if (account && process.env.GROK_BOT_GATEWAY_URL && process.env.GROK_BOT_GATEWAY_TOKEN) {
+    throw new MigrationError('Remove gateway overrides before selecting a migration account.');
+  }
+  const session = await connectGateway({ account });
+  if (!hasBackend(session)) throw new MigrationError('This login has no Grok Bot access token; full capture needs the backend (Grok Bot 0.78+ app login).');
+  const rpc = (name, body) => backendRead(session, name, body);
+  const presignMany = async (relPaths) => {
+    const r = await rpc('PresignSandBoxStoreReads', { relPaths });
+    return new Map((r?.instructions ?? []).map((i) => [i.relPath, i.url]));
+  };
+  return {
+    rpc,
+    presignMany,
+    presign: async (relPath) => {
+      const url = (await presignMany([relPath])).get(relPath);
+      if (!url) throw new MigrationError('The store did not presign ' + relPath + '.');
+      return url;
+    },
+    fetchImpl: fetch,
+    workflows: (agentId) => readMigrationWorkflows(session, agentId),
+    onProgress,
   };
 }

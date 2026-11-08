@@ -1075,6 +1075,42 @@ async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWA
   return data;
 }
 
+// Read-only backend RPCs the migration source may call. Anything that sends, writes, deletes or
+// changes state is absent on purpose, so a migration read can never modify the source account.
+export const BACKEND_READ_RPCS = Object.freeze([
+  "ListGrokBotAgents",
+  "ListGrokBotAgentSessions",
+  "ListGrokBotTranscriptEntries",
+  "ListGrokBotUserBotMemories",
+  "ListGrokBotAgentSkills",
+  "ListGrokBotAgentRoutines",
+  "ListGrokBotAgentAutomations",
+  "ListGrokBotAgentTasks",
+  "ListGrokBotAgentTodos",
+  "ListGrokBotTasks",
+  "ListGrokBotSubagents",
+  "ListGrokBotAgentFiles",
+  "ListGrokBotUserStoreFiles",
+  "ListGrokBotLibraryDocs",
+  "GetGrokBotAgentPlugins",
+  "ResolveGrokBotAttachmentReads",
+  "ReadGrokBotAgentAttachmentChunk",
+  "GetGrokBotRuntimeCapabilities",
+  "ListSandBoxStoreObjects",
+  "StatSandBoxStoreObject",
+  "PresignSandBoxStoreReads",
+]);
+
+/**
+ * One read-only backend RPC (allowlisted above) with the session's access token.
+ * @param {any} session @param {string} rpc @param {Record<string, unknown>} [body]
+ * @param {{ signal?: AbortSignal, timeoutMs?: number }} [options]
+ */
+export async function backendRead(session, rpc, body = {}, { signal, timeoutMs } = {}) {
+  if (!BACKEND_READ_RPCS.includes(rpc)) throw new GatewayError(rpc + " is not a read-only migration RPC.", { code: "RPC_NOT_ALLOWED" });
+  return backendCall(session, rpc, body, { signal, ...(timeoutMs ? { timeoutMs } : {}) });
+}
+
 const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
 
 /**

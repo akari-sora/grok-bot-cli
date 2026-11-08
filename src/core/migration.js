@@ -163,7 +163,7 @@ function report(snapshot) {
     (snapshot.errors.length ? 'Read failures (no error bodies or credentials):\n\n```json\n' + json(snapshot.errors) + '```\n' : 'No requested read failed. This does not establish completeness.\n');
 }
 
-function regularBytes(path, cap = MAX_MIGRATION_BYTES) {
+export function regularBytes(path, cap = MAX_MIGRATION_BYTES) {
   // NONBLOCK prevents a swapped FIFO from hanging; NOFOLLOW is supplemented by lstat/fstat checks.
   const before = lstatSync(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail('Expected a regular, non-linked file.');
@@ -184,21 +184,21 @@ function regularBytes(path, cap = MAX_MIGRATION_BYTES) {
     return Buffer.concat(chunks);
   } finally { closeSync(fd); }
 }
-function parseBytes(bytes) {
+export function parseBytes(bytes) {
   try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
   catch { fail('Migration file is not valid UTF-8 JSON.'); }
 }
-function directory(path) {
+export function directory(path) {
   const full = resolve(path);
   const st = lstatSync(full);
   if (!st.isDirectory() || st.isSymbolicLink()) fail('Migration root must be a real directory, not a symlink.');
   return realpathSync(full);
 }
-function safeRelative(path) {
+export function safeRelative(path) {
   return typeof path === 'string' && path.length <= 200 && path.split('/').every((part) =>
     /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(part) && !part.endsWith('.') && !/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part));
 }
-function privateWrite(path, bytes) {
+export function privateWrite(path, bytes) {
   const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 0o600);
   try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
 }
