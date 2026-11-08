@@ -13,6 +13,7 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 - The preview and the import report list each routine that is on in Grok Bot with what happens to it: off at the destination, on at the destination (it may run twice), or moved (paused in Grok Bot once the check passes, then turned on at the destination), with how to turn a paused one back on (in the Grok Bot app: Routines → toggle).
 - Capture: memory coverage is `complete` only when every memory file the box store lists for the bot (its own `memory/`, the shared `user-memory/` shards, its projects' memory) was read. One left out (size limit, budget, unreadable blob or digest mismatch, credential path, ...) makes it `partial` with each missing file and the reason (`coverage.memory.missing`); none read is `failed`. Missing memory files are listed in the Hermes/Muse/dot not-migrated lists (so in the preview) and in the import and check reports (`memoryNotCaptured`, "Memory files not captured" in the terminal). Before, one memory file read was enough for `complete`.
 - `checkMigration` takes an injected `exec` (Muse/dot) and `hermes`, like `importMigration`, so tests never reach a real `trinity-cli` or `hermes`.
+- Tests: 953 unit, 105 route.
 
 ### 0.11.2-iml1s.11
 

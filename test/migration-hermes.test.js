@@ -874,6 +874,28 @@ test('move: a roll back that fails is reported loudly with the exact manual fix'
   assert.match(importText(r), /\n {2}✗ a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): ROUTINE MAY RUN NOWHERE: paused in Grok Bot, not turned on in Hermes, and turning it back on in Grok Bot is not confirmed \(timed out; delivery is unknown\)\. Fix by hand: turn "Morning digest" back on in the Grok Bot app/);
 });
 
+test('move: when the Hermes read-back fails after the resume, the state is unknown and Grok Bot is not turned back on', async (t) => {
+  const root = tmp(t);
+  let resumed = false;
+  const fake = fakeHermes(join(root, 'hermes'), {
+    resumeFails: (job) => { if (job.name.endsWith('[grok-bot a5]')) { resumed = true; return true; } return false; },
+    helper: (req) => (req.op === 'readback' && resumed ? { ok: false, error: 'database is locked' } : undefined),
+  });
+  const archiveRoot = diskArchive(root);
+  const control = fakeSwitch();
+  const r = await importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, moveRoutines: true, hermes: fake.hermes, routineSwitch: control, onProgress: () => {} });
+  assert.deepEqual(control.calls.map((c) => c.slice(0, 3)), [[BOT, 'a1', false], [BOT, 'a5', false]], 'no roll back: it may be running in Hermes');
+  assert.equal(r.exitCode, 3);
+  const a5 = r.switchOver.find((x) => x.id === 'a5');
+  assert.deepEqual([a5.destination, a5.source, a5.rolledBack], ['unknown', 'paused', false]);
+  assert.match(a5.error, /database is locked/);
+  assert.equal(a5.byHand, 'check whether "Morning digest" runs in Hermes: if it does not, resume the Hermes job "Deploy QA · Watch & merge: Morning digest [grok-bot a5]" (hermes -p grok-qa cron list, then hermes -p grok-qa cron resume <job id>), or turn it back on in the Grok Bot app: Routines → toggle');
+  assert.deepEqual(r.routines.find((x) => x.id === 'a5').atDestination, 'unknown');
+  const text = importText(r);
+  assert.match(text, /\n {2}✗ a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): paused in Grok Bot; not known whether it is on in Hermes \(.*database is locked.*\); check whether "Morning digest" runs in Hermes/);
+  assert.match(text, /- a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): not known whether it is on in Hermes; paused in Grok Bot/);
+});
+
 test('move: a timeout or an answer that does not confirm it is unknown; every routine is tried once', async () => {
   const routines = ['t1', 't2', 't3', 't4', 't5'].map((id) => ({ id, name: id, schedule: '0 1 * * *', timezone: null }));
   const answers = {
