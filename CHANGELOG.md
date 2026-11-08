@@ -8,6 +8,7 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 
 - `gbot bots template <bot>` waits up to `--wait` seconds as documented: its render budget was the default 60 s, so a template the bot drafted after a minute was reported as `render-failed` although the message had gone out. `--show` marks an instruction entry that reached 500 characters (a template cuts each entry there).
 - Move to Hermes instructions: the routine step is split so no step reaches 500 characters; the public template is version 3.
+- A vertical phone video (`demo/gbot-migrate-phone.mp4`, 66 s) recorded with the released package: the guided migration to a new Hermes profile (routines left unchanged in Grok Bot), read-back 7/7 and questions 6/6, Hermes, Muse and Your dot each doing the trip's next step from the migrated data, the Move to Hermes template and the agent route. Its Remotion source and VHS tape are in `demo/promo` and `demo/gbot-migrate-phone.tape`.
 
 ### 0.11.2-iml1s.12
 

@@ -14,6 +14,10 @@ Manage Grok Bot bots, groups and messages from your terminal, and move a bot to 
 
 `gbot migrate` asks for the login, the bot and the destination, shows what will change, and after you confirm it imports, reads the destination back and asks the migrated bot questions only the migrated data answers. Recorded live on 2026-11-08 with a real demo bot ("Demo · Trip Planner"): Hermes gets a new profile with the bot's role, memory, skill folders, its routine (paused), the whole conversation and its files; every part is read back through Hermes (7/7); then the bot, now in Hermes, says what is still open for the Kyoto trip. [MP4](demo/gbot-migrate-hermes.mp4) · tape: [demo/gbot-migrate-hermes.tape](demo/gbot-migrate-hermes.tape)
 
+**On a phone (66 s, vertical):** the whole flow with the released package, then Hermes, Muse and Your dot each doing the trip's next step from the migrated data, the Move to Hermes template, and the agent route.
+
+<a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="Phone video: gbot migrate end to end" width="270"></a>
+
 ## What this fork adds
 
 - **Move a bot** (`gbot migrate`): a read-only, complete capture of one Grok Bot (every transcript page, memory, the skill library, routines, tasks, the files it uses), import into Hermes, Muse or Your dot, read-back, and questions to the migrated agent. [Guide](docs/migration.md)

@@ -14,6 +14,10 @@
 
 `gbot migrate` 會依序問登入、bot、目的地，先列出目的地會多什麼，確認後匯入、從目的地讀回，再問搬過去的 bot 只有搬過去的資料才答得出來的問題。2026-11-08 用為示範建立的真實 bot（Demo · Trip Planner）實際錄製：Hermes 多一個新 profile，含角色、記憶、skill 資料夾、排程（先暫停）、完整對話和檔案，每一項都透過 Hermes 讀回（7/7）；最後搬到 Hermes 的 bot 說出京都行程還有哪件事沒做。[MP4](demo/gbot-migrate-hermes.mp4) · tape：[demo/gbot-migrate-hermes.tape](demo/gbot-migrate-hermes.tape)
 
+**手機版影片（66 秒，直式）：** 用已發布的版本走完整個流程，接著 Hermes、Muse、Your dot 各自用搬過去的資料做行程的下一步，最後是 Move to Hermes 範本和給 agent 用的方式。
+
+<a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="手機版影片：gbot migrate 從頭到尾" width="270"></a>
+
 ## 這個 fork 多了什麼
 
 - **搬 bot**（`gbot migrate`）：只讀、完整地擷取一個 Grok Bot（每一頁對話、記憶、Skills 庫、排程、任務、它用到的檔案），匯入 Hermes、Muse 或 Your dot，讀回比對，再問搬過去的 agent 驗收題。[使用說明](docs/migration.zh-TW.md)
