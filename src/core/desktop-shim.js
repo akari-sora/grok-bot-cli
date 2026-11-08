@@ -31,10 +31,6 @@ const WRAPPER_LOG_FILENAME = "codex-desktop-to-daemon.log";
 const ENV_LOG_FILENAME = "codex-desktop-shared-daemon-env.log";
 const STANDALONE_REAL_SUFFIX = join("packages", "standalone", "current", "bin", "codex");
 
-function codexHomeDir(env = process.env) {
-  return env.CODEX_HOME || join(env.HOME || homedir(), ".codex");
-}
-
 function userHomeDir(env = process.env) {
   return env.HOME || homedir();
 }
