@@ -241,7 +241,7 @@ export const MIGRATE_TARGETS = [
   { key: "dot", label: "Your dot (one dot, one inbox; the same handoff folder on its computer)" },
 ];
 
-/** "aa22306546@hotmail.com" → "aa2…@hotmail.com": enough to tell logins apart on a shared screen. */
+/** Partial mask, "aa22306546@hotmail.com" → "aa2…@hotmail.com": the first three characters and the domain stay visible, enough to tell logins apart. */
 export function maskEmail(email) {
   const m = /^([^@]{1,3})[^@]*(@.+)$/.exec(String(email ?? ""));
   return m ? `${m[1]}…${m[2]}` : String(email ?? "");

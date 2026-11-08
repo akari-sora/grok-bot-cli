@@ -1,7 +1,8 @@
 /**
  * A small, deterministic zip writer (deflate, no external dependency) for the handoff bundle that
  * Muse and Your dot unzip on their computer. The same files always give the same bytes, so a
- * resumed migration recognises a bundle it already delivered.
+ * resumed migration recognises a bundle it already delivered. Names are ordered by code point, not by
+ * locale, so the bytes do not depend on the machine's language settings.
  */
 import { crc32, deflateRawSync } from 'node:zlib';
 import { MigrationError } from './migration.js';
@@ -16,7 +17,7 @@ export function zipFiles(entries) {
   const central = [];
   let offset = 0;
   const seen = new Set();
-  for (const { path, bytes } of [...entries].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const { path, bytes } of [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
     if (!/^[A-Za-z0-9._-][A-Za-z0-9._\-/]*$/.test(path) || path.split('/').some((p) => !p || p === '.' || p === '..') || seen.has(path)) {
       throw new MigrationError('Unsafe or duplicate bundle path: ' + path);
     }

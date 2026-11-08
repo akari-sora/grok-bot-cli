@@ -91,3 +91,10 @@ test('hostile box paths: refused when writing, and when a tampered capture.json 
   chmodSync(manPath, 0o600); writeFileSync(manPath, JSON.stringify(manifest));
   assert.throws(() => openArchive(root), /Unsafe box path in capture.json/);
 });
+
+test('projects.json is read only when selection would allow it: not when its bytes are a key', () => {
+  const key = { kind: 'file', sha: 'e'.repeat(64), size: 10 };
+  const pj = 'home/box/sand-data/agents/b1/projects.json';
+  assert.deepEqual(selectBoxFiles({ [pj]: key, 'home/box/.ssh/id_ed25519': key }, { agentId: 'b1', referenced: ['/' + pj] }), []);
+  assert.ok(isSecretPath('home/box/.claude/.credentials.json'));
+});

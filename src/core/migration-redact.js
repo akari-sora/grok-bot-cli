@@ -77,7 +77,9 @@ export function sanitizeBytes(bytes) {
     const r = sanitize(bytes.toString('utf8'));
     return { bytes: Buffer.from(r.text, 'utf8'), count: r.count, clean: r.clean, text: true };
   }
-  const found = hasSecret(bytes.toString('latin1'));
+  // Text stored as UTF-16 looks binary (every other byte is 0): read it as UTF-16 too.
+  const views = [bytes.toString('latin1'), bytes.toString('utf16le'), Buffer.from(bytes).swap16 && bytes.length % 2 === 0 ? Buffer.from(bytes).swap16().toString('utf16le') : ''];
+  const found = views.some((v) => v && hasSecret(v));
   return { bytes, count: found ? 1 : 0, clean: !found, text: false };
 }
 
@@ -87,18 +89,6 @@ export function sanitizeBytes(bytes) {
  */
 export function assertNoSecrets(value, where) {
   if (hasSecret(value)) throw new Error(`Refusing to send ${where}: it still contains a token-shaped value.`);
-}
-
-/** Redact text and add the count to a running tally object. */
-export function redactor() {
-  const tally = { count: 0 };
-  const fn = (value) => {
-    const r = redactSecrets(value);
-    tally.count += r.count;
-    return r.text;
-  };
-  fn.tally = tally;
-  return fn;
 }
 
 /** Text-like bytes (no NUL in the first 8 KiB and valid UTF-8). */

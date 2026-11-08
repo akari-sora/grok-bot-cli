@@ -10,7 +10,7 @@ import {
 } from '../src/core/migration-capture.js';
 import { archivePathFor, openArchive, writeArchive } from '../src/core/migration-archive.js';
 import { acceptanceQuestions, buildHermesPlan, distinctiveTokens, groupNotMigrated, memoryEntries, profileNameFor, skillDescription } from '../src/core/migration-hermes.js';
-import { brokenUnits, buildTrinityPlan, trinityOptions } from '../src/core/migration-trinity.js';
+import { brokenUnits, buildTrinityPlan, digestVerdict, trinityOptions } from '../src/core/migration-trinity.js';
 import { inflateRawSync } from 'node:zlib';
 import { hasSecret } from '../src/core/migration-redact.js';
 import { redactSecrets } from '../src/core/migration-redact.js';
@@ -317,7 +317,7 @@ test('Muse and dot get one handoff folder: a zip by default, the same folder fil
     assert.deepEqual(plan.steps.map((s) => s.id), ['bundle', 'remember']);
     assert.match(plan.steps[0].text, /Do not run, import, compile, install/);
     assert.match(plan.steps[1].text, /long-term/);
-    const files = unzip(readFileSync(plan.steps[0].attach[0]));
+    const files = unzip(readFileSync(plan.steps[0].attach[0].path));
     for (const want of ['README.md', 'ROLE.md', 'MEMORY.md', 'TASKS.md', 'ROUTINES.md', 'SKILLS.md', 'HISTORY.md', 'MANIFEST.txt']) assert.ok(files.has(want), want);
     assert.ok([...files.keys()].some((k) => k.startsWith('skills/')), 'whole skill folders');
     assert.ok([...files.keys()].some((k) => k.startsWith('box/')), 'the files it used');
@@ -385,4 +385,41 @@ test('the plan written for trinity has only trinity-migration-plan v1 fields; op
   assert.deepEqual(Object.keys(wire).filter((k) => !allowed.includes(k)), []);
   for (const bad of [{ via: 'fax' }, { history: 'recent:x' }, { skills: 'a;b' }, { folder: '~/../etc' }, { folder: "~/it's" }]) assert.throws(() => trinityOptions(bad), /--/);
   assert.throws(() => buildTrinityPlan(a, 'dot', { skills: 'no-such-skill', bundlePath: bundleIn(t, a) }), /No skill named/);
+});
+
+test('round 2: folder per bot id, tokens out of file names, files only by zip, capture gaps listed', async (t) => {
+  const a = await sampleArchive(t);
+  const tok = 'ghp_' + 'Z'.repeat(36);
+  // A hostile name cannot leave ~/grok-bot, and two bots with one name do not share a folder.
+  a.capture.bot.name = '..';
+  const hostile = buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) });
+  assert.match(hostile.delivery.folder, /^~\/grok-bot\/bot-[A-Za-z0-9]{1,8}$/);
+  a.capture.bot.name = 'Deploy QA · Watch & merge';
+  const one = buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) }).delivery.folder;
+  a.capture.bot = { ...a.capture.bot, id: 'ffffffff-0000-4000-8000-000000000000' };
+  assert.notEqual(buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) }).delivery.folder, one);
+  // A token in a file name is renamed in the zip and in MANIFEST.txt alike.
+  const row = a.capture.box.find((b) => b.kind === 'file' && b.reason === 'referenced');
+  row.boxPath = `/home/box/notes/${tok}.txt`;
+  a.capture.coverage = { ...a.capture.coverage, libraryDocs: { status: 'failed', reason: 'boom' } };
+  const plan = buildTrinityPlan(a, 'muse', { bundlePath: bundleIn(t, a) });
+  const files = unzip(readFileSync(plan.steps[0].attach[0].path));
+  assert.ok(![...files.keys()].some((k) => k.includes('ghp_')));
+  assert.deepEqual(files.get('MANIFEST.txt').toString('utf8').trim().split('\n'), [...files.keys()].filter((k) => k !== 'MANIFEST.txt').sort());
+  assert.match(plan.steps[0].attach[0].sha256, /^[0-9a-f]{64}$/);
+  assert.ok(plan.notMigrated.some((n) => n.item === 'Grok Bot libraryDocs' && /failed/.test(n.reason)));
+  assert.ok(!JSON.stringify(plan.notMigrated).includes('ghp_'));
+  // Chat delivery never retypes files.
+  const chat = buildTrinityPlan(a, 'dot', { via: 'chat' });
+  assert.ok(!chat.steps.some((s) => / box\//.test(s.text.split('\n')[0])));
+  assert.ok(chat.notMigrated.some((n) => /byte for byte only in a zip/.test(n.reason)));
+  assert.equal(new Set(chat.steps.map((s) => s.id)).size, chat.steps.length);
+});
+
+test('digest answers are judged row by row: every part once, right column, a marker on the first row is fine', () => {
+  const plan = { delivery: { via: 'upload', units: [{ unit: 'ROLE.md', digest: 'a'.repeat(12) }, { unit: 'box', digest: 'b'.repeat(12) }] } };
+  assert.equal(digestVerdict(plan, `Q2: ROLE.md ${'a'.repeat(12)} x\nbox ${'b'.repeat(12)} y`).ok, true);
+  assert.deepEqual(digestVerdict(plan, `${'a'.repeat(12)} ${'b'.repeat(12)}`).unknown, ['ROLE.md', 'box'], 'digests without their rows prove nothing');
+  assert.deepEqual(digestVerdict(plan, `Q2: ROLE.md MISSING 1\nbox ${'b'.repeat(12)} y`).broken, ['ROLE.md']);
+  assert.deepEqual(digestVerdict(plan, `ROLE.md x ${'a'.repeat(12)}\nbox ${'b'.repeat(12)} y`).broken, ['ROLE.md'], 'the exact column for a zip');
 });

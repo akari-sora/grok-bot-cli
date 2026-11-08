@@ -7,9 +7,9 @@
  *    automations, todos/tasks, skills, plugins, file lists;
  *  - the box store (ListSandBoxStoreObjects / PresignSandBoxStoreReads): manifest.json maps box
  *    paths to content-addressed blobs. It holds the bot's memory files, automation records,
- *    attachments and the box scripts its prompts call;
- *  - the box gateway workflow reader for skill bodies.
- * Nothing here sends a prompt or calls a write RPC. Every read is recorded in `coverage`, so a
+ *    attachments, the box scripts its prompts call and the shared skill library (workflows/<name>/).
+ * The session is backend-only: the box is never described or woken. Nothing here sends a prompt
+ * or calls a write RPC. Every read is recorded in `coverage`, so a
  * gap is visible instead of silent.
  */
 import { createHash } from 'node:crypto';
@@ -183,12 +183,15 @@ export async function readStoreManifest({ presign, fetchImpl = fetch }) {
 }
 
 // Never exported, even when a prompt names them.
-const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
+const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|\.?credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
 const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.azure|\.oci|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|\.config\/rclone|\.config\/hub|\.config\/op|\.config\/doctl|\.local\/share\/keyrings|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;
 // A best-effort name list, not a guarantee: content is redacted separately (migration-redact.js).
 export const isSecretPath = (p) => SECRET_PATH.test(p) || SECRET_DIR.test(p);
 
 /** Box paths a bot owns or names, from the manifest. Returns [{path, entry, reason}]. */
+/** Only the manifest entries at credential paths (for the same-bytes rule in a partial selection). */
+const secretEntries = (entries) => Object.fromEntries(Object.entries(entries).filter(([p]) => isSecretPath(p)));
+
 const UNSAFE_PATH = /(^\/|\\|\0|(^|\/)\.\.?(\/|$))/;
 export const isUnsafeBoxPath = (p) => typeof p !== 'string' || !p || UNSAFE_PATH.test(p);
 
@@ -430,8 +433,10 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     const memoryTexts = [];
     // Projects this bot joined (agents/<id>/projects.json); their shared memory travels with it.
     let projects = [];
-    const pj = store.entries[`home/box/sand-data/agents/${agentId}/projects.json`];
-    if (pj?.kind === 'file' && SHA_RE.test(str(pj.sha))) {
+    const pjPath = `home/box/sand-data/agents/${agentId}/projects.json`;
+    const pj = store.entries[pjPath];
+    // Read only what selection would also allow (same credential rules, same bytes rule).
+    if (pj?.kind === 'file' && SHA_RE.test(str(pj.sha)) && selectBoxFiles({ [pjPath]: pj, ...secretEntries(store.entries) }, { agentId, referenced: ['/' + pjPath] }).length) {
       const got = (await blobReader([pj.sha])).get(pj.sha);
       try {
         const parsed = JSON.parse(got?.toString('utf8') ?? 'null');
@@ -457,6 +462,7 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     for (const p of toRead) {
       const bytes = blobs.get(p.entry.sha);
       if (!bytes) { skipped.push({ boxPath: '/' + p.path, reason: 'blob unreadable or digest mismatch' }); continue; }
+      if (bytes.length !== p.entry.size) { skipped.push({ boxPath: '/' + p.path, reason: `size ${bytes.length} differs from the manifest (${p.entry.size})` }); continue; }
       files.push({ boxPath: '/' + p.path, reason: p.reason, kind: 'file', size: bytes.length, sha256: p.entry.sha, mode: p.entry.mode ?? null, bytes });
       if (p.path.includes('/memory/') && p.path.endsWith('.md')) memoryTexts.push(bytes.toString('utf8'));
     }
@@ -478,6 +484,7 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
       for (const p of extra) {
         const bytes = extraBlobs.get(p.entry.sha);
         if (!bytes) { skipped.push({ boxPath: '/' + p.path, reason: 'blob unreadable or digest mismatch' }); continue; }
+        if (bytes.length !== p.entry.size) { skipped.push({ boxPath: '/' + p.path, reason: `size ${bytes.length} differs from the manifest (${p.entry.size})` }); continue; }
         files.push({ boxPath: '/' + p.path, reason: 'referenced-by-memory', kind: 'file', size: bytes.length, sha256: p.entry.sha, mode: p.entry.mode ?? null, bytes });
       }
     }
