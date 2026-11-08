@@ -69,6 +69,6 @@ Keep MR Draft until live acceptance and remaining release conditions are reviewe
 
 ## Related documents
 
-- [Multi-target implementation plan](../migration-multitarget-plan.md)
-- [Usage and Trinity responsibility](../migration-targets.md)
+- Current guide (supersedes the multi-target plan and the earlier usage notes): [docs/migration.md](../migration.md) · [繁體中文](../migration.zh-TW.md)
+- Final run record: [2026-11-08-full-migration.md](2026-11-08-full-migration.md)
 - [Original archive/OpenClaw verification](2026-11-08-migration.md)

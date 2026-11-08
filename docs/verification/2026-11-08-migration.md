@@ -70,4 +70,4 @@ Exact schema/version rejection; UTF-8 preservation and invalid UTF-8 rejection; 
 
 The researched plan, working limited migration workflow and reproducible automated tests are ready for review. Keep the MR draft while live-provider/runtime acceptance, platform coverage and dependency findings are unresolved. Do not publish this as a lossless one-click account migration. No source bots, credentials, destination runtime, existing user directories or npm release were changed by this implementation session.
 
-Related: [implementation plan](../migration-toolkit-plan.md) · [usage and limitations](../migration-toolkit.md).
+Related: the current guide, which supersedes the toolkit plan and usage notes, is [docs/migration.md](../migration.md) ([繁體中文](../migration.zh-TW.md)); the final run record is [2026-11-08-full-migration.md](2026-11-08-full-migration.md).
