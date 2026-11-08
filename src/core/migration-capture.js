@@ -182,6 +182,52 @@ export async function readStoreManifest({ presign, fetchImpl = fetch }) {
   throw new MigrationError('The box store manifest kept changing during the read; run the capture again.');
 }
 
+/**
+ * The shared skill library (workflows/<name>/SKILL.md in the box store), read the way capture reads it:
+ * the manifest, then each SKILL.md blob by its hash (8 at a time), checked against hash and size.
+ * Returns [{ id, name, description, source: 'workflow', unreadable? }] sorted by id.
+ */
+export async function readSkillLibrary({ presign, presignMany, fetchImpl = fetch }) {
+  const store = await readStoreManifest({ presign, fetchImpl });
+  const rows = [];
+  for (const [path, entry] of Object.entries(store.entries)) {
+    const m = /^home\/box\/sand-data\/workflows\/([^/.][^/]*)\/SKILL\.md$/.exec(path);
+    if (m && object(entry)) rows.push({ id: m[1], entry });
+  }
+  rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const out = [];
+  for (let i = 0; i < rows.length; i += BLOB_BATCH) {
+    const batch = rows.slice(i, i + BLOB_BATCH);
+    const urls = await presignMany(batch.map((r) => 'blobs/' + r.entry.sha));
+    out.push(...await Promise.all(batch.map(async ({ id, entry }) => {
+      const url = urls.get('blobs/' + entry.sha);
+      let text = null;
+      if (url && Number(entry.size) <= 1024 * 1024) {
+        try {
+          const { bytes } = await fetchStoreBytes(url, { cap: 1024 * 1024, fetchImpl });
+          if (sha256(bytes) === entry.sha && bytes.length === entry.size) text = bytes.toString('utf8');
+        } catch { /* reported as unreadable */ }
+      }
+      const front = text === null ? '' : (/^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '');
+      // One front-matter field, including YAML block scalars (`description: >-` and indented lines).
+      const field = (key) => {
+        const lines = front.split(/\r?\n/);
+        const at = lines.findIndex((l) => l.startsWith(key + ':'));
+        if (at === -1) return '';
+        const value = lines[at].slice(key.length + 1).trim();
+        if (/^[>|][-+]?$/.test(value)) {
+          const body = [];
+          for (const l of lines.slice(at + 1)) { if (l.trim() && !/^\s/.test(l)) break; body.push(l.trim()); }
+          return body.filter(Boolean).join(value.startsWith('>') ? ' ' : '\n').trim();
+        }
+        return value.replace(/^(["'])(.*)\1$/, '$2').trim();
+      };
+      return { id, name: field('name') || id, description: field('description'), source: 'workflow', ...(text === null ? { unreadable: true } : {}) };
+    })));
+  }
+  return out;
+}
+
 // Never exported, even when a prompt names them.
 const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|\.?credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
 const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.azure|\.oci|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|\.config\/rclone|\.config\/hub|\.config\/op|\.config\/doctl|\.local\/share\/keyrings|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;

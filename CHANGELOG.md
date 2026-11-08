@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.9
+
+- Grok Bot 0.78 hosts answer 404 to the box gateway's skill-library and root-thread methods, even with the box awake. `gbot skills list` then reads the library from the box store through the backend (as `gbot migrate` does) instead of failing; `skills add`/`remove` and `thread --root` explain what to use instead (`LIBRARY_EDIT_UNAVAILABLE`, `THREAD_ROOT_UNAVAILABLE`) rather than a bare 404. Any other gateway failure is reported as before.
+- docs/migration.md: set up the `--via drive` rclone remote with your own Google OAuth client (rclone's shared client is being retired).
+
 ### 0.11.2-iml1s.8
 
 - `gbot bots template <bot>` shares a server-hosted bot as a Grok Bot template, the way the 0.78 app does: it reads `GetGrokBotTemplateForSourceAgent`, sends the bot the app's message (`Create a public template of yourself that I can share with somebody else`, or `Update the shared template of yourself.` when it already has one) through `SendGrokBotUserMessage` with the `TEMPLATE_SHARE` initiator, then reads the template every 10 s until it appears or gets a newer `updatedAtMs`, for at most `--wait` seconds (default 600; 0 does not wait). It prints the `https://x.ai/bot/<shareId>` link on its own line. Exit 0 when the template is seen; exit 3 when the message went out (or its delivery is unknown) but no template appeared in time, with a hint to run `gbot bots template <bot> --status` later; exit 1 when it was rejected or nothing was sent. The message is never sent again. `--status` only reads: the current template and link, or "no template yet". Box-only bots, a login whose server roster is off, groups, and sessions without an access token are refused before anything is sent (the app has no box path for templates). `--account` and `--json` as for the other `bots` commands. docs/move-to-hermes.md "Share it" uses it.

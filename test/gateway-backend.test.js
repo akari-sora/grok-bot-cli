@@ -15,11 +15,13 @@ import { formatTranscript, summarize } from "../src/core/format.js";
 import { transcriptDelta } from "../src/core/transcript.js";
 import {
   addGroupMember,
+  addSkill,
   connectGateway,
   createGroup,
   deleteAgent,
   getBotTemplate,
   getBotTemplateVersion,
+  getThread,
   getTranscriptTail,
   hasBackend,
   listAgents,
@@ -28,6 +30,7 @@ import {
   publishBotTemplate,
   reconcileDelivery,
   removeGroupMember,
+  removeSkill,
   resolveRef,
   respondGrokApproval,
   sendPrompt,
@@ -1919,4 +1922,47 @@ test("--publish calls ActivateGrokBotTemplateVersion with the share id and the c
   const empty = await backendSession(t, { ...templateVersionRoutes(), rpcs: { ...templateVersionRoutes().rpcs, ActivateGrokBotTemplateVersion: () => ({}) } });
   await assert.rejects(empty.run((session) => publishBotTemplate(session, "General", { version: 2 })), /ActivateGrokBotTemplateVersion returned no template/);
   assert.deepEqual(rpcCalls(empty.calls, "ActivateGrokBotTemplateVersion").map((call) => call.body), [{ shareId: "share-1", version: 2 }]);
+});
+
+
+test("0.78: skills list reads the library from the box store when the box gateway answers 404; edits and --root say why", async (t) => {
+  const skill = Buffer.from("---\nname: Ship it\ndescription: >-\n  Release\n  steps.\n---\nBody\n");
+  const sha = crypto.createHash("sha256").update(skill).digest("hex");
+  const manifest = Buffer.from(JSON.stringify({ version: 1, updatedAtMs: 1, entries: {
+    "home/box/sand-data/workflows/ship-it/SKILL.md": { sha, size: skill.length },
+    "home/box/sand-data/workflows/ship-it/run.sh": { sha: "1".repeat(64), size: 4 },
+    "home/box/sand-data/agents/bot-1/memory/a.md": { sha: "2".repeat(64), size: 3 },
+  } }));
+  const gone = () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+  const { calls, run } = await backendSession(t, {
+    rpcs: { PresignSandBoxStoreReads: (body) => ({ instructions: body.relPaths.map((relPath) => ({ relPath, url: STORE + "/" + relPath })) }) },
+    box: { listAgents: gone, getAgentWorkflows: gone, getAgentThread: gone, importAgentWorkflowText: gone },
+    store: { "/manifest.json": manifest, ["/blobs/" + sha]: skill },
+  });
+  await run(async (session) => {
+    assert.deepEqual(await listSkills(session), [{ id: "ship-it", name: "Ship it", description: "Release steps.", source: "workflow" }]);
+    const presigned = rpcCalls(calls, "PresignSandBoxStoreReads").flatMap((call) => call.body.relPaths);
+    assert.deepEqual(presigned, ["manifest.json", "blobs/" + sha], "only the manifest and the SKILL.md blob");
+    assert.ok(calls.filter((call) => call.target.startsWith(STORE + "/")).every((call) => !JSON.stringify(call.headers).includes(ACCESS)), "no token to the store");
+    await assert.rejects(addSkill(session, "---\nname: x\n---\nbody"), (error) => error.code === "LIBRARY_EDIT_UNAVAILABLE" && /Grok Bot app/.test(error.message));
+    await assert.rejects(removeSkill(session, "ship-it"), (error) => error.code === "LIBRARY_EDIT_UNAVAILABLE");
+    await assert.rejects(getThread(session, "General", "t3u"), (error) => error.code === "THREAD_ROOT_UNAVAILABLE" && /gbot thread "General"/.test(error.message));
+  });
+});
+
+test("skills list keeps the box gateway answer when there is one, and a non-404 failure is not hidden", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    box: {
+      listAgents: () => ({ agents: [{ id: "bot-1", name: "General" }] }),
+      getAgentWorkflows: () => ({ workflows: [{ id: "w1", name: "One", description: "d", source: "workflow" }] }),
+    },
+  });
+  await run(async (session) => {
+    assert.deepEqual((await listSkills(session)).map((s) => s.id), ["w1"]);
+    assert.equal(rpcCalls(calls, "PresignSandBoxStoreReads").length, 0);
+  });
+  const broken = await backendSession(t, { box: { listAgents: () => new Response("boom", { status: 500 }) } });
+  await broken.run(async (session) => {
+    await assert.rejects(listSkills(session), (error) => error.status === 500);
+  });
 });
