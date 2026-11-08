@@ -392,6 +392,10 @@ def real_contract() -> None:
         assert got["name"].endswith(job["tag"]) and got["schedule"]["expr"] == job["schedule"], got
         assert got["state"] == "paused" and got["enabled"] is False and got["prompt"] == job["prompt"] and got["workdir"] == job["workdir"], got
         print("PASS real Hermes `cron create` with gbot's arguments: tagged name, schedule, paused state, prompt and workdir read back")
+        ro = result["readOnly"]
+        assert ro["changed"] == [], f"the read-back changed {ro['changed']}"
+        assert ro["sameCron"], ro["cron"]
+        print("PASS real Hermes read-back writes nothing: a bare-list cron/jobs.json is read as is (not repaired), and no file in the profile changes")
     finally:
         shutil.rmtree(home, ignore_errors=True)
     assert not home.exists()

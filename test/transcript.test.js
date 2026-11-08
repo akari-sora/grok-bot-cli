@@ -318,3 +318,16 @@ test("transcript delta resets an unknown cursor with one bounded snapshot", () =
   assert.deepEqual(delta.entries, entries.slice(-40));
   assert.equal(delta.cursor, "m45");
 });
+
+test("an unreadable row holds the incremental cursor, so it is read again once its body is back", () => {
+  const rows = (a1) => ({ entries: [{ id: "u0", kind: "message", role: "user" }, { id: "u1", kind: "send-message", text: "one" }, a1, { id: "a2", kind: "send-message", text: "two" }] });
+  const first = transcriptDelta(rows({ id: "a1", kind: "send-message", seq: 3, unreadable: true }), { after: "u0" });
+  assert.deepEqual(first.entries.map((e) => e.id), ["u1"]);
+  assert.equal(first.cursor, "u1");
+  const later = transcriptDelta(rows({ id: "a1", kind: "send-message", text: "back" }), { after: first.cursor });
+  assert.deepEqual(later.entries.map((e) => e.id), ["a1", "a2"]);
+  assert.equal(later.cursor, "a2");
+  const stillDown = transcriptDelta(rows({ id: "a1", kind: "send-message", unreadable: true }), { after: "u1" });
+  assert.deepEqual(stillDown.entries, []);
+  assert.equal(stillDown.cursor, "u1", "the cursor does not move past it");
+});

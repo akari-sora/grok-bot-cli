@@ -11544,7 +11544,7 @@ var __webpack_modules__ = {
                 'drive',
                 'chat'
             ]).default('auto'),
-            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_.-]+:$/).optional(),
+            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/).optional(),
             driveFolder: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
@@ -11680,7 +11680,7 @@ var __webpack_modules__ = {
                 'drive',
                 'chat'
             ]).default('auto'),
-            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_.-]+:$/).optional(),
+            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/).optional(),
             driveFolder: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
             keepDrive: zod__rspack_import_3.zMY().default(false),
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
@@ -11802,7 +11802,7 @@ var __webpack_modules__ = {
                 'drive',
                 'chat'
             ]).default('auto'),
-            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_.-]+:$/).optional(),
+            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/).optional(),
             driveFolder: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
@@ -11950,7 +11950,7 @@ var __webpack_modules__ = {
                 'drive',
                 'chat'
             ]).default('auto'),
-            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_.-]+:$/).optional(),
+            driveRemote: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/).optional(),
             driveFolder: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
             keepDrive: zod__rspack_import_3.zMY().default(false),
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
@@ -36497,6 +36497,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
     "./src/core/migration-hermes-helper.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         const HERMES_HELPER = String.raw`
 import hashlib, importlib, json, os, sys
+from pathlib import Path
 
 def out(value):
     sys.stdout.write(json.dumps(value, ensure_ascii=False))
@@ -36526,6 +36527,26 @@ def memory_store():
     if req.get("user_char_limit"): store.user_char_limit = int(req["user_char_limit"])
     return store
 
+def read_jobs(cron_jobs):
+    # cron/jobs.json as load_jobs() reads it ({"jobs": [...]}, an id-keyed map, or a bare list), without
+    # its repair-and-save. An unreadable file is an error, not an empty list.
+    with cron_jobs.use_cron_store(home):
+        store = cron_jobs._current_cron_store() if hasattr(cron_jobs, "_current_cron_store") else None
+    path = Path(store.jobs_file) if store is not None else Path(home) / "cron" / "jobs.json"
+    if not path.exists():
+        return []
+    raw = path.read_text(encoding="utf-8-sig")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = json.loads(raw, strict=False)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+    if isinstance(jobs, dict):
+        jobs = [{**v, "id": v.get("id") or k} for k, v in jobs.items() if isinstance(v, dict)]
+    if not isinstance(jobs, list):
+        raise ValueError("cron/jobs.json has no list of jobs")
+    return [j for j in jobs if isinstance(j, dict)]
+
 def history_digest(messages):
     # Same as historyDigest() in migration-hermes.js: role, UTF-8 byte length and text of each message.
     h = hashlib.sha256()
@@ -36547,6 +36568,9 @@ if op == "preflight":
     if not missing:
         from hermes_state import SessionDB
         missing += [f"hermes_state.SessionDB.{n}" for n in ("import_foreign_history", "find_foreign_import", "get_messages", "close") if not hasattr(SessionDB, n)]
+        import inspect
+        if "read_only" not in inspect.signature(SessionDB.__init__).parameters:
+            missing.append("hermes_state.SessionDB(read_only=True)")
     if missing:
         out({"ok": False, "error": "this Hermes lacks " + ", ".join(missing) + "; update Hermes or gbot"}); sys.exit(0)
     import hermes_cli
@@ -36595,19 +36619,23 @@ elif op == "readback":
     from hermes_time import get_timezone_name
     result["timezone"] = get_timezone_name()
     from cron import jobs as cron_jobs
-    with cron_jobs.use_cron_store(home):
-        result["cron"] = [{"id": j.get("id"), "name": j.get("name"), "schedule": j.get("schedule"),
-                           "enabled": j.get("enabled", True), "state": cron_jobs.effective_job_state(j),
-                           "prompt": j.get("prompt"), "workdir": j.get("workdir")} for j in cron_jobs.load_jobs()]
+    # The read-back (also the preview's) never writes: load_jobs() repairs an old-shaped jobs.json
+    # and saves it, so the file is read here with the shapes load_jobs() accepts, and nothing saved.
+    result["cron"] = [{"id": j.get("id"), "name": j.get("name"), "schedule": j.get("schedule"),
+                       "enabled": j.get("enabled", True), "state": cron_jobs.effective_job_state(j),
+                       "prompt": j.get("prompt"), "workdir": j.get("workdir")} for j in read_jobs(cron_jobs)]
     from tools.skills_tool import skills_list
     listed = json.loads(skills_list())
     result["skills"] = [s.get("name") for s in (listed.get("skills") or [])]
+    import hermes_state
     from hermes_state import SessionDB
-    db = SessionDB()
+    # Read-only (no schema set-up, no write lock); a profile without a session store has no history yet.
+    db_path = hermes_state._default_db_path() if hasattr(hermes_state, "_default_db_path") else Path(home) / "state.db"
+    db = SessionDB(db_path=db_path, read_only=True) if Path(db_path).exists() else None
     try:
         sessions = []
         for fid in req.get("foreign_ids", []):
-            sid = db.find_foreign_import({"tool": "grok-bot", "path": req.get("history_path", ""), "foreign_session_id": fid})
+            sid = db.find_foreign_import({"tool": "grok-bot", "path": req.get("history_path", ""), "foreign_session_id": fid}) if db else None
             if sid:
                 msgs = db.get_messages(sid)
                 sessions.append({"foreign_id": fid, "session_id": sid, "messages": len(msgs), "digest": history_digest(msgs)})
@@ -36617,7 +36645,12 @@ elif op == "readback":
         if req.get("grok_sessions"):
             # Every session imported from Grok Bot (any bot), by foreign id, for the preview. This is the
             # query SessionDB's own foreign-import lookup runs; without it the preview says "not checked".
-            rows = db._read_rows("SELECT id, origin_json FROM sessions WHERE source = ? AND origin_json IS NOT NULL", ("grok-bot",)) if hasattr(db, "_read_rows") else None
+            if db is None:
+                rows = []
+            elif hasattr(db, "_read_rows"):
+                rows = db._read_rows("SELECT id, origin_json FROM sessions WHERE source = ? AND origin_json IS NOT NULL", ("grok-bot",))
+            else:
+                rows = None
             found = None if rows is None else []
             for row in rows or []:
                 fid = ((json.loads(row["origin_json"] or "{}") or {}).get("imported_from") or {}).get("foreign_session_id")
@@ -36626,7 +36659,8 @@ elif op == "readback":
                     found.append({"foreign_id": fid, "messages": len(msgs), "digest": history_digest(msgs)})
             result["grok_sessions"] = found
     finally:
-        db.close()
+        if db is not None:
+            db.close()
     out(result)
 
 else:
@@ -38313,7 +38347,7 @@ else:
                 'drive',
                 'chat'
             ].includes(via)) throw new _migration_js__rspack_import_5.Py('--via is auto, upload, drive or chat.');
-            if (driveRemote !== undefined && !/^[A-Za-z0-9_.-]+:$/.test(driveRemote)) throw new _migration_js__rspack_import_5.Py('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
+            if (driveRemote !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/.test(driveRemote)) throw new _migration_js__rspack_import_5.Py('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
             if (via === 'drive' && !driveRemote) throw new _migration_js__rspack_import_5.Py('--via drive needs --drive-remote (an rclone remote for your Google Drive).');
             if (driveFolder !== undefined && (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(driveFolder) || driveFolder.split('/').some((p)=>p === '..' || p === '.'))) {
                 throw new _migration_js__rspack_import_5.Py('--drive-folder is a Drive folder path such as gbot-migrations.');
@@ -39099,7 +39133,11 @@ else:
         async function driveUpload(exec, bundle, onProgress) {
             const { remote, folder, name } = bundle.drive;
             const target = `${remote}${folder}/${name}`;
-            const md5 = (0, node_crypto__rspack_import_0.createHash)('md5').update((0, node_fs__rspack_import_1.readFileSync)(bundle.path)).digest('hex');
+            const bytes = (0, node_fs__rspack_import_1.readFileSync)(bundle.path);
+            if ((0, node_crypto__rspack_import_0.createHash)('sha256').update(bytes).digest('hex') !== bundle.sha256) {
+                throw new _migration_js__rspack_import_5.Py(`${bundle.path} is not the bundle this plan was built from; nothing was uploaded or sent.`);
+            }
+            const md5 = (0, node_crypto__rspack_import_0.createHash)('md5').update(bytes).digest('hex');
             const remoteMd5 = async ()=>{
                 const r = await exec('rclone', [
                     'md5sum',
@@ -39115,10 +39153,12 @@ else:
             }
             onProgress(`putting the bundle in your Google Drive (${target})`);
             const up = await exec('rclone', [
-                'copyto',
-                bundle.path,
+                'rcat',
+                '--size',
+                String(bytes.length),
                 target
             ], {
+                input: bytes,
                 timeoutMs: 60 * 60000
             });
             if (up.code !== 0) throw new _migration_js__rspack_import_5.Py(`rclone could not put the bundle in Google Drive (exit ${up.code}): ${(up.stderr || up.stdout).trim().split('\n').filter((l)=>!/NOTICE/.test(l)).slice(-2).join(' ').slice(0, 300)}`);
@@ -40579,7 +40619,9 @@ else:
                     gapReset: true
                 };
             }
-            const entries = page.slice(afterIndex + 1);
+            let entries = page.slice(afterIndex + 1);
+            const held = entries.findIndex((entry)=>entry && typeof entry === "object" && entry.unreadable === true);
+            if (held !== -1) entries = entries.slice(0, held);
             if (entries.length > 0 && !sourceEntryId(entries[entries.length - 1])) {
                 return {
                     cursor: lastSourceId(page),

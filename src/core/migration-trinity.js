@@ -37,7 +37,7 @@ const stripWs = (b) => Buffer.from(b.toString('latin1').replace(/[ \t\n\v\f\r\\]
 /** Options shared by the CLI and the wizard; every one has a default. */
 export function trinityOptions({ via = 'auto', history, skills, folder, driveRemote, driveFolder } = {}) {
   if (!['auto', 'upload', 'drive', 'chat'].includes(via)) throw new MigrationError('--via is auto, upload, drive or chat.');
-  if (driveRemote !== undefined && !/^[A-Za-z0-9_.-]+:$/.test(driveRemote)) throw new MigrationError('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
+  if (driveRemote !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/.test(driveRemote)) throw new MigrationError('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
   if (via === 'drive' && !driveRemote) throw new MigrationError('--via drive needs --drive-remote (an rclone remote for your Google Drive).');
   if (driveFolder !== undefined && (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(driveFolder) || driveFolder.split('/').some((p) => p === '..' || p === '.'))) {
     throw new MigrationError('--drive-folder is a Drive folder path such as gbot-migrations.');
@@ -440,14 +440,20 @@ export function brokenUnits(plan, answer) {
 async function driveUpload(exec, bundle, onProgress) {
   const { remote, folder, name } = bundle.drive;
   const target = `${remote}${folder}/${name}`;
-  const md5 = createHash('md5').update(readFileSync(bundle.path)).digest('hex');
+  // Read once: these bytes are checked against the plan's SHA-256 and are the bytes rclone uploads
+  // (from stdin), so a file replaced after the plan was built never reaches Drive or the agent.
+  const bytes = readFileSync(bundle.path);
+  if (createHash('sha256').update(bytes).digest('hex') !== bundle.sha256) {
+    throw new MigrationError(`${bundle.path} is not the bundle this plan was built from; nothing was uploaded or sent.`);
+  }
+  const md5 = createHash('md5').update(bytes).digest('hex');
   const remoteMd5 = async () => {
     const r = await exec('rclone', ['md5sum', target], { timeoutMs: 5 * 60_000 });
     return r.code === 0 ? (r.stdout.trim().split(/\s+/)[0] ?? '') : '';
   };
   if (await remoteMd5() === md5) { onProgress(`the bundle is already in Google Drive (${target})`); return target; }
   onProgress(`putting the bundle in your Google Drive (${target})`);
-  const up = await exec('rclone', ['copyto', bundle.path, target], { timeoutMs: 60 * 60_000 });
+  const up = await exec('rclone', ['rcat', '--size', String(bytes.length), target], { input: bytes, timeoutMs: 60 * 60_000 });
   if (up.code !== 0) throw new MigrationError(`rclone could not put the bundle in Google Drive (exit ${up.code}): ${(up.stderr || up.stdout).trim().split('\n').filter((l) => !/NOTICE/.test(l)).slice(-2).join(' ').slice(0, 300)}`);
   if (await remoteMd5() !== md5) throw new MigrationError(`Google Drive reports other bytes for ${target}; nothing was sent to the agent.`);
   return target;

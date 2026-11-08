@@ -8,7 +8,7 @@
 //                      profile) and prints what Hermes read back next to what the plan expects.
 // Used by scripts/verify-hermes-import.py.
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { writeArchive, openArchive } from '../src/core/migration-archive.js';
 import { Hermes, applyHermes, buildHermesPlan, cronCreateArgs, inspectHermes, summarizeHermesPlan, verifyHermes } from '../src/core/migration-hermes.js';
@@ -73,8 +73,23 @@ if (flag === '--hermes') {
   const [job] = plan.cron;
   mkdirSync(plan.base, { recursive: true });
   await hermes.run(cronCreateArgs(plan, job).slice(2), { env: { HERMES_HOME: home }, timeoutMs: 120_000 });
-  const rb = await hermes.helper('readback', { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath, grok_sessions: true }, { home });
-  process.stdout.write(JSON.stringify({ versions: preflight.versions, first, second,
+  const rbReq = { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath, grok_sessions: true };
+  const rb = await hermes.helper('readback', rbReq, { home });
+  // The read-back (the preview's too) writes nothing, even over a jobs.json Hermes would repair and save.
+  const jobsFile = join(home, 'cron', 'jobs.json');
+  const stored = JSON.parse(readFileSync(jobsFile, 'utf8'));
+  writeFileSync(jobsFile, JSON.stringify(Array.isArray(stored) ? stored : stored.jobs));
+  const snapshot = () => {
+    const files = new Map();
+    const walk = (dir) => { for (const e of readdirSync(dir, { withFileTypes: true })) { const p = join(dir, e.name); if (e.isDirectory()) walk(p); else if (e.isFile()) files.set(p.slice(home.length), createHash('sha256').update(readFileSync(p)).digest('hex')); } };
+    walk(home);
+    return files;
+  };
+  const before = snapshot();
+  const rbBare = await hermes.helper('readback', rbReq, { home });
+  const after = snapshot();
+  const changed = [...new Set([...before.keys(), ...after.keys()])].filter((k) => before.get(k) !== after.get(k)).sort();
+  process.stdout.write(JSON.stringify({ versions: preflight.versions, first, second, readOnly: { changed, cron: rbBare.cron, sameCron: JSON.stringify(rbBare.cron) === JSON.stringify(rb.cron) },
     readback: { memory: rb.memory, user: rb.user, limits: rb.limits, timezone: rb.timezone, cron: rb.cron, skills: rb.skills, sessions: rb.sessions, grok_sessions: rb.grok_sessions },
     expected: { memory: plan.memory, user: plan.user, sessions: plan.history.map((s) => ({ foreign_id: s.foreign_id, messages: s.messages.length, digest: s.digest })),
       job: { tag: job.tag, schedule: job.schedule, prompt: job.prompt, workdir: plan.base } } }));

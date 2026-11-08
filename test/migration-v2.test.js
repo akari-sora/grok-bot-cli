@@ -472,19 +472,36 @@ test('--via drive: the zip goes through Google Drive (rclone, MD5-checked) and t
   const { createHash } = await import('node:crypto');
   const calls = [];
   let onDrive = '';
-  const exec = async (bin, args) => {
+  const exec = async (bin, args, opts = {}) => {
     calls.push([bin, ...args]);
     if (bin === 'rclone' && args[0] === 'md5sum') return { code: onDrive ? 0 : 3, stdout: onDrive ? `${onDrive}  x\n` : '', stderr: '' };
-    if (bin === 'rclone' && args[0] === 'copyto') { onDrive = createHash('md5').update(readFileSync(args[1])).digest('hex'); return { code: 0, stdout: '', stderr: '' }; }
+    if (bin === 'rclone' && args[0] === 'rcat') { onDrive = createHash('md5').update(opts.input).digest('hex'); return { code: 0, stdout: '', stderr: '' }; }
     if (bin === 'rclone' && args[0] === 'deletefile') return { code: 0, stdout: '', stderr: '' };
     if (args[0] === 'migrate' && args[1] === '--help') return { code: 0, stdout: '--check-only --redo', stderr: '' };
     return { code: 0, stdout: JSON.stringify({ ok: true, steps: [{ id: 'bundle', state: 'replied', ok: true }, { id: 'remember', state: 'replied', ok: true }], checks: [], questions: [], state_path: '/tmp/x', stopped: null }), stderr: '' };
   };
   const r = await importTrinity({ archive: a.root, to: 'dot', via: 'drive', driveRemote: 'gdrive:', accept: false, exec, bin: 'trinity-cli' });
   const verbs = calls.filter((c) => c[0] === 'rclone').map((c) => c[1]);
-  assert.deepEqual(verbs, ['md5sum', 'copyto', 'md5sum', 'deletefile']);
-  assert.match(calls.find((c) => c[1] === 'copyto')[3], /^gdrive:gbot-migrations\/grok-bot-.*\.zip$/);
+  assert.deepEqual(verbs, ['md5sum', 'rcat', 'md5sum', 'deletefile']);
+  assert.match(calls.find((c) => c[1] === 'rcat').at(-1), /^gdrive:gbot-migrations\/grok-bot-.*\.zip$/);
   assert.equal(r.driveCopy, null, 'removed after a verified migration');
   const send = calls.findIndex((c) => c[1] === '--json');
-  assert.ok(send > calls.findIndex((c) => c[1] === 'copyto'), 'the agent is asked only after the upload is proven');
+  assert.ok(send > calls.findIndex((c) => c[1] === 'rcat'), 'the agent is asked only after the upload is proven');
+
+  // Round 6: the bundle replaced by another valid zip after the plan was built never reaches Drive or the agent.
+  // The zip is content-addressed next to the archive: the same bytes give the same path.
+  const zipPath = buildTrinityPlan(a, 'dot', { via: 'drive', driveRemote: 'gdrive:' }).delivery.bundle.path;
+  const original = readFileSync(zipPath);
+  calls.length = 0; onDrive = '';
+  const swap = async (bin, args, opts = {}) => {
+    if (args[0] === 'migrate' && args[1] === '--help') writeFileSync(zipPath, Buffer.concat([original, Buffer.from('x')]));
+    return exec(bin, args, opts);
+  };
+  try {
+    await assert.rejects(importTrinity({ archive: a.root, to: 'dot', via: 'drive', driveRemote: 'gdrive:', accept: false, exec: swap, bin: 'trinity-cli' }),
+      /not the bundle this plan was built from/);
+  } finally { writeFileSync(zipPath, original); }
+  assert.ok(!calls.some((c) => c[1] === 'rcat'), 'nothing uploaded');
+  assert.ok(!calls.some((c) => c[1] === '--json'), 'nothing sent to the agent');
+  assert.throws(() => buildTrinityPlan(a, 'dot', { via: 'drive', driveRemote: '--config:' }), /--drive-remote/);
 });

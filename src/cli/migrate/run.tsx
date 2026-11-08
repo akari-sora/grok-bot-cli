@@ -44,7 +44,7 @@ export const inputSchema = z.object({
   maxFileMb: z.number().positive().max(1024).optional(),
   skills: z.string().regex(/^(all|index|none|[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*)$/).optional(),
   via: z.enum(['auto', 'upload', 'drive', 'chat']).default('auto'),
-  driveRemote: z.string().regex(/^[A-Za-z0-9_.-]+:$/).optional(),
+  driveRemote: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/).optional(),
   driveFolder: z.string().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
   keepDrive: z.boolean().default(false),
   history: z.string().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),

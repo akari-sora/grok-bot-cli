@@ -33466,7 +33466,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     gapReset: true
                 };
             }
-            const entries = page.slice(afterIndex + 1);
+            let entries = page.slice(afterIndex + 1);
+            const held = entries.findIndex((entry)=>entry && typeof entry === "object" && entry.unreadable === true);
+            if (held !== -1) entries = entries.slice(0, held);
             if (entries.length > 0 && !sourceEntryId(entries[entries.length - 1])) {
                 return {
                     cursor: lastSourceId(page),

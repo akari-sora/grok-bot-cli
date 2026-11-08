@@ -8,6 +8,7 @@
  */
 export const HERMES_HELPER = String.raw`
 import hashlib, importlib, json, os, sys
+from pathlib import Path
 
 def out(value):
     sys.stdout.write(json.dumps(value, ensure_ascii=False))
@@ -37,6 +38,26 @@ def memory_store():
     if req.get("user_char_limit"): store.user_char_limit = int(req["user_char_limit"])
     return store
 
+def read_jobs(cron_jobs):
+    # cron/jobs.json as load_jobs() reads it ({"jobs": [...]}, an id-keyed map, or a bare list), without
+    # its repair-and-save. An unreadable file is an error, not an empty list.
+    with cron_jobs.use_cron_store(home):
+        store = cron_jobs._current_cron_store() if hasattr(cron_jobs, "_current_cron_store") else None
+    path = Path(store.jobs_file) if store is not None else Path(home) / "cron" / "jobs.json"
+    if not path.exists():
+        return []
+    raw = path.read_text(encoding="utf-8-sig")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = json.loads(raw, strict=False)
+    jobs = data.get("jobs", []) if isinstance(data, dict) else data
+    if isinstance(jobs, dict):
+        jobs = [{**v, "id": v.get("id") or k} for k, v in jobs.items() if isinstance(v, dict)]
+    if not isinstance(jobs, list):
+        raise ValueError("cron/jobs.json has no list of jobs")
+    return [j for j in jobs if isinstance(j, dict)]
+
 def history_digest(messages):
     # Same as historyDigest() in migration-hermes.js: role, UTF-8 byte length and text of each message.
     h = hashlib.sha256()
@@ -58,6 +79,9 @@ if op == "preflight":
     if not missing:
         from hermes_state import SessionDB
         missing += [f"hermes_state.SessionDB.{n}" for n in ("import_foreign_history", "find_foreign_import", "get_messages", "close") if not hasattr(SessionDB, n)]
+        import inspect
+        if "read_only" not in inspect.signature(SessionDB.__init__).parameters:
+            missing.append("hermes_state.SessionDB(read_only=True)")
     if missing:
         out({"ok": False, "error": "this Hermes lacks " + ", ".join(missing) + "; update Hermes or gbot"}); sys.exit(0)
     import hermes_cli
@@ -106,19 +130,23 @@ elif op == "readback":
     from hermes_time import get_timezone_name
     result["timezone"] = get_timezone_name()
     from cron import jobs as cron_jobs
-    with cron_jobs.use_cron_store(home):
-        result["cron"] = [{"id": j.get("id"), "name": j.get("name"), "schedule": j.get("schedule"),
-                           "enabled": j.get("enabled", True), "state": cron_jobs.effective_job_state(j),
-                           "prompt": j.get("prompt"), "workdir": j.get("workdir")} for j in cron_jobs.load_jobs()]
+    # The read-back (also the preview's) never writes: load_jobs() repairs an old-shaped jobs.json
+    # and saves it, so the file is read here with the shapes load_jobs() accepts, and nothing saved.
+    result["cron"] = [{"id": j.get("id"), "name": j.get("name"), "schedule": j.get("schedule"),
+                       "enabled": j.get("enabled", True), "state": cron_jobs.effective_job_state(j),
+                       "prompt": j.get("prompt"), "workdir": j.get("workdir")} for j in read_jobs(cron_jobs)]
     from tools.skills_tool import skills_list
     listed = json.loads(skills_list())
     result["skills"] = [s.get("name") for s in (listed.get("skills") or [])]
+    import hermes_state
     from hermes_state import SessionDB
-    db = SessionDB()
+    # Read-only (no schema set-up, no write lock); a profile without a session store has no history yet.
+    db_path = hermes_state._default_db_path() if hasattr(hermes_state, "_default_db_path") else Path(home) / "state.db"
+    db = SessionDB(db_path=db_path, read_only=True) if Path(db_path).exists() else None
     try:
         sessions = []
         for fid in req.get("foreign_ids", []):
-            sid = db.find_foreign_import({"tool": "grok-bot", "path": req.get("history_path", ""), "foreign_session_id": fid})
+            sid = db.find_foreign_import({"tool": "grok-bot", "path": req.get("history_path", ""), "foreign_session_id": fid}) if db else None
             if sid:
                 msgs = db.get_messages(sid)
                 sessions.append({"foreign_id": fid, "session_id": sid, "messages": len(msgs), "digest": history_digest(msgs)})
@@ -128,7 +156,12 @@ elif op == "readback":
         if req.get("grok_sessions"):
             # Every session imported from Grok Bot (any bot), by foreign id, for the preview. This is the
             # query SessionDB's own foreign-import lookup runs; without it the preview says "not checked".
-            rows = db._read_rows("SELECT id, origin_json FROM sessions WHERE source = ? AND origin_json IS NOT NULL", ("grok-bot",)) if hasattr(db, "_read_rows") else None
+            if db is None:
+                rows = []
+            elif hasattr(db, "_read_rows"):
+                rows = db._read_rows("SELECT id, origin_json FROM sessions WHERE source = ? AND origin_json IS NOT NULL", ("grok-bot",))
+            else:
+                rows = None
             found = None if rows is None else []
             for row in rows or []:
                 fid = ((json.loads(row["origin_json"] or "{}") or {}).get("imported_from") or {}).get("foreign_session_id")
@@ -137,7 +170,8 @@ elif op == "readback":
                     found.append({"foreign_id": fid, "messages": len(msgs), "digest": history_digest(msgs)})
             result["grok_sessions"] = found
     finally:
-        db.close()
+        if db is not None:
+            db.close()
     out(result)
 
 else:

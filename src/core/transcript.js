@@ -75,7 +75,11 @@ export function transcriptDelta(payload, { after, limit = 40 } = /** @type {{ af
   if (afterIndex === -1) {
     return { cursor: lastSourceId(page), entries: page, entryCount: page.length, gapReset: true };
   }
-  const entries = page.slice(afterIndex + 1);
+  let entries = page.slice(afterIndex + 1);
+  // A row whose body could not be read yet (its store blob was unavailable) holds the cursor before
+  // it, so the next poll reads it again instead of skipping it.
+  const held = entries.findIndex((entry) => entry && typeof entry === "object" && entry.unreadable === true);
+  if (held !== -1) entries = entries.slice(0, held);
   if (entries.length > 0 && !sourceEntryId(entries[entries.length - 1])) {
     return { cursor: lastSourceId(page), entries: page, entryCount: page.length, gapReset: true };
   }
