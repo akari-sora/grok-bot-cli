@@ -4,6 +4,14 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.12
+
+- `gbot migrate`: by default nothing in Grok Bot changes. The routines keep running there; gbot pauses one only with `--move-routines`, and the wizard, the preview and docs/migration.md say so.
+- The guided `gbot migrate` asks three ways for a bot with scheduled routines that are on (default 1): "1. Keep them off in <destination>; Grok Bot keeps running them (nothing in Grok Bot changes) 2. Run them in both: turn them on in <destination> and leave Grok Bot running them (they may run twice) 3. Move them: turn them on in <destination> and pause them in Grok Bot once the check passes". For 2 and 3 it lists the routines that are on (number, name, schedule) and asks "Which routines? Enter for all, or numbers like 1,3"; picking some passes them as `--routines`.
+- `--routines ID_OR_NAME,…` on `migrate preview|import|check|run` limits `--activate-routines` / `--move-routines` to those routines (matched against the captured routine id or exact name). Only scheduled routines that are on in Grok Bot can be named; an unknown name stops with the list of valid ones before anything changes, and `--routines` without either flag is refused. The others stay as by default (Hermes: created paused; Muse/dot: ROUTINES.md only) and are never paused in Grok Bot. Without `--routines`, both flags apply to every routine that was on, as before. The selection is part of the plan: a Muse/dot plan id changes with it, and `check` needs the same selection as the import.
+- The preview and the import report list each routine that is on in Grok Bot with what happens to it: off at the destination, on at the destination (both run), or on at the destination and paused in Grok Bot after the check, with how to turn a paused one back on (in the Grok Bot app: Routines → toggle). The report JSON has them as `routines` (`atDestination`, `inGrokBot`) next to `sourceRoutines`.
+- `checkMigration` takes an injected `exec` (Muse/dot) and `hermes`, like `importMigration`, so tests never reach a real `trinity-cli` or `hermes`.
+
 ### 0.11.2-iml1s.11
 
 - From upstream 0.12.3–0.12.5, with their authors:

@@ -69914,6 +69914,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     schedule: a.scheduleCron,
                     timezone: a.timezone ?? null
                 }));
+        function selectRoutines(automations, spec) {
+            const on = automations.filter((a)=>a.trigger === 'schedule' && a.scheduleCron && a.enabled);
+            if (spec === undefined || spec === null) return on;
+            const valid = ()=>on.length ? on.map((a)=>`${a.id || '(no id)'} "${a.name}" (${a.scheduleCron}${a.timezone ? ' ' + a.timezone : ''})`).join(', ') : 'none';
+            const wanted = String(spec).split(',').map((s)=>s.trim()).filter(Boolean);
+            if (!wanted.length) throw new MigrationError(`--routines takes routine ids or exact names, comma-separated. Routines that are on in Grok Bot: ${valid()}.`);
+            const picked = new Set();
+            for (const w of wanted){
+                const byId = on.filter((a)=>a.id && a.id === w);
+                const found = byId.length ? byId : on.filter((a)=>a.name === w);
+                if (found.length > 1) throw new MigrationError(`--routines: several routines that are on are named "${w}"; use the id. Routines that are on in Grok Bot: ${valid()}.`);
+                if (!found.length) throw new MigrationError(`--routines: no routine that is on in Grok Bot has the id or name "${w}". Routines that are on in Grok Bot: ${valid()}.`);
+                picked.add(found[0]);
+            }
+            return on.filter((a)=>picked.has(a));
+        }
         function normalizeAutomation(record) {
             const trigger = object(record.trigger) ? record.trigger : {};
             const schedule = str(trigger.schedule) || str(record.schedule);

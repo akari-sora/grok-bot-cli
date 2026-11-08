@@ -8,7 +8,7 @@ import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, distinctiveT
 import { hasSecret } from '../src/core/migration-redact.js';
 import { writeArchive } from '../src/core/migration-archive.js';
 import { ARCHIVE_FORMAT, ARCHIVE_VERSION } from '../src/core/migration-capture.js';
-import { importMigration, pauseSourceRoutines, previewMigration } from '../src/core/migration-flow.js';
+import { checkMigration, importMigration, pauseSourceRoutines, previewMigration } from '../src/core/migration-flow.js';
 import { importText } from '../src/core/migration-text.js';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -843,16 +843,96 @@ test('move: a timeout or an answer that does not confirm it is unknown; every ro
   assert.equal(control.calls.length, 5);
 });
 
-test('move: the preview says what happens to the routines that are on, for both choices', async (t) => {
+test('move: the preview says per routine what happens, and that by default nothing in Grok Bot changes', async (t) => {
   const root = tmp(t);
   const fake = fakeHermes(join(root, 'hermes'));
   const archiveRoot = diskArchive(root);
   const kept = await previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, hermes: fake.hermes });
   assert.match(kept.summary, /^ {2}Schedules {2}→ 3 cron job\(s\), 3 created paused, time zone Asia\/Taipei$/m);
-  assert.match(kept.summary, /^Grok Bot routines → 3 on there stay on; in Hermes they are created paused \(--move-routines turns them on in Hermes and pauses them in Grok Bot once the import check passes\)\.$/m);
+  assert.match(kept.summary, /\nGrok Bot routines that are on \(3\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): off in Hermes \(created paused\); Grok Bot keeps running it\n {2}- a4 "Token job" \(52 9-21 \* \* 1-5 Asia\/Taipei\): not migrated \(see "Not migrated"\); Grok Bot keeps running it\n {2}- a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): off in Hermes \(created paused\); Grok Bot keeps running it\n {2}To run them in Hermes too: --activate-routines\. To move them \(on in Hermes, paused in Grok Bot once the import check passes\): --move-routines\. Add --routines id,id to do either for only some\.$/);
+  assert.deepEqual(kept.routines.map((x) => [x.id, x.atDestination, x.inGrokBot]), [['a1', 'off', 'unchanged'], ['a4', 'not migrated', 'unchanged'], ['a5', 'off', 'unchanged']]);
+  const both = await previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, activateRoutines: true, hermes: fake.hermes });
+  assert.match(both.summary, /\nGrok Bot routines that are on \(3\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): on in Hermes; Grok Bot keeps running it too, so it runs in both\n/);
+  assert.match(both.summary, /\n {2}Both copies run until one is turned off; --move-routines pauses the Grok Bot copies once the import check passes\.$/);
   const moved = await previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, moveRoutines: true, hermes: fake.hermes });
   assert.match(moved.summary, /^ {2}Schedules {2}→ 3 cron job\(s\), 1 created paused, time zone Asia\/Taipei$/m);
-  assert.match(moved.summary, /^Grok Bot routines → 2 of the 3 on there run in Hermes from the import \(created active\), and once the import check passes they are paused in Grok Bot: "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\), "Morning digest" \(0 8 \* \* \* Asia\/Taipei\)\. Turn one back on in the Grok Bot app: Routines → toggle\.$/m);
+  assert.match(moved.summary, /\nGrok Bot routines that are on \(3\):\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): on in Hermes; paused in Grok Bot once the import check passes\n {2}- a4 "Token job" \(52 9-21 \* \* 1-5 Asia\/Taipei\): not migrated \(see "Not migrated"\); Grok Bot keeps running it\n {2}- a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): on in Hermes; paused in Grok Bot once the import check passes\n {2}Turn one back on in the Grok Bot app: Routines → toggle\.$/);
   assert.deepEqual(moved.plan.cron.map((c) => c.paused), [false, true, false], 'the token job is not migrated');
+  const one = await previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, moveRoutines: true, routines: 'Morning digest', hermes: fake.hermes });
+  assert.match(one.summary, /\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): off in Hermes \(created paused\); Grok Bot keeps running it\n/);
+  assert.match(one.summary, /\n {2}- a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): on in Hermes; paused in Grok Bot once the import check passes\n {2}Turn one back on/);
   assert.equal(fake.calls.filter((c) => c.args?.[2] === 'cron').length, 0, 'the preview changes nothing');
+});
+
+test('routines: by default and with --activate-routines nothing in Grok Bot changes (no SetGrokBotAgentAutomationEnabled call)', async (t) => {
+  for (const flags of [{}, { activateRoutines: true }, { activateRoutines: true, routines: 'a1' }]) {
+    const root = tmp(t);
+    const fake = fakeHermes(join(root, 'hermes'));
+    const archiveRoot = diskArchive(root);
+    const control = fakeSwitch();
+    const r = await importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, ...flags, hermes: fake.hermes, routineSwitch: control, onProgress: () => {} });
+    assert.deepEqual(control.calls, [], `${JSON.stringify(flags)}: no write to Grok Bot`);
+    assert.equal(r.exitCode, 0);
+    assert.equal(r.sourceRoutines, undefined);
+    assert.ok(r.routines.every((x) => x.inGrokBot === 'unchanged'));
+    assert.match(importText(r), /\nGrok Bot routines that were on \(3\); nothing in Grok Bot was changed:\n/);
+    assert.doesNotMatch(importText(r), /paused in Grok Bot/);
+  }
+});
+
+test('routines: --routines limits --move-routines: only the named routines are turned on and paused in Grok Bot', async (t) => {
+  const root = tmp(t);
+  const fake = fakeHermes(join(root, 'hermes'));
+  const archiveRoot = diskArchive(root);
+  const control = fakeSwitch();
+  const r = await importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, moveRoutines: true, routines: 'Morning digest', hermes: fake.hermes, routineSwitch: control, onProgress: () => {} });
+  assert.deepEqual(control.calls, [[BOT, 'a5', false]], 'only the routine named with --routines');
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(fake.state(PROFILE).jobs.map((j) => [/\[grok-bot (\w+)\]$/.exec(j.name)[1], j.state]), [['a1', 'paused'], ['a2', 'paused'], ['a5', 'scheduled']]);
+  assert.deepEqual(r.sourceRoutines.routines.map((x) => [x.id, x.result]), [['a5', 'paused']]);
+  assert.deepEqual(r.routines.map((x) => [x.id, x.atDestination, x.inGrokBot]), [['a1', 'off', 'unchanged'], ['a4', 'not migrated', 'unchanged'], ['a5', 'on', 'paused']]);
+  assert.deepEqual(JSON.parse(readFileSync(r.report, 'utf8')).routines, r.routines, 'the report file has it too');
+  const text = importText(r);
+  assert.match(text, /\nGrok Bot routines that were on \(3\):\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): off in Hermes \(created paused\); Grok Bot keeps running it\n/);
+  assert.match(text, /\n {2}- a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): on in Hermes; paused in Grok Bot\n/);
+  assert.match(text, /✓ paused a5 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\)\n {2}Turn one back on in the Grok Bot app: Routines → toggle\./);
+
+  // Ids work as well as names; --activate-routines with the same selection plans the same Hermes jobs.
+  const byId = await previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, activateRoutines: true, routines: 'a5', hermes: fake.hermes });
+  assert.deepEqual(byId.plan.cron.map((c) => c.paused), [true, true, false]);
+});
+
+test('routines: an unknown --routines entry, or --routines alone, is a usage error before anything changes', async (t) => {
+  const root = tmp(t);
+  const fake = fakeHermes(join(root, 'hermes'));
+  const archiveRoot = diskArchive(root);
+  const valid = 'Routines that are on in Grok Bot: a1 "Hourly scan" \\(52 9-21 \\* \\* 1-5 Asia/Taipei\\), a4 "Token job" \\(52 9-21 \\* \\* 1-5 Asia/Taipei\\), a5 "Morning digest" \\(0 8 \\* \\* \\* Asia/Taipei\\)\\.$';
+  // Unknown, off in Grok Bot (a2) and event-triggered (a3) routines cannot be chosen.
+  for (const name of ['Nope', 'a2', 'On PR']) {
+    await assert.rejects(previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, moveRoutines: true, routines: `a1,${name}`, hermes: fake.hermes }),
+      new RegExp(`^MigrationError: --routines: no routine that is on in Grok Bot has the id or name "${name}"\\. ${valid}`));
+  }
+  const control = fakeSwitch();
+  await assert.rejects(importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, moveRoutines: true, routines: 'Nope', hermes: fake.hermes, routineSwitch: control, onProgress: () => {} }),
+    /no routine that is on in Grok Bot has the id or name "Nope"/);
+  await assert.rejects(importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, routines: 'a1', hermes: fake.hermes, routineSwitch: control, onProgress: () => {} }),
+    /^MigrationError: --routines limits --activate-routines or --move-routines to some routines; add one of them\./);
+  await assert.rejects(previewMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, activateRoutines: true, routines: ' , ', hermes: fake.hermes }), /--routines takes routine ids or exact names/);
+  assert.deepEqual(control.calls, []);
+  assert.equal(fake.calls.filter((c) => c.args?.[0] === 'profile' && c.args?.[1] === 'create').length, 0, 'no profile was created');
+  // Two routines that are on with the same name: the id is needed.
+  const twin = diskArchive(tmp(t), [AUTO, { ...AUTO, id: 'a9' }]);
+  await assert.rejects(previewMigration({ archive: twin, to: 'hermes', profile: PROFILE, moveRoutines: true, routines: 'Hourly scan', hermes: fake.hermes }), /several routines that are on are named "Hourly scan"; use the id/);
+});
+
+test('routines: the selection is part of the plan; check with another selection does not verify', async (t) => {
+  const root = tmp(t);
+  const fake = fakeHermes(join(root, 'hermes'));
+  const archiveRoot = diskArchive(root);
+  await importMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, yes: true, accept: false, moveRoutines: true, routines: 'a5', hermes: fake.hermes, routineSwitch: fakeSwitch(), onProgress: () => {} });
+  const same = await checkMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, moveRoutines: true, routines: 'a5', hermes: fake.hermes, onProgress: () => {} });
+  assert.equal(same.exitCode, 0, 'the same options plan the same destination');
+  const all = await checkMigration({ archive: archiveRoot, to: 'hermes', profile: PROFILE, moveRoutines: true, hermes: fake.hermes, onProgress: () => {} });
+  assert.equal(all.exitCode, 3);
+  assert.ok(all.verify.checks.some((c) => (c.issues ?? []).some((i) => /^Hourly scan: paused, expected scheduled$/.test(i))), JSON.stringify(all.verify.checks));
 });

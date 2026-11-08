@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { MigrationError, parseBytes, regularBytes } from './migration.js';
+import { selectRoutines } from './migration-capture.js';
 import { HERMES_HELPER } from './migration-hermes-helper.js';
 import { assertNoSecrets, isText, sanitize, sanitizeBytes } from './migration-redact.js';
 
@@ -132,7 +133,7 @@ const skillName = (s) => /^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(
  * Pure plan from an opened archive. `profileDir` is where the profile lives (or will live).
  * @param {ReturnType<import('./migration-archive.js').openArchive>} archive
  */
-export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, now = () => new Date() }) {
+export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, routines: only, now = () => new Date() }) {
   const cap = archive.capture;
   if (cap.bot.kind !== 'bot') throw new MigrationError('Only a bot (not a group) can become a Hermes profile.');
   const notMigrated = [];
@@ -262,6 +263,8 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   const pathNote = `[Migrated from Grok Bot "${botName}". Box paths /home/box/... now live under ${boxRoot}/home/box/... . CLI logins that existed on the Grok box (for example glab, gh) must exist on this machine.]\n\n`;
   const cron = [], unscheduled = [], routines = [];
   const zones = new Set();
+  // Created active: the routines on in Grok Bot with --activate-routines / --move-routines (only those named with --routines).
+  const active = new Set(activateRoutines || moveRoutines ? selectRoutines(cap.automations, only) : []);
   for (const a of cap.automations) {
     const routine = clean(a.name, `routine ${a.id}`);
     const prompt = routine === null ? null : clean(a.prompt, `routine "${routine}"`);
@@ -274,7 +277,7 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
       // The source id in the name finds this job again on a re-run, whatever else shares its name.
       const tag = `[grok-bot ${a.id || sha256(a.name).slice(0, 12)}]`;
       cron.push({ name: `${botName}: ${routine} ${tag}`, routine, tag, schedule: a.scheduleCron, timezone: a.timezone, prompt: pathNote + prompt,
-        paused: !((activateRoutines || moveRoutines) && a.enabled), sourceEnabled: a.enabled, sourceId: a.id });
+        paused: !active.has(a), sourceEnabled: a.enabled, sourceId: a.id });
     } else unscheduled.push({ name: routine, prompt, trigger: a.trigger, enabled: a.enabled, triggerDetails: details });
   }
   const timezone = zones.size === 1 ? [...zones][0] : null;

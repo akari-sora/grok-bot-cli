@@ -2,8 +2,9 @@
  * The user-facing migration flow, shared by the CLI routes and the interactive wizard:
  *   bots (pick a bot) → capture (archive v2) → preview (destination diff) → import → verify → accept.
  * Hermes is imported directly; Muse and dot go through trinity-cli (migration-trinity.js).
- * With --move-routines the routines on in Grok Bot are scheduled at the destination, and after the
- * destination verified they are paused in Grok Bot (one write per routine, never repeated).
+ * By default nothing in Grok Bot changes. With --move-routines the routines on in Grok Bot (or the
+ * ones --routines names) are scheduled at the destination, and after the destination verified they
+ * are paused in Grok Bot (one write per routine, never repeated).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -13,6 +14,7 @@ import { openArchive, writeArchive } from './migration-archive.js';
 import { openLiveCapture, openRoutineSwitch } from './migration-source.js';
 import { Hermes, acceptHermes, applyHermes, buildHermesPlan, inspectHermes, summarizeHermesPlan, verifyHermes } from './migration-hermes.js';
 import { MigrationError } from './migration.js';
+import { ROUTINE_TOGGLE, routinesText } from './migration-text.js';
 
 const progress = (text) => process.stderr.write(`gbot migrate: ${text}\n`);
 
@@ -86,14 +88,14 @@ const hermesSkills = (skills = 'all') => {
 // GBOT_DRIVE_REMOTE names the rclone remote for --via drive when --drive-remote is not given.
 const trinityOpts = ({ via, history, skills, folder, driveRemote, driveFolder }) => ({ via, history, skills, folder, driveRemote: driveRemote ?? (process.env.GBOT_DRIVE_REMOTE || undefined), driveFolder });
 
-/** @param {{archive: string, profile?: string, skills?: string, activateRoutines?: boolean, moveRoutines?: boolean, hermes?: any}} opts */
-async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, moveRoutines = false, hermes }) {
+/** @param {{archive: string, profile?: string, skills?: string, activateRoutines?: boolean, moveRoutines?: boolean, routines?: string, hermes?: any}} opts */
+async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, moveRoutines = false, routines, hermes }) {
   const skills = hermesSkills(wanted);
   const opened = openArchive(archive);
   const h = hermes ?? new Hermes();
   const name = profile ?? buildHermesPlan(opened, { profileDir: '/', skills }).profile;
   const dest = await inspectHermes(h, { profile: name });
-  const plan = buildHermesPlan(opened, { profile: name, profileDir: dest.profileDir, skills, activateRoutines, moveRoutines });
+  const plan = buildHermesPlan(opened, { profile: name, profileDir: dest.profileDir, skills, activateRoutines, moveRoutines, routines });
   return { opened, hermes: h, dest, plan };
 }
 
@@ -107,31 +109,49 @@ function planFacts(plan) {
   };
 }
 
-// --- routines: --move-routines ------------------------------------------------------------------
-const ROUTINE_TOGGLE = 'in the Grok Bot app: Routines → toggle';
+// --- routines: --activate-routines, --move-routines, --routines ---------------------------------
 const DEST = { hermes: 'Hermes', muse: 'Muse', dot: 'Your dot' };
-const routineLabel = (r) => `"${r.name}" (${r.schedule}${r.timezone ? ' ' + r.timezone : ''})`;
+
+/** True when a routine is turned on at the destination; `--routines` alone is a usage error. */
+function routineFlags({ activateRoutines = false, moveRoutines = false, routines }) {
+  if (routines !== undefined && !activateRoutines && !moveRoutines) {
+    throw new MigrationError('--routines limits --activate-routines or --move-routines to some routines; add one of them. Without either, every routine stays as it is in Grok Bot and none is turned on at the destination.');
+  }
+  return activateRoutines || moveRoutines;
+}
 
 /** Hermes: the jobs created active for routines on in Grok Bot, with the job name to pause one by hand. */
 const hermesScheduled = (plan) => plan.cron.filter((c) => c.sourceEnabled && !c.paused)
   .map((c) => ({ id: c.sourceId, name: c.routine, schedule: c.schedule, timezone: c.timezone ?? null, job: c.name }));
 
+const routineKey = (r) => r.id || `name:${r.name}`;
+
+/**
+ * What happens to each routine that is on in Grok Bot: at the destination `on`, `off` (Hermes:
+ * created paused; Muse/dot: only in ROUTINES.md) or `not migrated`; in Grok Bot `unchanged` or
+ * `paused after the check` (--move-routines, only for the ones turned on at the destination).
+ */
+function routineRows({ on, active, migrated = null, move }) {
+  const activeKeys = new Set(active.map(routineKey));
+  const migratedKeys = migrated && new Set(migrated.map(routineKey));
+  return on.map((r) => {
+    const atDestination = activeKeys.has(routineKey(r)) ? 'on' : migratedKeys && !migratedKeys.has(routineKey(r)) ? 'not migrated' : 'off';
+    return { ...r, atDestination, inGrokBot: move && atDestination === 'on' ? 'paused after the check' : 'unchanged' };
+  });
+}
+
+/** The rows with the pause results: `paused`, `left on`, `not paused` or `unknown`. */
+const RESULT = { paused: 'paused', 'left-on': 'left on', failed: 'not paused', unknown: 'unknown' };
+function routineOutcome(rows, sourceRoutines) {
+  if (!sourceRoutines) return rows;
+  const result = new Map(sourceRoutines.routines.map((x) => [routineKey(x), RESULT[x.result] ?? 'unknown']));
+  return rows.map((r) => (result.has(routineKey(r)) ? { ...r, inGrokBot: result.get(routineKey(r)) } : r));
+}
+
 /** Where a routine is paused by hand at the destination when its Grok Bot copy is still on. */
 const pauseThere = (to, profile) => (r) => (to === 'hermes'
   ? `pause the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron pause <job id>)`
   : `ask ${DEST[to]} to pause its scheduled task "${r.name}"`);
-
-/** The preview line about the routines that are on in Grok Bot. */
-function routinesPreview({ to, on, moved, activate, move }) {
-  if (!on.length) return null;
-  const where = DEST[to];
-  if (move) {
-    return `Grok Bot routines → ${moved.length} of the ${on.length} on there run in ${where} from the import (created active), and once the import check passes they are paused in Grok Bot: ` +
-      `${moved.map(routineLabel).join(', ') || 'none'}. Turn one back on ${ROUTINE_TOGGLE}.`;
-  }
-  if (activate) return `Grok Bot routines → ${on.length} on there stay on, and their copies in ${where} are created active: both run until one is turned off (--move-routines pauses the Grok Bot copies after the check).`;
-  return `Grok Bot routines → ${on.length} on there stay on; in ${where} they are ${to === 'hermes' ? 'created paused' : 'only written to ROUTINES.md'} (--move-routines turns them on in ${where} and pauses them in Grok Bot once the import check passes).`;
-}
 
 /**
  * --move-routines after the import: pause in Grok Bot the routines the destination now runs.
@@ -167,39 +187,40 @@ export async function pauseSourceRoutines({ routines, passed, agentId, routineSw
 
 const routinesDone = (s) => !s || s.status === 'paused' || s.status === 'none';
 
-/** @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, hermes?: any}} opts */
-export async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, hermes }) {
-  const activate = activateRoutines || moveRoutines;
+/** @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, routines?: string, hermes?: any}} opts */
+export async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, routines, hermes }) {
+  const activate = routineFlags({ activateRoutines, moveRoutines, routines });
+  const withRoutines = (p, rows) => (rows.length ? { ...p, summary: p.summary + '\n' + routinesText(to, rows, { activate, move: moveRoutines }), routines: rows } : p);
   if (to !== 'hermes') {
     const { previewTrinity } = await import('./migration-trinity.js');
-    const p = await previewTrinity({ archive, to, activateRoutines: activate, ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
-    const line = routinesPreview({ to, on: p.routinesOn, moved: p.plan.scheduled, activate, move: moveRoutines });
-    return line ? { ...p, summary: p.summary + '\n' + line } : p;
+    const p = await previewTrinity({ archive, to, activateRoutines: activate, routines, ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
+    return withRoutines(p, routineRows({ on: p.routinesOn, active: p.plan.scheduled, move: moveRoutines }));
   }
-  const { opened, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines, hermes });
-  const line = routinesPreview({ to, on: routinesOn(opened.capture.automations), moved: hermesScheduled(plan), activate, move: moveRoutines });
-  return { exitCode: 0, to, destination: dest, summary: summarizeHermesPlan(plan, dest) + (line ? '\n' + line : ''), plan: planFacts(plan) };
+  const { opened, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines, routines, hermes });
+  const rows = routineRows({ on: routinesOn(opened.capture.automations), active: hermesScheduled(plan), migrated: plan.cron.map((c) => ({ id: c.sourceId, name: c.routine })), move: moveRoutines });
+  return withRoutines({ exitCode: 0, to, destination: dest, summary: summarizeHermesPlan(plan, dest), plan: planFacts(plan) }, rows);
 }
 
-/** @param {{archive: string, to: string, account?: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, hermes?: any, exec?: any, routineSwitch?: any, onProgress?: (t: string) => void}} opts */
-export async function importMigration({ archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, hermes, exec, routineSwitch, onProgress = progress }) {
+/** @param {{archive: string, to: string, account?: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, routines?: string, hermes?: any, exec?: any, routineSwitch?: any, onProgress?: (t: string) => void}} opts */
+export async function importMigration({ archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, routines, hermes, exec, routineSwitch, onProgress = progress }) {
   if (!yes) throw new MigrationError('Review gbot migrate preview first, then pass --yes to import.');
+  const activate = routineFlags({ activateRoutines, moveRoutines, routines });
   // Opened before anything changes: a login that cannot make the pause stops the import here.
+  // Without --move-routines there is no switch at all: nothing in Grok Bot can change.
   const control = moveRoutines ? (routineSwitch ?? openRoutineSwitch({ account })) : null;
-  const activate = activateRoutines || moveRoutines;
   if (to !== 'hermes') {
     const { importTrinity } = await import('./migration-trinity.js');
-    const r = await importTrinity({ archive, to, accept, activateRoutines: activate, onProgress, keepDrive, ...(exec ? { exec } : {}), ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
-    if (!control) return r;
+    const r = await importTrinity({ archive, to, accept, activateRoutines: activate, routines, onProgress, keepDrive, ...(exec ? { exec } : {}), ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
     // Muse/dot: delivered, read back (their schedules too), and the acceptance questions passed.
     const passed = r.exitCode === 0 && r.acceptance?.ok === true && r.verify.checks.some((c) => c.area === 'schedules read-back' && c.ok && !c.informational);
-    const sourceRoutines = await pauseSourceRoutines({ routines: r.scheduled ?? [], passed, agentId: r.botId, routineSwitch: control, pauseHere: pauseThere(to), onProgress });
+    const sourceRoutines = control ? await pauseSourceRoutines({ routines: r.scheduled ?? [], passed, agentId: r.botId, routineSwitch: control, pauseHere: pauseThere(to), onProgress }) : undefined;
     const { report: path, ...rest } = r;
-    const report = { ...rest, exitCode: r.exitCode === 0 && routinesDone(sourceRoutines) ? 0 : 3, sourceRoutines };
+    const rows = routineOutcome(routineRows({ on: r.routinesOn ?? [], active: r.scheduled ?? [], move: moveRoutines }), sourceRoutines);
+    const report = { ...rest, exitCode: r.exitCode === 0 && routinesDone(sourceRoutines) ? 0 : 3, ...(rows.length ? { routines: rows } : {}), ...(sourceRoutines ? { sourceRoutines } : {}) };
     writeFileSync(path, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
     return { ...report, report: path };
   }
-  const { opened, hermes: h, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines, hermes });
+  const { opened, hermes: h, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines, routines, hermes });
   const applied = await applyHermes(h, opened, plan, { onProgress, allowExisting: intoExisting });
   onProgress('reading the destination back');
   const verified = await verifyHermes(h, opened, plan);
@@ -208,8 +229,10 @@ export async function importMigration({ archive, to, account, profile, skills, v
   const ok = verified.ok && (!acceptance || acceptance.ok);
   const sourceRoutines = control ? await pauseSourceRoutines({ routines: hermesScheduled(plan), passed: ok, agentId: opened.capture.bot.id,
     routineSwitch: control, pauseHere: pauseThere(to, plan.profile), onProgress }) : undefined;
+  const rows = routineOutcome(routineRows({ on: routinesOn(opened.capture.automations), active: hermesScheduled(plan),
+    migrated: plan.cron.map((c) => ({ id: c.sourceId, name: c.routine })), move: moveRoutines }), sourceRoutines);
   const report = { exitCode: ok && routinesDone(sourceRoutines) ? 0 : 3, to, profile: plan.profile, destination: dest.hermesVersion, archive: opened.root,
-    bot: opened.capture.bot.name, steps: applied.steps, verify: verified, acceptance, ...(sourceRoutines ? { sourceRoutines } : {}), plan: planFacts(plan), finishedAt: new Date().toISOString() };
+    bot: opened.capture.bot.name, steps: applied.steps, verify: verified, acceptance, ...(rows.length ? { routines: rows } : {}), ...(sourceRoutines ? { sourceRoutines } : {}), plan: planFacts(plan), finishedAt: new Date().toISOString() };
   const path = reportPath(opened.root, to, plan.profile);
   writeFileSync(path, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
   return { ...report, report: path };
@@ -219,16 +242,17 @@ export async function importMigration({ archive, to, account, profile, skills, v
  * Read the destination back (and with accept, ask again). Never delivers: for Muse/dot it runs
  * trinity-cli migrate --check-only, so a step that was not delivered is reported, not sent.
  * Never pauses a Grok Bot routine. Use the same --via/--history/--skills/--folder and routine
- * options as the import (--move-routines and --activate-routines plan the same destination).
- * @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, accept?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, onProgress?: (t: string) => void}} opts
+ * options as the import (--move-routines and --activate-routines plan the same destination, and
+ * --routines must name the same routines).
+ * @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, accept?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, routines?: string, hermes?: any, exec?: any, onProgress?: (t: string) => void}} opts
  */
-export async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
-  const activate = activateRoutines || moveRoutines;
+export async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, moveRoutines = false, routines, hermes: injected, exec, onProgress = progress }) {
+  const activate = routineFlags({ activateRoutines, moveRoutines, routines });
   if (to !== 'hermes') {
     const { checkTrinity } = await import('./migration-trinity.js');
-    return checkTrinity({ archive, to, accept, activateRoutines: activate, onProgress, ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
+    return checkTrinity({ archive, to, accept, activateRoutines: activate, routines, onProgress, ...(exec ? { exec } : {}), ...trinityOpts({ via, history, skills, folder, driveRemote, driveFolder }) });
   }
-  const { opened, hermes, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines });
+  const { opened, hermes, plan } = await hermesContext({ archive, profile, skills, activateRoutines: activate, moveRoutines, routines, hermes: injected });
   const verified = await verifyHermes(hermes, opened, plan);
   const acceptance = accept ? await acceptHermes(hermes, opened, plan, { onProgress, usageDir: usageDir(opened.root, to, plan.profile) }) : null;
   const ok = verified.ok && (!acceptance || acceptance.ok);
@@ -239,14 +263,15 @@ export async function checkMigration({ archive, to, profile, skills, via, histor
 }
 
 /** Capture, preview and (with --yes) import, verify and accept, in one command. */
-/** @param {{account?: string, bot: string, to: string, profile?: string, out?: string, maxFileMb?: number, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, onProgress?: (t: string) => void}} opts */
-export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
+/** @param {{account?: string, bot: string, to: string, profile?: string, out?: string, maxFileMb?: number, skills?: string, via?: string, history?: string, folder?: string, driveRemote?: string, driveFolder?: string, keepDrive?: boolean, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, moveRoutines?: boolean, routines?: string, onProgress?: (t: string) => void}} opts */
+export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, routines, onProgress = progress }) {
+  routineFlags({ activateRoutines, moveRoutines, routines });
   const captured = await captureToArchive({ account, bot, out, maxFileMb, onProgress });
-  const preview = await previewMigration({ archive: captured.archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines, moveRoutines });
+  const preview = await previewMigration({ archive: captured.archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines, moveRoutines, routines });
   if (!yes) {
     return { exitCode: 0, stage: 'preview', captured, preview,
-      next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''}${moveRoutines ? `${account ? ' --account ' + account : ''} --move-routines` : activateRoutines ? ' --activate-routines' : ''} --yes` };
+      next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''}${moveRoutines ? `${account ? ' --account ' + account : ''} --move-routines` : activateRoutines ? ' --activate-routines' : ''}${routines ? ' --routines ' + JSON.stringify(routines) : ''} --yes` };
   }
-  const imported = await importMigration({ archive: captured.archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive, yes, accept, intoExisting, activateRoutines, moveRoutines, onProgress });
+  const imported = await importMigration({ archive: captured.archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive, yes, accept, intoExisting, activateRoutines, moveRoutines, routines, onProgress });
   return { exitCode: imported.exitCode, stage: 'imported', captured, preview: { summary: preview.summary }, imported };
 }

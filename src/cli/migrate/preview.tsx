@@ -20,8 +20,9 @@ export const config = {
       driveFolder: { description: 'Google Drive folder for the bundle (default gbot-migrations)', type: 'string' },
       history: { description: 'Muse/dot history: full, recent:N or none (default: upload full, chat recent:30)', type: 'string' },
       folder: { description: 'Muse/dot folder on the agent\'s computer (default ~/grok-bot/<bot>)', type: 'string' },
-      activateRoutines: { description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)', type: 'boolean' },
-      moveRoutines: { description: 'Show the import with --move-routines: routines on in Grok Bot created active here and paused in Grok Bot after the check (changes nothing now)', type: 'boolean' },
+      activateRoutines: { description: 'Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)', type: 'boolean' },
+      moveRoutines: { description: 'Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) created active here and paused in Grok Bot after the check (changes nothing now)', type: 'boolean' },
+      routines: { description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot', type: 'string' },
     },
     required: ['archive', 'to'],
     type: 'object',
@@ -41,6 +42,7 @@ export const inputSchema = z.object({
   folder: z.string().min(1).optional(),
   activateRoutines: z.boolean().default(false),
   moveRoutines: z.boolean().default(false),
+  routines: z.string().min(1).optional(),
 }).strict();
 export const resultSchema = migrationResultSchema;
 
@@ -48,7 +50,7 @@ export default async function preview({ input }: CliRouteProps<typeof inputSchem
   const p = await previewMigration(input);
   const result = migrationResult(p);
   // The guided `gbot migrate` asks for confirmation itself; plain use prints the next command.
-  const routines = input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '';
+  const routines = (input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '') + (input.routines ? ' --routines ' + JSON.stringify(input.routines) : '');
   const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''}${routines} --yes`;
   return <Agent.Result value={result}><Agent.Text>{p.summary + next}</Agent.Text></Agent.Result>;
 }

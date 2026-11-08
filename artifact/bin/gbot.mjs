@@ -10323,6 +10323,10 @@ var __webpack_modules__ = {
                         description: 'Same value as at import (plans the destination as --activate-routines does; pauses nothing)',
                         type: 'boolean'
                     },
+                    routines: {
+                        description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot',
+                        type: 'string'
+                    },
                     accept: {
                         description: 'Also run the behavioral acceptance checks',
                         type: 'boolean'
@@ -10359,6 +10363,7 @@ var __webpack_modules__ = {
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
             moveRoutines: zod__rspack_import_3.zMY().default(false),
+            routines: zod__rspack_import_3.YjP().min(1).optional(),
             accept: zod__rspack_import_3.zMY().default(false)
         }).strict();
         const resultSchema = _core_migration_route_js__rspack_import_1.l;
@@ -10368,7 +10373,7 @@ var __webpack_modules__ = {
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
                 value: result,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
-                    children: (0, _core_migration_text_js__rspack_import_5.z)(r)
+                    children: (0, _core_migration_text_js__rspack_import_5.zy)(r)
                 })
             });
         }
@@ -10453,12 +10458,16 @@ var __webpack_modules__ = {
                         type: 'string'
                     },
                     activateRoutines: {
-                        description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
+                        description: 'Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)',
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        description: 'Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
                         type: 'boolean'
+                    },
+                    routines: {
+                        description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot',
+                        type: 'string'
                     },
                     yes: {
                         description: 'Confirm the previewed import',
@@ -10506,6 +10515,7 @@ var __webpack_modules__ = {
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
             moveRoutines: zod__rspack_import_3.zMY().default(false),
+            routines: zod__rspack_import_3.YjP().min(1).optional(),
             yes: zod__rspack_import_3.zMY().default(false),
             accept: zod__rspack_import_3.zMY().default(true),
             intoExisting: zod__rspack_import_3.zMY().default(false)
@@ -10517,7 +10527,7 @@ var __webpack_modules__ = {
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
                 value: result,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
-                    children: (0, _core_migration_text_js__rspack_import_5.z)(r)
+                    children: (0, _core_migration_text_js__rspack_import_5.zy)(r)
                 })
             });
         }
@@ -10593,12 +10603,16 @@ var __webpack_modules__ = {
                         type: 'string'
                     },
                     activateRoutines: {
-                        description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
+                        description: 'Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)',
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Show the import with --move-routines: routines on in Grok Bot created active here and paused in Grok Bot after the check (changes nothing now)',
+                        description: 'Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) created active here and paused in Grok Bot after the check (changes nothing now)',
                         type: 'boolean'
+                    },
+                    routines: {
+                        description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot',
+                        type: 'string'
                     }
                 },
                 required: [
@@ -10631,13 +10645,14 @@ var __webpack_modules__ = {
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
-            moveRoutines: zod__rspack_import_3.zMY().default(false)
+            moveRoutines: zod__rspack_import_3.zMY().default(false),
+            routines: zod__rspack_import_3.YjP().min(1).optional()
         }).strict();
         const resultSchema = _core_migration_route_js__rspack_import_1.l;
         async function preview({ input }) {
             const p = await (0, _core_migration_flow_js__rspack_import_2.rV)(input);
             const result = (0, _core_migration_route_js__rspack_import_1.Y)(p);
-            const routines = input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '';
+            const routines = (input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '') + (input.routines ? ' --routines ' + JSON.stringify(input.routines) : '');
             const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''}${routines} --yes`;
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
                 value: result,
@@ -10735,12 +10750,16 @@ var __webpack_modules__ = {
                         type: 'string'
                     },
                     activateRoutines: {
-                        description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
+                        description: 'Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)',
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        description: 'Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
                         type: 'boolean'
+                    },
+                    routines: {
+                        description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot',
+                        type: 'string'
                     },
                     yes: {
                         description: 'Import after showing the diff',
@@ -10787,6 +10806,7 @@ var __webpack_modules__ = {
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
             moveRoutines: zod__rspack_import_3.zMY().default(false),
+            routines: zod__rspack_import_3.YjP().min(1).optional(),
             yes: zod__rspack_import_3.zMY().default(false),
             accept: zod__rspack_import_3.zMY().default(true),
             intoExisting: zod__rspack_import_3.zMY().default(false)
@@ -10800,7 +10820,7 @@ var __webpack_modules__ = {
                 (0, _core_migration_text_js__rspack_import_4._)(r.captured.coverage),
                 '',
                 r.preview.summary,
-                r.stage === 'preview' ? `\nNothing was imported. Review the diff above, then run:\n  ${r.next}` : '\n' + (0, _core_migration_text_js__rspack_import_4.z)(r.imported)
+                r.stage === 'preview' ? `\nNothing was imported. Review the diff above, then run:\n  ${r.next}` : '\n' + (0, _core_migration_text_js__rspack_import_4.zy)(r.imported)
             ].join('\n');
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Result, {
                 value: result,
@@ -46534,6 +46554,14 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
+                                "description": "With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot",
+                                "key": "routines",
+                                "kind": "string",
+                                "option": "routines",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
                                 "description": "Skills: all, none, or for Muse/dot also index (names only) or a comma-separated list (default: all; Muse/dot by chat: index)",
                                 "key": "skills",
                                 "kind": "string",
@@ -46601,7 +46629,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)",
+                                "description": "Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)",
                                 "key": "activateRoutines",
                                 "kind": "boolean",
                                 "option": "activate-routines",
@@ -46666,7 +46694,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
+                                "description": "Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46678,6 +46706,14 @@ var __webpack_modules__ = {
                                 "key": "profile",
                                 "kind": "string",
                                 "option": "profile",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot",
+                                "key": "routines",
+                                "kind": "string",
+                                "option": "routines",
                                 "repeated": false,
                                 "required": false
                             },
@@ -46741,7 +46777,7 @@ var __webpack_modules__ = {
                         "exitCode": "result",
                         "options": [
                             {
-                                "description": "Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)",
+                                "description": "Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)",
                                 "key": "activateRoutines",
                                 "kind": "boolean",
                                 "option": "activate-routines",
@@ -46790,7 +46826,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Show the import with --move-routines: routines on in Grok Bot created active here and paused in Grok Bot after the check (changes nothing now)",
+                                "description": "Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) created active here and paused in Grok Bot after the check (changes nothing now)",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46802,6 +46838,14 @@ var __webpack_modules__ = {
                                 "key": "profile",
                                 "kind": "string",
                                 "option": "profile",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot",
+                                "key": "routines",
+                                "kind": "string",
+                                "option": "routines",
                                 "repeated": false,
                                 "required": false
                             },
@@ -46873,7 +46917,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)",
+                                "description": "Create schedules that were on in Grok Bot as active; Grok Bot keeps running them (default: Hermes paused, Muse/dot notes only; by default nothing in Grok Bot changes)",
                                 "key": "activateRoutines",
                                 "kind": "boolean",
                                 "option": "activate-routines",
@@ -46945,7 +46989,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
+                                "description": "Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46965,6 +47009,14 @@ var __webpack_modules__ = {
                                 "key": "profile",
                                 "kind": "string",
                                 "option": "profile",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot",
+                                "key": "routines",
+                                "kind": "string",
+                                "option": "routines",
                                 "repeated": false,
                                 "required": false
                             },
@@ -56423,6 +56475,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     schedule: a.scheduleCron,
                     timezone: a.timezone ?? null
                 }));
+        function selectRoutines(automations, spec) {
+            const on = automations.filter((a)=>a.trigger === 'schedule' && a.scheduleCron && a.enabled);
+            if (spec === undefined || spec === null) return on;
+            const valid = ()=>on.length ? on.map((a)=>`${a.id || '(no id)'} "${a.name}" (${a.scheduleCron}${a.timezone ? ' ' + a.timezone : ''})`).join(', ') : 'none';
+            const wanted = String(spec).split(',').map((s)=>s.trim()).filter(Boolean);
+            if (!wanted.length) throw new _migration_js__rspack_import_1.Py(`--routines takes routine ids or exact names, comma-separated. Routines that are on in Grok Bot: ${valid()}.`);
+            const picked = new Set();
+            for (const w of wanted){
+                const byId = on.filter((a)=>a.id && a.id === w);
+                const found = byId.length ? byId : on.filter((a)=>a.name === w);
+                if (found.length > 1) throw new _migration_js__rspack_import_1.Py(`--routines: several routines that are on are named "${w}"; use the id. Routines that are on in Grok Bot: ${valid()}.`);
+                if (!found.length) throw new _migration_js__rspack_import_1.Py(`--routines: no routine that is on in Grok Bot has the id or name "${w}". Routines that are on in Grok Bot: ${valid()}.`);
+                picked.add(found[0]);
+            }
+            return on.filter((a)=>picked.has(a));
+        }
         function normalizeAutomation(record) {
             const trigger = object(record.trigger) ? record.trigger : {};
             const schedule = str(trigger.schedule) || str(record.schedule);
@@ -56996,7 +57064,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             $8: ()=>fetchStoreBytes,
             Hu: ()=>normalizeAutomation,
             Lr: ()=>readSkillLibrary,
-            U8: ()=>captureBot
+            U8: ()=>captureBot,
+            u_: ()=>selectRoutines
         }, {
             $r: routinesOn,
             CR: DEFAULT_MAX_FILE_BYTES,
@@ -57012,6 +57081,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _migration_source_js__rspack_import_5 = __webpack_require__("./src/core/migration-source.js");
         var _migration_hermes_js__rspack_import_6 = __webpack_require__("./src/core/migration-hermes.js");
         var _migration_js__rspack_import_7 = __webpack_require__("./src/core/migration.js");
+        var _migration_text_js__rspack_import_8 = __webpack_require__("./src/core/migration-text.js");
         const progress = (text)=>process.stderr.write(`gbot migrate: ${text}\n`);
         function migrationsHome(env = process.env) {
             return env.GBOT_MIGRATIONS_DIR || (0, node_path__rspack_import_2.join)((0, node_os__rspack_import_1.homedir)(), '.grok-bot-cli', 'migrations');
@@ -57102,7 +57172,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 driveRemote: driveRemote ?? (process.env.GBOT_DRIVE_REMOTE || undefined),
                 driveFolder
             });
-        async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, moveRoutines = false, hermes }) {
+        async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, moveRoutines = false, routines, hermes }) {
             const skills = hermesSkills(wanted);
             const opened = (0, _migration_archive_js__rspack_import_4.p_)(archive);
             const h = hermes ?? new _migration_hermes_js__rspack_import_6.$o();
@@ -57118,7 +57188,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 profileDir: dest.profileDir,
                 skills,
                 activateRoutines,
-                moveRoutines
+                moveRoutines,
+                routines
             });
             return {
                 opened,
@@ -57151,13 +57222,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 notMigrated: plan.notMigrated
             };
         }
-        const ROUTINE_TOGGLE = 'in the Grok Bot app: Routines → toggle';
         const DEST = {
             hermes: 'Hermes',
             muse: 'Muse',
             dot: 'Your dot'
         };
-        const routineLabel = (r)=>`"${r.name}" (${r.schedule}${r.timezone ? ' ' + r.timezone : ''})`;
+        function routineFlags({ activateRoutines = false, moveRoutines = false, routines }) {
+            if (routines !== undefined && !activateRoutines && !moveRoutines) {
+                throw new _migration_js__rspack_import_7.Py('--routines limits --activate-routines or --move-routines to some routines; add one of them. Without either, every routine stays as it is in Grok Bot and none is turned on at the destination.');
+            }
+            return activateRoutines || moveRoutines;
+        }
         const hermesScheduled = (plan)=>plan.cron.filter((c)=>c.sourceEnabled && !c.paused).map((c)=>({
                     id: c.sourceId,
                     name: c.routine,
@@ -57165,16 +57240,37 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     timezone: c.timezone ?? null,
                     job: c.name
                 }));
-        const pauseThere = (to, profile)=>(r)=>to === 'hermes' ? `pause the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron pause <job id>)` : `ask ${DEST[to]} to pause its scheduled task "${r.name}"`;
-        function routinesPreview({ to, on, moved, activate, move }) {
-            if (!on.length) return null;
-            const where = DEST[to];
-            if (move) {
-                return `Grok Bot routines → ${moved.length} of the ${on.length} on there run in ${where} from the import (created active), and once the import check passes they are paused in Grok Bot: ` + `${moved.map(routineLabel).join(', ') || 'none'}. Turn one back on ${ROUTINE_TOGGLE}.`;
-            }
-            if (activate) return `Grok Bot routines → ${on.length} on there stay on, and their copies in ${where} are created active: both run until one is turned off (--move-routines pauses the Grok Bot copies after the check).`;
-            return `Grok Bot routines → ${on.length} on there stay on; in ${where} they are ${to === 'hermes' ? 'created paused' : 'only written to ROUTINES.md'} (--move-routines turns them on in ${where} and pauses them in Grok Bot once the import check passes).`;
+        const routineKey = (r)=>r.id || `name:${r.name}`;
+        function routineRows({ on, active, migrated = null, move }) {
+            const activeKeys = new Set(active.map(routineKey));
+            const migratedKeys = migrated && new Set(migrated.map(routineKey));
+            return on.map((r)=>{
+                const atDestination = activeKeys.has(routineKey(r)) ? 'on' : migratedKeys && !migratedKeys.has(routineKey(r)) ? 'not migrated' : 'off';
+                return {
+                    ...r,
+                    atDestination,
+                    inGrokBot: move && atDestination === 'on' ? 'paused after the check' : 'unchanged'
+                };
+            });
         }
+        const RESULT = {
+            paused: 'paused',
+            'left-on': 'left on',
+            failed: 'not paused',
+            unknown: 'unknown'
+        };
+        function routineOutcome(rows, sourceRoutines) {
+            if (!sourceRoutines) return rows;
+            const result = new Map(sourceRoutines.routines.map((x)=>[
+                    routineKey(x),
+                    RESULT[x.result] ?? 'unknown'
+                ]));
+            return rows.map((r)=>result.has(routineKey(r)) ? {
+                    ...r,
+                    inGrokBot: result.get(routineKey(r))
+                } : r);
+        }
+        const pauseThere = (to, profile)=>(r)=>to === 'hermes' ? `pause the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron pause <job id>)` : `ask ${DEST[to]} to pause its scheduled task "${r.name}"`;
         async function pauseSourceRoutines({ routines, passed, agentId, routineSwitch, pauseHere, onProgress = ()=>{} }) {
             if (!routines.length) return {
                 status: 'none',
@@ -57193,7 +57289,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             const out = [];
             for (const r of routines){
-                const byHand = `turn "${r.name}" off ${ROUTINE_TOGGLE}, or ${pauseHere(r)}`;
+                const byHand = `turn "${r.name}" off ${_migration_text_js__rspack_import_8.Om}, or ${pauseHere(r)}`;
                 if (!r.id) {
                     out.push({
                         ...r,
@@ -57230,18 +57326,31 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return {
                 status: paused === out.length ? 'paused' : paused ? 'partial' : 'not-paused',
                 routines: out,
-                turnBackOn: `Turn one back on ${ROUTINE_TOGGLE}.`
+                turnBackOn: `Turn one back on ${_migration_text_js__rspack_import_8.Om}.`
             };
         }
         const routinesDone = (s)=>!s || s.status === 'paused' || s.status === 'none';
-        async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, hermes }) {
-            const activate = activateRoutines || moveRoutines;
+        async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, routines, hermes }) {
+            const activate = routineFlags({
+                activateRoutines,
+                moveRoutines,
+                routines
+            });
+            const withRoutines = (p, rows)=>rows.length ? {
+                    ...p,
+                    summary: p.summary + '\n' + (0, _migration_text_js__rspack_import_8.v)(to, rows, {
+                        activate,
+                        move: moveRoutines
+                    }),
+                    routines: rows
+                } : p;
             if (to !== 'hermes') {
                 const { previewTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
                 const p = await previewTrinity({
                     archive,
                     to,
                     activateRoutines: activate,
+                    routines,
                     ...trinityOpts({
                         via,
                         history,
@@ -57251,17 +57360,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
-                const line = routinesPreview({
-                    to,
+                return withRoutines(p, routineRows({
                     on: p.routinesOn,
-                    moved: p.plan.scheduled,
-                    activate,
+                    active: p.plan.scheduled,
                     move: moveRoutines
-                });
-                return line ? {
-                    ...p,
-                    summary: p.summary + '\n' + line
-                } : p;
+                }));
             }
             const { opened, dest, plan } = await hermesContext({
                 archive,
@@ -57269,29 +57372,36 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 skills,
                 activateRoutines: activate,
                 moveRoutines,
+                routines,
                 hermes
             });
-            const line = routinesPreview({
-                to,
+            const rows = routineRows({
                 on: (0, _migration_capture_js__rspack_import_3.$r)(opened.capture.automations),
-                moved: hermesScheduled(plan),
-                activate,
+                active: hermesScheduled(plan),
+                migrated: plan.cron.map((c)=>({
+                        id: c.sourceId,
+                        name: c.routine
+                    })),
                 move: moveRoutines
             });
-            return {
+            return withRoutines({
                 exitCode: 0,
                 to,
                 destination: dest,
-                summary: (0, _migration_hermes_js__rspack_import_6.FN)(plan, dest) + (line ? '\n' + line : ''),
+                summary: (0, _migration_hermes_js__rspack_import_6.FN)(plan, dest),
                 plan: planFacts(plan)
-            };
+            }, rows);
         }
-        async function importMigration({ archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, hermes, exec, routineSwitch, onProgress = progress }) {
+        async function importMigration({ archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, routines, hermes, exec, routineSwitch, onProgress = progress }) {
             if (!yes) throw new _migration_js__rspack_import_7.Py('Review gbot migrate preview first, then pass --yes to import.');
+            const activate = routineFlags({
+                activateRoutines,
+                moveRoutines,
+                routines
+            });
             const control = moveRoutines ? routineSwitch ?? (0, _migration_source_js__rspack_import_5.T)({
                 account
             }) : null;
-            const activate = activateRoutines || moveRoutines;
             if (to !== 'hermes') {
                 const { importTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
                 const r = await importTrinity({
@@ -57299,6 +57409,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     to,
                     accept,
                     activateRoutines: activate,
+                    routines,
                     onProgress,
                     keepDrive,
                     ...exec ? {
@@ -57313,21 +57424,30 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
-                if (!control) return r;
                 const passed = r.exitCode === 0 && r.acceptance?.ok === true && r.verify.checks.some((c)=>c.area === 'schedules read-back' && c.ok && !c.informational);
-                const sourceRoutines = await pauseSourceRoutines({
+                const sourceRoutines = control ? await pauseSourceRoutines({
                     routines: r.scheduled ?? [],
                     passed,
                     agentId: r.botId,
                     routineSwitch: control,
                     pauseHere: pauseThere(to),
                     onProgress
-                });
+                }) : undefined;
                 const { report: path, ...rest } = r;
+                const rows = routineOutcome(routineRows({
+                    on: r.routinesOn ?? [],
+                    active: r.scheduled ?? [],
+                    move: moveRoutines
+                }), sourceRoutines);
                 const report = {
                     ...rest,
                     exitCode: r.exitCode === 0 && routinesDone(sourceRoutines) ? 0 : 3,
-                    sourceRoutines
+                    ...rows.length ? {
+                        routines: rows
+                    } : {},
+                    ...sourceRoutines ? {
+                        sourceRoutines
+                    } : {}
                 };
                 (0, node_fs__rspack_import_0.writeFileSync)(path, JSON.stringify(report, null, 2) + '\n', {
                     mode: 384
@@ -57343,6 +57463,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 skills,
                 activateRoutines: activate,
                 moveRoutines,
+                routines,
                 hermes
             });
             const applied = await (0, _migration_hermes_js__rspack_import_6.VE)(h, opened, plan, {
@@ -57365,6 +57486,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 pauseHere: pauseThere(to, plan.profile),
                 onProgress
             }) : undefined;
+            const rows = routineOutcome(routineRows({
+                on: (0, _migration_capture_js__rspack_import_3.$r)(opened.capture.automations),
+                active: hermesScheduled(plan),
+                migrated: plan.cron.map((c)=>({
+                        id: c.sourceId,
+                        name: c.routine
+                    })),
+                move: moveRoutines
+            }), sourceRoutines);
             const report = {
                 exitCode: ok && routinesDone(sourceRoutines) ? 0 : 3,
                 to,
@@ -57375,6 +57505,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 steps: applied.steps,
                 verify: verified,
                 acceptance,
+                ...rows.length ? {
+                    routines: rows
+                } : {},
                 ...sourceRoutines ? {
                     sourceRoutines
                 } : {},
@@ -57390,8 +57523,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 report: path
             };
         }
-        async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
-            const activate = activateRoutines || moveRoutines;
+        async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, moveRoutines = false, routines, hermes: injected, exec, onProgress = progress }) {
+            const activate = routineFlags({
+                activateRoutines,
+                moveRoutines,
+                routines
+            });
             if (to !== 'hermes') {
                 const { checkTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
                 return checkTrinity({
@@ -57399,7 +57536,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     to,
                     accept,
                     activateRoutines: activate,
+                    routines,
                     onProgress,
+                    ...exec ? {
+                        exec
+                    } : {},
                     ...trinityOpts({
                         via,
                         history,
@@ -57415,7 +57556,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 profile,
                 skills,
                 activateRoutines: activate,
-                moveRoutines
+                moveRoutines,
+                routines,
+                hermes: injected
             });
             const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(hermes, opened, plan);
             const acceptance = accept ? await (0, _migration_hermes_js__rspack_import_6.Pg)(hermes, opened, plan, {
@@ -57440,7 +57583,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 report: path
             };
         }
-        async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
+        async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, routines, onProgress = progress }) {
+            routineFlags({
+                activateRoutines,
+                moveRoutines,
+                routines
+            });
             const captured = await captureToArchive({
                 account,
                 bot,
@@ -57459,7 +57607,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 driveRemote,
                 driveFolder,
                 activateRoutines,
-                moveRoutines
+                moveRoutines,
+                routines
             });
             if (!yes) {
                 return {
@@ -57467,7 +57616,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     stage: 'preview',
                     captured,
                     preview,
-                    next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''}${moveRoutines ? `${account ? ' --account ' + account : ''} --move-routines` : activateRoutines ? ' --activate-routines' : ''} --yes`
+                    next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''}${moveRoutines ? `${account ? ' --account ' + account : ''} --move-routines` : activateRoutines ? ' --activate-routines' : ''}${routines ? ' --routines ' + JSON.stringify(routines) : ''} --yes`
                 };
             }
             const imported = await importMigration({
@@ -57487,6 +57636,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 intoExisting,
                 activateRoutines,
                 moveRoutines,
+                routines,
                 onProgress
             });
             return {
@@ -57690,8 +57840,9 @@ else:
         var node_fs__rspack_import_2 = __webpack_require__("node:fs");
         var node_path__rspack_import_3 = __webpack_require__("node:path");
         var _migration_js__rspack_import_4 = __webpack_require__("./src/core/migration.js");
-        var _migration_hermes_helper_js__rspack_import_6 = __webpack_require__("./src/core/migration-hermes-helper.js");
-        var _migration_redact_js__rspack_import_5 = __webpack_require__("./src/core/migration-redact.js");
+        var _migration_capture_js__rspack_import_5 = __webpack_require__("./src/core/migration-capture.js");
+        var _migration_hermes_helper_js__rspack_import_7 = __webpack_require__("./src/core/migration-hermes-helper.js");
+        var _migration_redact_js__rspack_import_6 = __webpack_require__("./src/core/migration-redact.js");
         const sha256 = (b)=>(0, node_crypto__rspack_import_1.createHash)('sha256').update(b).digest('hex');
         const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
         const DEFAULT_MEMORY_LIMIT = 2200;
@@ -57813,7 +57964,7 @@ else:
             return path.startsWith(base.endsWith(node_path__rspack_import_3.sep) ? base : base + node_path__rspack_import_3.sep) ? path : null;
         }
         const skillName = (s)=>/^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(s.files.find((f)=>f.rel === 'SKILL.md')?.bytes.toString('utf8') ?? '')?.[1]?.trim() ?? s.slug;
-        function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, now = ()=>new Date() }) {
+        function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, routines: only, now = ()=>new Date() }) {
             const cap = archive.capture;
             if (cap.bot.kind !== 'bot') throw new _migration_js__rspack_import_4.Py('Only a bot (not a group) can become a Hermes profile.');
             const notMigrated = [];
@@ -57824,14 +57975,14 @@ else:
                 });
             let redactedSecrets = 0;
             const clean = (value, item)=>{
-                const r = (0, _migration_redact_js__rspack_import_5.aj)(value);
+                const r = (0, _migration_redact_js__rspack_import_6.aj)(value);
                 redactedSecrets += r.count;
                 if (r.clean) return r.text;
                 if (item) omit(item, SECRET_REASON, SECRET_ALT);
                 return null;
             };
             const destFor = (root, rel, item)=>{
-                const r = (0, _migration_redact_js__rspack_import_5.aj)(rel);
+                const r = (0, _migration_redact_js__rspack_import_6.aj)(rel);
                 if (!r.clean || r.count) {
                     omit(item, 'its path holds a token-shaped value', SECRET_ALT);
                     return null;
@@ -57841,7 +57992,7 @@ else:
                 return dest;
             };
             const cleanFile = (row, item)=>{
-                const r = (0, _migration_redact_js__rspack_import_5.vT)(archive.read(row.path));
+                const r = (0, _migration_redact_js__rspack_import_6.vT)(archive.read(row.path));
                 redactedSecrets += r.count;
                 if (r.clean) return r;
                 omit(item, r.text ? SECRET_REASON : 'binary file with a token-shaped value inside; binary bytes cannot be redacted', SECRET_ALT);
@@ -57858,18 +58009,18 @@ else:
             const base = (0, node_path__rspack_import_3.join)(profileDir, 'workspace', 'grok-bot');
             const boxRoot = (0, node_path__rspack_import_3.join)(base, 'grok-box');
             const date = now().toISOString().slice(0, 10);
-            const archivePath = (0, _migration_redact_js__rspack_import_5.aj)(archive.root);
+            const archivePath = (0, _migration_redact_js__rspack_import_6.aj)(archive.root);
             const historyPath = archivePath.clean && !archivePath.count ? archive.root : 'grok-bot-archive';
             const memFiles = cap.box.filter((b)=>b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath));
             const user = [], memory = [];
             for (const f of memFiles.sort((a, b)=>a.boxPath.localeCompare(b.boxPath))){
                 const bytes = archive.read(f.path);
-                const raw = (0, _migration_redact_js__rspack_import_5.vT)(bytes);
+                const raw = (0, _migration_redact_js__rspack_import_6.vT)(bytes);
                 if (!raw.text) {
                     omit(f.boxPath, raw.clean ? 'not UTF-8 text' : 'holds a token-shaped value that cannot be removed in place', 'kept only in the private archive');
                     continue;
                 }
-                const r = (0, _migration_redact_js__rspack_import_5.aj)(bytes.toString('utf8'));
+                const r = (0, _migration_redact_js__rspack_import_6.aj)(bytes.toString('utf8'));
                 redactedSecrets += r.count;
                 const into = /\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/') ? user : memory;
                 for (const e of memoryEntries(r.text)){
@@ -57985,6 +58136,7 @@ else:
             const pathNote = `[Migrated from Grok Bot "${botName}". Box paths /home/box/... now live under ${boxRoot}/home/box/... . CLI logins that existed on the Grok box (for example glab, gh) must exist on this machine.]\n\n`;
             const cron = [], unscheduled = [], routines = [];
             const zones = new Set();
+            const active = new Set(activateRoutines || moveRoutines ? (0, _migration_capture_js__rspack_import_5.u_)(cap.automations, only) : []);
             for (const a of cap.automations){
                 const routine = clean(a.name, `routine ${a.id}`);
                 const prompt = routine === null ? null : clean(a.prompt, `routine "${routine}"`);
@@ -58011,7 +58163,7 @@ else:
                         schedule: a.scheduleCron,
                         timezone: a.timezone,
                         prompt: pathNote + prompt,
-                        paused: !((activateRoutines || moveRoutines) && a.enabled),
+                        paused: !active.has(a),
                         sourceEnabled: a.enabled,
                         sourceId: a.id
                     });
@@ -58109,7 +58261,7 @@ else:
                 else if (c.status === 'unavailable') omit(area, 'not readable with this login: ' + (c.reason ?? '') + (c.note ? ` (${c.note})` : ''), 'capture again with a login that can read it');
             }
             const shown = (v)=>{
-                const r = (0, _migration_redact_js__rspack_import_5.aj)(v);
+                const r = (0, _migration_redact_js__rspack_import_6.aj)(v);
                 return r.clean ? r.text : '[withheld: holds an encoded token-shaped value]';
             };
             return {
@@ -58153,13 +58305,13 @@ else:
         }
         function assertPlanClean(plan) {
             const { files, skills, docs, ...rest } = plan;
-            (0, _migration_redact_js__rspack_import_5.v7)(JSON.stringify(rest), 'the Hermes plan');
-            const text = (bytes)=>bytes.toString((0, _migration_redact_js__rspack_import_5.KH)(bytes) ? 'utf8' : 'latin1');
+            (0, _migration_redact_js__rspack_import_6.v7)(JSON.stringify(rest), 'the Hermes plan');
+            const text = (bytes)=>bytes.toString((0, _migration_redact_js__rspack_import_6.KH)(bytes) ? 'utf8' : 'latin1');
             for (const f of [
                 ...files,
                 ...skills.flatMap((s)=>s.files)
-            ])(0, _migration_redact_js__rspack_import_5.v7)(f.dest + '\n' + text(f.bytes), f.dest);
-            for (const [path, bytes] of docs)(0, _migration_redact_js__rspack_import_5.v7)(path + '\n' + text(bytes), path);
+            ])(0, _migration_redact_js__rspack_import_6.v7)(f.dest + '\n' + text(f.bytes), f.dest);
+            for (const [path, bytes] of docs)(0, _migration_redact_js__rspack_import_6.v7)(path + '\n' + text(bytes), path);
         }
         function groupNotMigrated(items) {
             const big = items.filter((n)=>/^larger than/.test(n.reason));
@@ -58229,7 +58381,7 @@ else:
                 this.bin = bin;
             }
             async run(args, opts = {}) {
-                (0, _migration_redact_js__rspack_import_5.v7)(args.join('\n'), `hermes ${args.slice(0, 3).join(' ')}`);
+                (0, _migration_redact_js__rspack_import_6.v7)(args.join('\n'), `hermes ${args.slice(0, 3).join(' ')}`);
                 const r = await this.exec(this.bin, args, opts);
                 if (r.code !== 0) {
                     const tail = (r.stderr || r.stdout).trim().split('\n').slice(-4).join(' ').slice(0, 400);
@@ -58294,11 +58446,11 @@ else:
                     op,
                     ...payload
                 });
-                (0, _migration_redact_js__rspack_import_5.v7)(input, `the Hermes helper ${op} payload`);
+                (0, _migration_redact_js__rspack_import_6.v7)(input, `the Hermes helper ${op} payload`);
                 const args = [
                     ...argv.slice(1, -1),
                     boot,
-                    Buffer.from(_migration_hermes_helper_js__rspack_import_6.W).toString('base64')
+                    Buffer.from(_migration_hermes_helper_js__rspack_import_7.W).toString('base64')
                 ];
                 const r = await this.exec(argv[0], args, {
                     input: '\n' + input,
@@ -59301,6 +59453,40 @@ else:
             empty: '·',
             failed: '✗'
         };
+        const ROUTINE_TOGGLE = 'in the Grok Bot app: Routines → toggle';
+        const DEST = {
+            hermes: 'Hermes',
+            muse: 'Muse',
+            dot: 'Your dot'
+        };
+        const routineAt = (x)=>`${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
+        const IN_GROK_BOT = {
+            unchanged: 'Grok Bot keeps running it',
+            'paused after the check': 'paused in Grok Bot once the import check passes',
+            paused: 'paused in Grok Bot',
+            'left on': 'still on in Grok Bot (the check did not pass)',
+            'not paused': 'not paused in Grok Bot (see below)',
+            unknown: 'not known whether it was paused in Grok Bot (see below)'
+        };
+        function routinesText(to, rows, { activate = false, move = false, done = false } = {}) {
+            const where = DEST[to] ?? to;
+            const there = (x)=>x.atDestination === 'on' ? `on in ${where}` : x.atDestination === 'not migrated' ? 'not migrated (see "Not migrated")' : to === 'hermes' ? 'off in Hermes (created paused)' : `not scheduled in ${where} (kept in ROUTINES.md)`;
+            const here = (x)=>x.atDestination === 'on' && x.inGrokBot === 'unchanged' ? 'Grok Bot keeps running it too, so it runs in both' : IN_GROK_BOT[x.inGrokBot] ?? x.inGrokBot;
+            const untouched = rows.every((x)=>[
+                    'unchanged',
+                    'left on',
+                    'not paused'
+                ].includes(x.inGrokBot));
+            const lines = [
+                `Grok Bot routines that ${done ? 'were' : 'are'} on (${rows.length})${untouched ? `; nothing in Grok Bot ${done ? 'was changed' : 'changes'}` : ''}:`,
+                ...rows.map((x)=>`  - ${routineAt(x)}: ${there(x)}; ${here(x)}`)
+            ];
+            if (done) return lines.join('\n');
+            if (rows.some((x)=>x.inGrokBot === 'paused after the check')) lines.push(`  Turn one back on ${ROUTINE_TOGGLE}.`);
+            if (!activate) lines.push(`  To run them in ${where} too: --activate-routines. To move them (on in ${where}, paused in Grok Bot once the import check passes): --move-routines. Add --routines id,id to do either for only some.`);
+            else if (!move && rows.some((x)=>x.atDestination === 'on')) lines.push(`  Both copies run until one is turned off; --move-routines pauses the Grok Bot copies once the import check passes.`);
+            return lines.join('\n');
+        }
         function coverageText(coverage) {
             const lines = [
                 'Captured from Grok Bot:'
@@ -59349,8 +59535,11 @@ else:
                 lines.push('', 'Delivered:');
                 for (const d of r.deliveries)lines.push(`  ${d.ok ? '✓' : '✗'} ${d.step}: ${d.state}${d.note ? ' — ' + d.note : ''}`);
             }
+            if (r.routines?.length) lines.push('', routinesText(r.to, r.routines, {
+                done: true
+            }));
             const sr = r.sourceRoutines;
-            const at = (x)=>`${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
+            const at = routineAt;
             if (sr?.status === 'none') lines.push('', 'Grok Bot routines (--move-routines): none were on; nothing to pause.');
             else if (sr?.status === 'left-on') {
                 lines.push('', 'Grok Bot routines (--move-routines):', `  ✗ ${sr.reason}`);
@@ -59370,7 +59559,10 @@ else:
         }
         __webpack_require__.d(__webpack_exports__, {
             _: ()=>coverageText,
-            z: ()=>importText
+            v: ()=>routinesText,
+            zy: ()=>importText
+        }, {
+            Om: ROUTINE_TOGGLE
         });
     },
     "./src/core/migration-trinity.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -59471,7 +59663,7 @@ else:
             '  e.update((n+"\\n"+hashlib.sha256(b).hexdigest()+"\\n").encode());m.update((n+"\\n"+hashlib.sha256(re.sub(rb"[ \\t\\n\\v\\f\\r\\\\]+",b"",b)).hexdigest()+"\\n").encode())',
             ' print(k,"MISSING",miss) if miss else print(k,e.hexdigest()[:12],m.hexdigest()[:12])'
         ].join('\n');
-        function buildTrinityPlan(archive, seat, { activateRoutines = false, via = 'auto', history, skills, folder: folderOpt, salt = (0, node_crypto__rspack_import_0.randomBytes)(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
+        function buildTrinityPlan(archive, seat, { activateRoutines = false, routines, via = 'auto', history, skills, folder: folderOpt, salt = (0, node_crypto__rspack_import_0.randomBytes)(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
             if (!LABEL[seat]) throw new _migration_js__rspack_import_6.Py('Unsupported trinity seat.');
             trinityOptions({
                 via,
@@ -59497,6 +59689,7 @@ else:
                         mode,
                         auto: via === 'auto',
                         activateRoutines,
+                        routines,
                         history,
                         skills,
                         folderOpt,
@@ -59514,7 +59707,7 @@ else:
         }
         class TooBig extends _migration_js__rspack_import_6.Py {
         }
-        function planFor(archive, seat, { mode, auto, activateRoutines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
+        function planFor(archive, seat, { mode, auto, activateRoutines, routines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
             const cap = archive.capture;
             const name = (0, _migration_redact_js__rspack_import_7.aj)(cap.bot.name).text;
             const short = name.split(' · ')[0];
@@ -59581,6 +59774,7 @@ else:
             const open1 = cap.todos.filter((t)=>t.status === 'pending' || t.status === 'in_progress');
             const scheduled = cap.automations.filter((a)=>a.trigger === 'schedule' && a.scheduleCron);
             const events = cap.automations.filter((a)=>!(a.trigger === 'schedule' && a.scheduleCron));
+            const active = new Set(activateRoutines ? (0, _migration_capture_js__rspack_import_4.u_)(cap.automations, routines) : []);
             const transcripts = cap.transcripts.map((t)=>({
                     ...t,
                     rows: archive.transcript(t).filter((m)=>m.role === 'user' || m.role === 'assistant')
@@ -59652,7 +59846,7 @@ else:
             if (cap.automations.length) addFile('ROUTINES.md', [
                 `# ${short}: routines`,
                 '',
-                ...scheduled.map((a)=>`## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${activateRoutines && a.enabled ? 'Migrated as an active scheduled task' : 'Not scheduled here'}\n\n${a.prompt}\n`),
+                ...scheduled.map((a)=>`## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${active.has(a) ? 'Migrated as an active scheduled task' : 'Not scheduled here'}\n\n${a.prompt}\n`),
                 ...events.map((a)=>`## ${a.name}\n- Trigger: ${a.trigger} event (no equivalent here)\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n\n${a.prompt}\n`)
             ].join('\n'));
             if (skillInfo.length && skillsMode !== 'none') {
@@ -59756,7 +59950,7 @@ else:
                 ''
             ].join('\n'));
             addFile('MANIFEST.txt', files.map((f)=>f.rel).sort().join('\n') + '\n');
-            if (!activateRoutines) for (const a of scheduled)notMigrated.push({
+            for (const a of scheduled.filter((x)=>!active.has(x) && (!activateRoutines || x.enabled)))notMigrated.push({
                 item: `routine "${a.name}"`,
                 reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`,
                 alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (schedules it here and pauses the Grok copy after the check)`
@@ -59938,7 +60132,7 @@ else:
                 });
                 if (steps.length > MAX_CHAT_STEPS) throw new TooBig(`Chat delivery would need ${steps.length} messages. Use --via upload, --history recent:N or --skills index.`);
             }
-            for (const a of scheduled.filter((x)=>activateRoutines && x.enabled)){
+            for (const a of scheduled.filter((x)=>active.has(x))){
                 add(`schedule-${safeSegment(a.id)}`.slice(0, 60), `Create a recurring scheduled task named "${a.name}" that runs on cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''} and does what ${folder}/ROUTINES.md describes under "${a.name}".`);
             }
             add('remember', `Please remember this long-term (明確要求長期記住): my Grok Bot assistant "${short}" was moved to you. Its handoff folder is ${folder}/ (start with README.md; role in ROLE.md, memory in MEMORY.md, open tasks in TASKS.md). Read those files before doing ${short}'s work.`);
@@ -60060,10 +60254,10 @@ else:
                     informational: true
                 }
             ] : [];
-            if (activateRoutines && scheduled.some((a)=>a.enabled)) checks1.push({
+            if (active.size) checks1.push({
                 id: 'schedules',
                 kind: 'schedules',
-                contains: scheduled.filter((a)=>a.enabled).map((a)=>a.name)
+                contains: scheduled.filter((a)=>active.has(a)).map((a)=>a.name)
             });
             for (const n of notMigrated){
                 n.item = (0, _migration_redact_js__rspack_import_7.aj)(n.item).text;
@@ -60120,7 +60314,7 @@ else:
                     bundle,
                     units: expected,
                     files: files.length,
-                    scheduled: activateRoutines ? (0, _migration_capture_js__rspack_import_4.$r)(cap.automations) : []
+                    scheduled: (0, _migration_capture_js__rspack_import_4.$r)(scheduled.filter((a)=>active.has(a)))
                 }
             };
         }
@@ -60142,10 +60336,11 @@ else:
         function planFile(archiveRoot, seat) {
             return (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(archiveRoot), `${(0, node_path__rspack_import_2.basename)(archiveRoot)}.${seat}-plan.json`);
         }
-        async function previewTrinity({ archive, to, activateRoutines = false, ...options }) {
+        async function previewTrinity({ archive, to, activateRoutines = false, routines, ...options }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
                 activateRoutines,
+                routines,
                 ...trinityOptions(options)
             });
             return {
@@ -60258,10 +60453,11 @@ else:
             if (result.error) throw new _migration_js__rspack_import_6.Py('trinity-cli: ' + result.error);
             return result;
         }
-        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, onProgress, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
+        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, routines, onProgress, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
                 activateRoutines,
+                routines,
                 ...trinityOptions(options)
             });
             const help = await exec(bin, [
@@ -60333,6 +60529,7 @@ else:
                 folder: delivery.folder,
                 bundle: delivery.bundle,
                 scheduled: delivery.scheduled,
+                routinesOn: (0, _migration_capture_js__rspack_import_4.$r)(opened.capture.automations),
                 checkOnly,
                 stopped: result.stopped,
                 repaired,
