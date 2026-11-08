@@ -38414,12 +38414,15 @@ else:
                     (0, _migration_hermes_js__rspack_import_4.v0)(clean(skill.desc), 1)[0]
                 ]
             });
-            const first = shownMain.find((m)=>m.role === 'user' && !(0, _migration_redact_js__rspack_import_6.aj)(m.text).count && (0, _migration_hermes_js__rspack_import_4.v0)(clean(m.text), 1).length);
-            if (first && recentN > 0) ask({
+            const minute = (m)=>m.timestampMs ? new Date(m.timestampMs).toISOString().slice(0, 16).replace('T', ' ') : null;
+            const mine = shownMain.filter((m)=>m.role === 'user');
+            const once = (m)=>mine.filter((x)=>minute(x) === minute(m)).length === 1;
+            const pick = mine.find((m)=>minute(m) && once(m) && !(0, _migration_redact_js__rspack_import_6.aj)(m.text).count && (0, _migration_hermes_js__rspack_import_4.v0)(clean(m.text), 1).length);
+            if (pick && recentN > 0) ask({
                 area: 'history',
                 note: contextNote,
-                text: `Open ${folder}/HISTORY.md on your computer and quote the first message I sent ${short} that contains no [redacted] part.`,
-                expect: (0, _migration_hermes_js__rspack_import_4.v0)(clean(first.text), 2),
+                text: `Open ${folder}/HISTORY.md on your computer and quote the message I sent at ${minute(pick)} UTC.`,
+                expect: (0, _migration_hermes_js__rspack_import_4.v0)(clean(pick.text), 2),
                 min: 1
             });
             if (roleTokens.length) ask({

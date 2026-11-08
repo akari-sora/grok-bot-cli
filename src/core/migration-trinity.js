@@ -298,8 +298,13 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const skill = fullSkills.find((x) => distinctiveTokens(opening(x.text), 1).length) ?? skillInfo.find((l) => distinctiveTokens(clean(l.desc), 1).length);
   if (skill && fullSkills.includes(skill)) ask({ area: 'skills', note: contextNote, text: `Open ${folder}/skills/${safeSegment(skill.slug)}/SKILL.md on your computer and quote its first steps.`, expect: distinctiveTokens(opening(skill.text), 3), min: 1 });
   else if (skill && skillsMode !== 'none') ask({ area: 'skills', note: contextNote, text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`, expect: [distinctiveTokens(clean(skill.desc), 1)[0]] });
-  const first = shownMain.find((m) => m.role === 'user' && !sanitize(m.text).count && distinctiveTokens(clean(m.text), 1).length);
-  if (first && recentN > 0) ask({ area: 'history', note: contextNote, text: `Open ${folder}/HISTORY.md on your computer and quote the first message I sent ${short} that contains no [redacted] part.`, expect: distinctiveTokens(clean(first.text), 2), min: 1 });
+  // One message named by its minute (as HISTORY.md prints it), unique among my messages, so
+  // the question has exactly one right answer; its keywords are not in the question.
+  const minute = (m) => (m.timestampMs ? new Date(m.timestampMs).toISOString().slice(0, 16).replace('T', ' ') : null);
+  const mine = shownMain.filter((m) => m.role === 'user');
+  const once = (m) => mine.filter((x) => minute(x) === minute(m)).length === 1;
+  const pick = mine.find((m) => minute(m) && once(m) && !sanitize(m.text).count && distinctiveTokens(clean(m.text), 1).length);
+  if (pick && recentN > 0) ask({ area: 'history', note: contextNote, text: `Open ${folder}/HISTORY.md on your computer and quote the message I sent at ${minute(pick)} UTC.`, expect: distinctiveTokens(clean(pick.text), 2), min: 1 });
   if (roleTokens.length) ask({ area: 'role', note: contextNote, text: `Open ${folder}/ROLE.md on your computer: which projects or accounts did ${short} work on?`, expect: roleTokens, min: 1 });
   // Muse keeps Memory.md short and curated: whether the pointer landed there is reported, not judged.
   const checks = seat === 'muse' ? [{ id: 'memory-pointer', kind: 'memory', contains: [short, folderName], min: 1, informational: true }] : [];
