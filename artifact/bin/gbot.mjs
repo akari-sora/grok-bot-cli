@@ -8158,14 +8158,15 @@ var __webpack_modules__ = {
     "./src/cli/codex/list-threads.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
-        var _agent_bundle_runtime__rspack_import_5 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
-        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_5 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_codex_bridge_js__rspack_import_1 = __webpack_require__("./src/core/codex-bridge.js");
         var _core_codex_contract_js__rspack_import_2 = __webpack_require__("./src/core/codex/contract.js");
-        var _core_format_js__rspack_import_6 = __webpack_require__("./src/core/format.js");
+        var _core_format_js__rspack_import_7 = __webpack_require__("./src/core/format.js");
         var _shared_js__rspack_import_3 = __webpack_require__("./src/cli/_shared.ts");
+        var _core_codex_routes_js__rspack_import_4 = __webpack_require__("./src/core/codex/routes.ts");
         const config = {
-            description: 'List Codex daemon-managed threads (all modelProviders; pages via --cursor / nextCursor).',
+            description: 'List Codex daemon-managed threads, newest activity first (all modelProviders; pages via --cursor / nextCursor). Find old threads with --query (name/title/id prefix, all pages), --active-within 7d, --since, --sort created.',
             exitCode: 'result',
             inputJsonSchema: {
                 additionalProperties: false,
@@ -8178,49 +8179,100 @@ var __webpack_modules__ = {
                         default: 20,
                         description: 'Max threads to list (1-200)',
                         type: 'number'
+                    },
+                    sort: {
+                        default: 'updated',
+                        description: 'updated (last activity, default) | created | recency',
+                        enum: [
+                            'updated',
+                            'created',
+                            'recency'
+                        ],
+                        type: 'string'
+                    },
+                    order: {
+                        default: 'desc',
+                        enum: [
+                            'desc',
+                            'asc'
+                        ],
+                        type: 'string'
+                    },
+                    query: {
+                        description: 'Case-insensitive substring of name/title, preview or id (id prefix works); scans every page',
+                        type: 'string'
+                    },
+                    activeWithin: {
+                        description: 'Only threads updated within 90s, 30m, 12h, 7d, 2w',
+                        type: 'string'
+                    },
+                    since: {
+                        description: 'Only threads updated at/after this ISO date/time or epoch seconds',
+                        type: 'string'
+                    },
+                    cwd: {
+                        description: 'Exact session cwd',
+                        type: 'string'
+                    },
+                    modelProvider: {
+                        description: 'Any modelProvider id; omit for all',
+                        type: 'string'
+                    },
+                    sourceKind: {
+                        description: 'Any app-server source kind; omit for interactive sources',
+                        type: 'string'
+                    },
+                    archived: {
+                        description: 'Archived threads only',
+                        type: 'boolean'
                     }
                 },
                 type: 'object'
             }
         };
-        const inputSchema = zod__rspack_import_4.Ikc({
-            cursor: zod__rspack_import_4.YjP().min(1).optional(),
-            limit: zod__rspack_import_4.aig().int().min(1).max(200).default(20)
-        }).strict();
-        const resultSchema = zod__rspack_import_4.KCZ([
-            zod__rspack_import_4.Ikc({
-                exitCode: zod__rspack_import_4.euz(0),
-                limit: zod__rspack_import_4.aig().int().min(1).max(200),
-                nextCursor: zod__rspack_import_4.YjP().nullable(),
-                threads: zod__rspack_import_4.YOg(zod__rspack_import_4.g1P(zod__rspack_import_4.YjP(), zod__rspack_import_4.Pq9())),
-                useStateDbOnly: zod__rspack_import_4.zMY().optional()
+        const inputSchema = _core_codex_routes_js__rspack_import_4.P3;
+        const resultSchema = zod__rspack_import_5.KCZ([
+            zod__rspack_import_5.Ikc({
+                exitCode: zod__rspack_import_5.euz(0),
+                limit: zod__rspack_import_5.aig().int().min(1).max(200),
+                sort: zod__rspack_import_5.YjP().optional(),
+                order: zod__rspack_import_5.YjP().optional(),
+                scanned: zod__rspack_import_5.aig().int().min(0).optional(),
+                nextCursor: zod__rspack_import_5.YjP().nullable(),
+                threads: zod__rspack_import_5.YOg(zod__rspack_import_5.g1P(zod__rspack_import_5.YjP(), zod__rspack_import_5.Pq9())),
+                useStateDbOnly: zod__rspack_import_5.zMY().optional()
             }).strict(),
             _shared_js__rspack_import_3.R9
         ]);
         async function codexListThreads({ input }) {
             let out;
             try {
+                const { sourceKind, ...rest } = input;
                 out = await (0, _core_codex_bridge_js__rspack_import_1.X$)({
-                    cursor: input.cursor,
-                    limit: input.limit
+                    ...rest,
+                    ...sourceKind ? {
+                        sourceKinds: [
+                            sourceKind
+                        ]
+                    } : {}
                 });
             } catch (error) {
                 const failure = (0, _core_codex_contract_js__rspack_import_2.DG)(error);
-                return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Result, {
+                return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
                     value: failure,
-                    children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Text, {
+                    children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
                         children: failure.error
                     })
                 });
             }
             const more = out.nextCursor ? `\n\nmore: --cursor ${JSON.stringify((0, _core_codex_bridge_js__rspack_import_1.pF)(out.nextCursor))}` : '';
-            const text = out.threads.length === 0 ? 'No Codex threads.' : out.threads.map(_core_format_js__rspack_import_6.nz).join('\n\n') + more;
-            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Result, {
+            const text = out.threads.length === 0 ? 'No Codex threads.' : out.threads.map(_core_format_js__rspack_import_7.nz).join('\n\n') + more;
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
                 value: {
                     ...out,
                     exitCode: 0
                 },
-                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Text, {
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
                     children: text
                 })
             });
@@ -8405,6 +8457,7 @@ var __webpack_modules__ = {
         var _agent_bundle_runtime__rspack_import_5 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
         var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_codex_routes_js__rspack_import_1 = __webpack_require__("./src/core/codex/routes.ts");
+        var _core_format_js__rspack_import_6 = __webpack_require__("./src/core/format.js");
         var _core_relay_routes_js__rspack_import_2 = __webpack_require__("./src/core/relay/routes.ts");
         const resultSchema = zod__rspack_import_3.KCZ([
             _core_codex_routes_js__rspack_import_1.FD,
@@ -8528,7 +8581,9 @@ var __webpack_modules__ = {
                         exitCode: out.delivery === 'rejected' ? 1 : 0
                     },
                     children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_5.g.Text, {
-                        children: `Delivery ${out.delivery}; terminal answer returns to Grok automatically.`
+                        children: (0, _core_format_js__rspack_import_6.Ks)(out, {
+                            managed: true
+                        })
                     })
                 });
             }
@@ -10529,16 +10584,17 @@ var __webpack_modules__ = {
     "./src/cli/send.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.js");
-        var _agent_bundle_runtime__rspack_import_9 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
-        var _agent_bundle_runtime__rspack_import_10 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
-        var zod__rspack_import_8 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_10 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+        var _agent_bundle_runtime__rspack_import_11 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_9 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _core_relay_routes_js__rspack_import_1 = __webpack_require__("./src/core/relay/routes.ts");
         var _core_codex_bridge_js__rspack_import_2 = __webpack_require__("./src/core/codex-bridge.js");
-        var _core_codex_contract_js__rspack_import_3 = __webpack_require__("./src/core/codex/contract.js");
-        var _core_history_js__rspack_import_4 = __webpack_require__("./src/core/history.js");
-        var _core_stdin_message_js__rspack_import_5 = __webpack_require__("./src/core/stdin-message.js");
-        var _core_store_js__rspack_import_6 = __webpack_require__("./src/core/store.js");
-        var _shared_js__rspack_import_7 = __webpack_require__("./src/cli/_shared.ts");
+        var _core_sender_prefix_js__rspack_import_3 = __webpack_require__("./src/core/sender-prefix.js");
+        var _core_codex_contract_js__rspack_import_4 = __webpack_require__("./src/core/codex/contract.js");
+        var _core_history_js__rspack_import_5 = __webpack_require__("./src/core/history.js");
+        var _core_stdin_message_js__rspack_import_6 = __webpack_require__("./src/core/stdin-message.js");
+        var _core_store_js__rspack_import_7 = __webpack_require__("./src/core/store.js");
+        var _shared_js__rspack_import_8 = __webpack_require__("./src/cli/_shared.ts");
         const config = {
             description: 'Send a message to a Grok Bot bot or group by name or id.',
             exitCode: 'result',
@@ -10629,56 +10685,56 @@ var __webpack_modules__ = {
                 'message'
             ]
         };
-        const inputSchema = _shared_js__rspack_import_7.lK.extend({
+        const inputSchema = _shared_js__rspack_import_8.lK.extend({
             ..._core_relay_routes_js__rspack_import_1.zK,
-            replyMode: zod__rspack_import_8.k5n([
+            replyMode: zod__rspack_import_9.k5n([
                 'auto',
                 'manual'
             ]).optional(),
-            correlationId: zod__rspack_import_8.YjP().min(1).optional(),
-            envelope: zod__rspack_import_8.zMY().default(false),
-            historyDir: zod__rspack_import_8.YjP().min(1).optional(),
-            hop: zod__rspack_import_8.aig().int().min(0).optional(),
-            message: zod__rspack_import_8.YOg(zod__rspack_import_8.YjP()).optional(),
-            noHistory: zod__rspack_import_8.zMY().default(false),
-            replyTo: zod__rspack_import_8.YjP().min(1).optional(),
-            stdin: zod__rspack_import_8.zMY().default(false),
-            target: zod__rspack_import_8.YjP().min(1)
+            correlationId: zod__rspack_import_9.YjP().min(1).optional(),
+            envelope: zod__rspack_import_9.zMY().default(false),
+            historyDir: zod__rspack_import_9.YjP().min(1).optional(),
+            hop: zod__rspack_import_9.aig().int().min(0).optional(),
+            message: zod__rspack_import_9.YOg(zod__rspack_import_9.YjP()).optional(),
+            noHistory: zod__rspack_import_9.zMY().default(false),
+            replyTo: zod__rspack_import_9.YjP().min(1).optional(),
+            stdin: zod__rspack_import_9.zMY().default(false),
+            target: zod__rspack_import_9.YjP().min(1)
         }).strict().refine((input)=>!(input.stdin && (input.message?.length ?? 0) > 0), '--stdin cannot be combined with a positional message.').refine((input)=>input.stdin || (input.message?.length ?? 0) > 0, 'gbot send <bot-or-group> <message> or --stdin');
-        const receiptSchema = zod__rspack_import_8.Ikc({
-            clientNonce: zod__rspack_import_8.YjP().min(1).optional(),
-            correlationId: zod__rspack_import_8.YjP(),
-            delivery: zod__rspack_import_8.k5n([
+        const receiptSchema = zod__rspack_import_9.Ikc({
+            clientNonce: zod__rspack_import_9.YjP().min(1).optional(),
+            correlationId: zod__rspack_import_9.YjP(),
+            delivery: zod__rspack_import_9.k5n([
                 'accepted',
                 'unknown'
             ]),
-            envelopeId: zod__rspack_import_8.YjP(),
-            exitCode: zod__rspack_import_8.euz(0),
-            hop: zod__rspack_import_8.aig().int().min(0),
-            id: zod__rspack_import_8.YjP(),
-            kind: zod__rspack_import_8.k5n([
+            envelopeId: zod__rspack_import_9.YjP(),
+            exitCode: zod__rspack_import_9.euz(0),
+            hop: zod__rspack_import_9.aig().int().min(0),
+            id: zod__rspack_import_9.YjP(),
+            kind: zod__rspack_import_9.k5n([
                 'bot',
                 'group'
             ]),
-            maxHops: zod__rspack_import_8.aig().int().min(0),
-            messageId: zod__rspack_import_8.YjP().optional(),
-            name: zod__rspack_import_8.YjP(),
-            replyTo: zod__rspack_import_8.YjP().optional(),
-            result: zod__rspack_import_8.g1P(zod__rspack_import_8.YjP(), zod__rspack_import_8.Pq9()),
-            roster: zod__rspack_import_8.euz('box').optional()
+            maxHops: zod__rspack_import_9.aig().int().min(0),
+            messageId: zod__rspack_import_9.YjP().optional(),
+            name: zod__rspack_import_9.YjP(),
+            replyTo: zod__rspack_import_9.YjP().optional(),
+            result: zod__rspack_import_9.g1P(zod__rspack_import_9.YjP(), zod__rspack_import_9.Pq9()),
+            roster: zod__rspack_import_9.euz('box').optional()
         }).strict();
-        const resultSchema = zod__rspack_import_8.KCZ([
+        const resultSchema = zod__rspack_import_9.KCZ([
             receiptSchema,
-            _shared_js__rspack_import_7.R9,
+            _shared_js__rspack_import_8.R9,
             _core_relay_routes_js__rspack_import_1.Ax
         ]);
         const messageFromInput = async (input)=>{
             const parts = input.message ?? [];
             if (input.stdin && parts.length > 0) {
-                throw new _core_store_js__rspack_import_6.AD('--stdin cannot be combined with a positional message.');
+                throw new _core_store_js__rspack_import_7.AD('--stdin cannot be combined with a positional message.');
             }
-            if (input.stdin) return (0, _core_stdin_message_js__rspack_import_5.iC)();
-            if (parts.length === 0) throw new _core_store_js__rspack_import_6.AD('gbot send <bot-or-group> <message> or --stdin');
+            if (input.stdin) return (0, _core_stdin_message_js__rspack_import_6.iC)();
+            if (parts.length === 0) throw new _core_store_js__rspack_import_7.AD('gbot send <bot-or-group> <message> or --stdin');
             return parts.join(' ').trim();
         };
         const deliver = async (input, message)=>{
@@ -10688,9 +10744,12 @@ var __webpack_modules__ = {
                 hop: input.hop,
                 replyTo: input.replyTo
             });
-            const backend = await (0, _shared_js__rspack_import_7.FS)(input);
-            const out = await backend.send(input.target, (0, _core_codex_bridge_js__rspack_import_2.Mr)(message, envelope));
-            (0, _core_history_js__rspack_import_4.QX)(out, {
+            const backend = await (0, _shared_js__rspack_import_8.FS)(input);
+            const out = await backend.send(input.target, (0, _core_sender_prefix_js__rspack_import_3.Xt)((0, _core_codex_bridge_js__rspack_import_2.Mr)(message, envelope), {
+                threadId: (0, _core_sender_prefix_js__rspack_import_3.Wh)(),
+                cwd: input.expectedCwd ?? process.cwd()
+            }));
+            (0, _core_history_js__rspack_import_5.QX)(out, {
                 dir: input.historyDir,
                 disabled: input.noHistory,
                 event: 'send',
@@ -10738,28 +10797,28 @@ var __webpack_modules__ = {
                         requestId: input.requestId,
                         hop: input.hop,
                         correlationId: input.correlationId
-                    }, await (0, _agent_bundle_runtime__rspack_import_9.MA)());
-                    return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Result, {
+                    }, await (0, _agent_bundle_runtime__rspack_import_10.MA)());
+                    return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_11.g.Result, {
                         value: {
                             ...out,
                             exitCode: out.delivery === 'rejected' ? 1 : 0
                         },
-                        children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Text, {
+                        children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_11.g.Text, {
                             children: `Delivery ${out.delivery}; inspect codex bridge status for automatic reply delivery.`
                         })
                     });
                 }
                 value = await deliver(input, message);
             } catch (error) {
-                value = (0, _core_codex_contract_js__rspack_import_3.DG)(error);
+                value = (0, _core_codex_contract_js__rspack_import_4.DG)(error);
             }
             const nonce = typeof value.clientNonce === 'string' && value.clientNonce.length > 0 ? value.clientNonce : undefined;
             const shownTarget = /[\s"]/.test(input.target) ? JSON.stringify(input.target) : input.target;
             const hint = nonce ? ` Confirm with gbot reconcile ${shownTarget} --nonce ${nonce}` : '';
             const text = value.exitCode === 0 ? value.delivery === 'unknown' && nonce ? `Sent to ${value.kind} ${value.name} (${value.id}); delivery unknown; nonce ${nonce}.${hint}` : `Sent to ${value.kind} ${value.name} (${value.id})${value.messageId ? ` message ${value.messageId}` : ''}; envelope ${value.envelopeId}` : value.delivery === 'unknown' && nonce ? `${value.error}\nnonce ${nonce}.${hint}` : value.error;
-            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Result, {
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_11.g.Result, {
                 value: value,
-                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_10.g.Text, {
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_11.g.Text, {
                     children: text
                 })
             });
@@ -15566,6 +15625,7 @@ var __webpack_modules__ = {
         var _codex_bridge_js__rspack_import_0 = __webpack_require__("./src/core/codex-bridge.js");
         var _contract_js__rspack_import_1 = __webpack_require__("./src/core/codex/contract.js");
         var _conversation_js__rspack_import_2 = __webpack_require__("./src/core/codex/conversation.js");
+        var _format_js__rspack_import_6 = __webpack_require__("./src/core/format.js");
         var _thread_id_js__rspack_import_4 = __webpack_require__("./src/core/codex/thread-id.js");
         const bareId = zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9_.:-]{1,128}$/);
         const id = zod__rspack_import_3.YjP().min(1).max(160).transform((value, ctx)=>{
@@ -15626,7 +15686,23 @@ var __webpack_modules__ = {
         }).strict();
         const threadsSchema = zod__rspack_import_3.Ikc({
             limit: zod__rspack_import_3.aig().int().min(1).max(200).default(20),
-            cursor: zod__rspack_import_3.YjP().min(1).max(4096).optional()
+            cursor: zod__rspack_import_3.YjP().min(1).max(4096).optional(),
+            sort: zod__rspack_import_3.k5n([
+                'updated',
+                'created',
+                'recency'
+            ]).default('updated'),
+            order: zod__rspack_import_3.k5n([
+                'desc',
+                'asc'
+            ]).default('desc'),
+            query: zod__rspack_import_3.YjP().trim().min(1).max(256).optional(),
+            activeWithin: zod__rspack_import_3.YjP().trim().regex(/^\d+(?:\.\d+)?\s*[smhdw]$/i, 'use a duration like 30m, 12h, 7d or 2w').optional(),
+            since: zod__rspack_import_3.YjP().trim().min(1).max(64).optional(),
+            cwd: zod__rspack_import_3.YjP().min(1).max(4096).optional(),
+            modelProvider: zod__rspack_import_3.YjP().min(1).max(256).optional(),
+            archived: zod__rspack_import_3.zMY().optional(),
+            sourceKind: zod__rspack_import_3.YjP().min(1).max(64).optional()
         }).strict();
         const resultSchema = zod__rspack_import_3.Ikc({
             exitCode: zod__rspack_import_3.aig().int().min(0).max(1),
@@ -15786,8 +15862,16 @@ var __webpack_modules__ = {
         }
         async function threadsOperation(input) {
             try {
+                const { sourceKind, ...rest } = input;
                 return {
-                    ...await listCodexThreads(input),
+                    ...await listCodexThreads({
+                        ...rest,
+                        ...sourceKind ? {
+                            sourceKinds: [
+                                sourceKind
+                            ]
+                        } : {}
+                    }),
                     exitCode: 0
                 };
             } catch (error) {
@@ -15801,7 +15885,10 @@ var __webpack_modules__ = {
             if (result.delivery === 'accepted') return `Started turn ${result.turnId} (${result.turnStatus}) on Codex thread ${result.threadId}; message ${result.messageId}`;
             if (result.delivery) return `Codex delivery ${result.delivery} on thread ${result.threadId}`;
             if (result.reason) return `Codex observation: ${result.reason}`;
-            if (Array.isArray(result.threads)) return `${result.threads.length} Codex threads`;
+            if (Array.isArray(result.threads)) {
+                const rows = result.threads.map((t)=>(0, _format_js__rspack_import_6.nz)(t)).join('\n\n');
+                return `${result.threads.length} Codex threads (sort ${String(result.sort ?? 'updated')} ${String(result.order ?? 'desc')})${result.nextCursor ? `; more: pass cursor ${JSON.stringify(result.nextCursor)}` : ''}${rows ? `\n\n${rows}` : ''}`;
+            }
             return String(result.error ?? 'Codex observation complete');
         }
         __webpack_require__.d(__webpack_exports__, {
@@ -15810,6 +15897,7 @@ var __webpack_modules__ = {
             gT: ()=>observeOperation
         }, {
             FD: resultSchema,
+            P3: threadsSchema,
             R9: watchSchema,
             at: sendFields,
             jS: waitSchema
@@ -15856,69 +15944,70 @@ var __webpack_modules__ = {
         });
     },
     "./src/core/relay/routes.ts" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
-        var _agent_bundle_runtime__rspack_import_5 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/40.js");
-        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/40.js");
+        var zod__rspack_import_5 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
         var _managed_js__rspack_import_0 = __webpack_require__("./src/core/relay/managed.js");
         var _gbot_js__rspack_import_1 = __webpack_require__("./src/gbot.ts");
         var _codex_bridge_js__rspack_import_2 = __webpack_require__("./src/core/codex-bridge.js");
         var _logins_js__rspack_import_3 = __webpack_require__("./src/core/logins.js");
-        const id = zod__rspack_import_4.YjP().min(1).max(128);
+        var _sender_prefix_js__rspack_import_4 = __webpack_require__("./src/core/sender-prefix.js");
+        const id = zod__rspack_import_5.YjP().min(1).max(128);
         const routeFields = {
             codexThreadId: id.optional(),
-            expectedCwd: zod__rspack_import_4.YjP().min(1).max(4096).optional(),
-            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
+            expectedCwd: zod__rspack_import_5.YjP().min(1).max(4096).optional(),
+            bindingId: zod__rspack_import_5.YjP().min(1).max(512).optional(),
             requestId: id.optional()
         };
-        const grokSendSchema = zod__rspack_import_4.Ikc({
-            target: zod__rspack_import_4.YjP().min(1),
-            message: zod__rspack_import_4.YjP().min(1),
-            replyMode: zod__rspack_import_4.k5n([
+        const grokSendSchema = zod__rspack_import_5.Ikc({
+            target: zod__rspack_import_5.YjP().min(1),
+            message: zod__rspack_import_5.YjP().min(1),
+            replyMode: zod__rspack_import_5.k5n([
                 "auto",
                 "manual"
             ]).optional(),
-            hop: zod__rspack_import_4.aig().int().min(0).optional(),
+            hop: zod__rspack_import_5.aig().int().min(0).optional(),
             correlationId: id.optional(),
             ...routeFields
         }).strict();
-        const bridgeStartSchema = zod__rspack_import_4.Ikc({
-            grokTarget: zod__rspack_import_4.YjP().min(1),
+        const bridgeStartSchema = zod__rspack_import_5.Ikc({
+            grokTarget: zod__rspack_import_5.YjP().min(1),
             codexThreadId: id.optional(),
-            expectedCwd: zod__rspack_import_4.YjP().min(1).max(4096).optional(),
-            busyPolicy: zod__rspack_import_4.k5n([
+            expectedCwd: zod__rspack_import_5.YjP().min(1).max(4096).optional(),
+            busyPolicy: zod__rspack_import_5.k5n([
                 "steer",
                 "reject"
             ]).optional(),
             requestId: id.optional()
         }).strict();
-        const bridgeStatusSchema = zod__rspack_import_4.Ikc({
-            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
-            limit: zod__rspack_import_4.aig().int().min(1).max(100).optional()
+        const bridgeStatusSchema = zod__rspack_import_5.Ikc({
+            bindingId: zod__rspack_import_5.YjP().min(1).max(512).optional(),
+            limit: zod__rspack_import_5.aig().int().min(1).max(100).optional()
         }).strict();
-        const bridgeStopSchema = zod__rspack_import_4.Ikc({
-            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
-            all: zod__rspack_import_4.zMY().optional(),
-            worker: zod__rspack_import_4.zMY().optional()
+        const bridgeStopSchema = zod__rspack_import_5.Ikc({
+            bindingId: zod__rspack_import_5.YjP().min(1).max(512).optional(),
+            all: zod__rspack_import_5.zMY().optional(),
+            worker: zod__rspack_import_5.zMY().optional()
         }).strict().refine((x)=>!!x.bindingId || x.all === true || x.worker === true, "Specify bindingId, all or worker");
-        const respondSchema = zod__rspack_import_4.Ikc({
-            interactionId: zod__rspack_import_4.YjP().min(1).max(512),
+        const respondSchema = zod__rspack_import_5.Ikc({
+            interactionId: zod__rspack_import_5.YjP().min(1).max(512),
             generation: id,
             threadId: id,
             turnId: id,
-            bindingId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
-            exchangeId: zod__rspack_import_4.YjP().min(1).max(512).optional(),
-            decision: zod__rspack_import_4.k5n([
+            bindingId: zod__rspack_import_5.YjP().min(1).max(512).optional(),
+            exchangeId: zod__rspack_import_5.YjP().min(1).max(512).optional(),
+            decision: zod__rspack_import_5.k5n([
                 "accept",
                 "decline",
                 "cancel"
             ]).optional(),
-            answersJson: zod__rspack_import_4.YjP().min(2).max(65536).optional()
+            answersJson: zod__rspack_import_5.YjP().min(2).max(65536).optional()
         }).strict().refine((x)=>!!x.bindingId || !!x.exchangeId, "Binding or exchange scope required").refine((x)=>!!x.decision !== !!x.answersJson, "Supply decision or answersJson");
-        const answersSchema = zod__rspack_import_4.g1P(zod__rspack_import_4.YjP().min(1).max(128), zod__rspack_import_4.Ikc({
-            answers: zod__rspack_import_4.YOg(zod__rspack_import_4.YjP().max(8192)).max(20)
+        const answersSchema = zod__rspack_import_5.g1P(zod__rspack_import_5.YjP().min(1).max(128), zod__rspack_import_5.Ikc({
+            answers: zod__rspack_import_5.YOg(zod__rspack_import_5.YjP().max(8192)).max(20)
         }).strict());
-        const relayResultSchema = zod__rspack_import_4.g1P(zod__rspack_import_4.YjP(), zod__rspack_import_4.Pq9());
+        const relayResultSchema = zod__rspack_import_5.g1P(zod__rspack_import_5.YjP(), zod__rspack_import_5.Pq9());
         function nativeCodexThread(context) {
-            return context.host.state === "available" && (0, _agent_bundle_runtime__rspack_import_5.bg)(context.host.value.name) === "codex" && context.lineage.state === "available" && context.lineage.source === "native" && context.lineage.value.resolution === "native" ? context.lineage.value.conversation : undefined;
+            return context.host.state === "available" && (0, _agent_bundle_runtime__rspack_import_6.bg)(context.host.value.name) === "codex" && context.lineage.state === "available" && context.lineage.source === "native" && context.lineage.value.resolution === "native" ? context.lineage.value.conversation : undefined;
         }
         function options(context) {
             return {
@@ -15951,7 +16040,11 @@ var __webpack_modules__ = {
                     } : {}
                 }, options(context)));
             if (input.replyMode === "auto") throw Error("Automatic reply delivery requires a native Codex source, codexThreadId or bindingId");
-            const message = input.hop !== undefined || input.correlationId !== undefined ? (0, _codex_bridge_js__rspack_import_2.Mr)(input.message, (0, _codex_bridge_js__rspack_import_2.nq)(input)) : input.message;
+            const stamped = input.hop !== undefined || input.correlationId !== undefined ? (0, _codex_bridge_js__rspack_import_2.Mr)(input.message, (0, _codex_bridge_js__rspack_import_2.nq)(input)) : input.message;
+            const message = (0, _sender_prefix_js__rspack_import_4.Xt)(stamped, {
+                threadId: route.codexThreadId,
+                cwd: route.expectedCwd
+            });
             const sent = await (0, _gbot_js__rspack_import_1.yF)(async ()=>(0, _gbot_js__rspack_import_1.LV)(await (0, _gbot_js__rspack_import_1.Vq)({
                     account: (0, _logins_js__rspack_import_3.SH)() || undefined
                 }), input.target, message));
@@ -15993,7 +16086,7 @@ var __webpack_modules__ = {
         }
         async function codexReturnOperation(input, context) {
             assertManagedSendOptions(input);
-            if (input.whenBusy === "queue") throw Error("Managed relay supports steer or reject, not experimental queue");
+            if (input.whenBusy === "queue") throw Error("--when-busy queue is not available with --reply-to-grok / bindingId: Codex's thread queue is experimental and cannot carry the managed Grok return route. " + "Omit --when-busy (default: an active turn is steered with a guarded steer, an idle thread starts a new turn), pass --when-busy steer to say so explicitly, " + "or --when-busy reject to fail instead of steering a busy thread.");
             return (0, _gbot_js__rspack_import_1.yF)(()=>(0, _managed_js__rspack_import_0.Bb)("sendToCodex", {
                     grokTarget: input.replyToGrok,
                     codexThreadId: input.threadId,
@@ -44563,9 +44656,25 @@ var __webpack_modules__ = {
                     },
                     {
                         "aliases": [],
-                        "description": "List Codex daemon-managed threads (all modelProviders; pages via --cursor / nextCursor).",
+                        "description": "List Codex daemon-managed threads, newest activity first (all modelProviders; pages via --cursor / nextCursor). Find old threads with --query (name/title/id prefix, all pages), --active-within 7d, --since, --sort created.",
                         "exitCode": "result",
                         "options": [
+                            {
+                                "description": "Only threads updated within 90s, 30m, 12h, 7d, 2w",
+                                "key": "activeWithin",
+                                "kind": "string",
+                                "option": "active-within",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Archived threads only",
+                                "key": "archived",
+                                "kind": "boolean",
+                                "option": "archived",
+                                "repeated": false,
+                                "required": false
+                            },
                             {
                                 "description": "Opaque pagination cursor from a previous nextCursor (may start with -)",
                                 "key": "cursor",
@@ -44575,11 +44684,77 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
+                                "description": "Exact session cwd",
+                                "key": "cwd",
+                                "kind": "string",
+                                "option": "cwd",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
                                 "defaultValue": 20,
                                 "description": "Max threads to list (1-200)",
                                 "key": "limit",
                                 "kind": "number",
                                 "option": "limit",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Any modelProvider id; omit for all",
+                                "key": "modelProvider",
+                                "kind": "string",
+                                "option": "model-provider",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "choices": [
+                                    "desc",
+                                    "asc"
+                                ],
+                                "defaultValue": "desc",
+                                "key": "order",
+                                "kind": "enum",
+                                "option": "order",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Case-insensitive substring of name/title, preview or id (id prefix works); scans every page",
+                                "key": "query",
+                                "kind": "string",
+                                "option": "query",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Only threads updated at/after this ISO date/time or epoch seconds",
+                                "key": "since",
+                                "kind": "string",
+                                "option": "since",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "choices": [
+                                    "updated",
+                                    "created",
+                                    "recency"
+                                ],
+                                "defaultValue": "updated",
+                                "description": "updated (last activity, default) | created | recency",
+                                "key": "sort",
+                                "kind": "enum",
+                                "option": "sort",
+                                "repeated": false,
+                                "required": false
+                            },
+                            {
+                                "description": "Any app-server source kind; omit for interactive sources",
+                                "key": "sourceKind",
+                                "kind": "string",
+                                "option": "source-kind",
                                 "repeated": false,
                                 "required": false
                             }
@@ -48884,7 +49059,8 @@ var __webpack_modules__ = {
                 expectedCwd: resolvedCwd,
                 model,
                 effort,
-                signal
+                signal,
+                freshThreadCwd: resolvedCwd
             });
         }
         const CODEX_VERSION_PROBE_TIMEOUT_MS = 3000;
@@ -49049,7 +49225,52 @@ var __webpack_modules__ = {
             };
         }
         const THREAD_LIST_MAX_LIMIT = 200;
-        async function listCodexThreads1({ limit = 20, cursor, modelProviders = [], env = process.env } = {}) {
+        const THREAD_SORT_KEYS = {
+            updated: "updated_at",
+            created: "created_at",
+            recency: "recency_at"
+        };
+        const GBOT_CURSOR = "gbot1:";
+        const DURATION_MS = {
+            s: 1000,
+            m: 60000,
+            h: 3600000,
+            d: 86400000,
+            w: 604800000
+        };
+        const toSeconds = (value)=>value > 1e11 ? value / 1000 : value;
+        function parseActiveWithin(text) {
+            const m = /^(\d+(?:\.\d+)?)\s*([smhdw])$/i.exec(String(text).trim());
+            if (!m) throw new RangeError("--active-within must look like 30m, 12h, 7d or 2w");
+            return Number(m[1]) * DURATION_MS[m[2].toLowerCase()];
+        }
+        function parseSince(value) {
+            const text = String(value).trim();
+            const n = /^\d+(?:\.\d+)?$/.test(text) ? toSeconds(Number(text)) : Date.parse(text) / 1000;
+            if (!Number.isFinite(n)) throw new RangeError("--since must be an ISO date/time or epoch seconds");
+            return n;
+        }
+        function encodeThreadCursor(state) {
+            return GBOT_CURSOR + Buffer.from(JSON.stringify(state)).toString("base64url");
+        }
+        function decodeThreadCursor(cursor) {
+            if (cursor === undefined) return {
+                skip: 0
+            };
+            if (!cursor.startsWith(GBOT_CURSOR)) return {
+                c: cursor,
+                skip: 0
+            };
+            try {
+                const v = JSON.parse(Buffer.from(cursor.slice(GBOT_CURSOR.length), "base64url").toString("utf8"));
+                if (isObject(v) && Number.isInteger(v.skip) && v.skip >= 0 && (v.c === undefined || typeof v.c === "string")) return {
+                    c: v.c,
+                    skip: v.skip
+                };
+            } catch  {}
+            throw new RangeError("--cursor is not a valid thread cursor");
+        }
+        async function listCodexThreads1({ limit = 20, cursor, modelProviders = [], modelProvider, sort = "updated", order: order1 = "desc", query, since, activeWithin, cwd, archived, sourceKinds, now = Date.now(), env = process.env } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > THREAD_LIST_MAX_LIMIT) {
                 throw new RangeError("--limit must be an integer 1-" + THREAD_LIST_MAX_LIMIT);
             }
@@ -49057,45 +49278,125 @@ var __webpack_modules__ = {
             if (!Array.isArray(modelProviders) || modelProviders.some((p)=>typeof p !== "string")) {
                 throw new RangeError("modelProviders must be an array of strings (empty = all providers)");
             }
+            if (!Object.hasOwn(THREAD_SORT_KEYS, sort)) throw new RangeError("--sort must be one of: " + Object.keys(THREAD_SORT_KEYS).join(", "));
+            if (order1 !== "asc" && order1 !== "desc") throw new RangeError("--order must be asc or desc");
+            if (query !== undefined && (typeof query !== "string" || !query.trim())) throw new RangeError("--query must be a non-empty string");
+            if (sourceKinds !== undefined && (!Array.isArray(sourceKinds) || sourceKinds.some((k)=>typeof k !== "string" || !k))) {
+                throw new RangeError("--source-kind must be a non-empty string");
+            }
+            const providers = modelProvider ? [
+                ...modelProviders,
+                modelProvider
+            ] : modelProviders;
+            const needle = query?.trim().toLowerCase();
+            const cutoffs = [];
+            if (since !== undefined) cutoffs.push(parseSince(since));
+            if (activeWithin !== undefined) cutoffs.push((now - parseActiveWithin(activeWithin)) / 1000);
+            const cutoff = cutoffs.length ? Math.max(...cutoffs) : undefined;
+            const clientSide = needle !== undefined || cutoff !== undefined;
+            const activityOf = (t)=>typeof t.updatedAt === "number" ? toSeconds(t.updatedAt) : typeof t.createdAt === "number" ? toSeconds(t.createdAt) : null;
+            const keep = (t)=>{
+                if (cutoff !== undefined) {
+                    const at = activityOf(t);
+                    if (at === null || at < cutoff) return false;
+                }
+                if (needle !== undefined && ![
+                    t.name,
+                    t.preview,
+                    t.id
+                ].some((f)=>typeof f === "string" && f.toLowerCase().includes(needle))) return false;
+                return true;
+            };
+            const pageSize = clientSide ? THREAD_LIST_MAX_LIMIT : limit;
+            const start = decodeThreadCursor(cursor);
             const { client } = await openSession(env);
             try {
                 const baseParams = {
-                    limit,
-                    modelProviders,
-                    ...cursor !== undefined ? {
-                        cursor
+                    limit: pageSize,
+                    modelProviders: providers,
+                    sortKey: THREAD_SORT_KEYS[sort],
+                    ...order1 === "asc" ? {
+                        sortDirection: "asc"
+                    } : {},
+                    ...cwd ? {
+                        cwd
+                    } : {},
+                    ...archived === true ? {
+                        archived: true
+                    } : {},
+                    ...sourceKinds?.length ? {
+                        sourceKinds
                     } : {}
                 };
-                let out;
-                let usedStateDbOnly = true;
-                try {
-                    out = await client.request("thread/list", {
-                        ...baseParams,
-                        useStateDbOnly: true
-                    });
-                } catch (err) {
-                    throw transportError(err);
-                }
-                if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
-                if (out.data.length === 0 && cursor === undefined && (out.nextCursor == null || out.nextCursor === "")) {
+                const fetchPage = async (pageCursor, useStateDbOnly)=>{
                     try {
-                        out = await client.request("thread/list", {
+                        return await client.request("thread/list", {
                             ...baseParams,
-                            useStateDbOnly: false
+                            ...pageCursor !== undefined ? {
+                                cursor: pageCursor
+                            } : {},
+                            useStateDbOnly
                         });
-                        usedStateDbOnly = false;
                     } catch (err) {
                         throw transportError(err);
                     }
+                };
+                const checkPage = (out)=>{
                     if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
+                    if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
+                };
+                const threads = [];
+                let usedStateDbOnly = true;
+                let scanned = 0;
+                let nextCursor = null;
+                let pageCursor = start.c;
+                let skip = start.skip;
+                for(;;){
+                    let out = await fetchPage(pageCursor, true);
+                    checkPage(out);
+                    if (out.data.length === 0 && pageCursor === undefined && (out.nextCursor == null || out.nextCursor === "")) {
+                        out = await fetchPage(pageCursor, false);
+                        usedStateDbOnly = false;
+                        checkPage(out);
+                    }
+                    const rows = out.data.map(summarizeThread);
+                    scanned += rows.length;
+                    let matches = rows.filter(keep);
+                    const pageSkip = skip;
+                    if (skip) {
+                        matches = matches.slice(skip);
+                        skip = 0;
+                    }
+                    const need = limit - threads.length;
+                    if (matches.length > need) {
+                        threads.push(...matches.slice(0, need));
+                        nextCursor = encodeThreadCursor({
+                            ...pageCursor !== undefined ? {
+                                c: pageCursor
+                            } : {},
+                            skip: pageSkip + need
+                        });
+                        break;
+                    }
+                    threads.push(...matches);
+                    const more = out.nextCursor || null;
+                    const last = rows[rows.length - 1];
+                    const pastCutoff = cutoff !== undefined && sort === "updated" && order1 === "desc" && last !== undefined && (activityOf(last) ?? -Infinity) < cutoff;
+                    if (!more || pastCutoff) break;
+                    if (threads.length >= limit) {
+                        nextCursor = more;
+                        break;
+                    }
+                    pageCursor = more;
                 }
-                if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
-                const threads = out.data.map(summarizeThread);
                 return {
                     threads,
-                    nextCursor: out.nextCursor ?? null,
+                    nextCursor,
                     limit,
-                    useStateDbOnly: usedStateDbOnly
+                    useStateDbOnly: usedStateDbOnly,
+                    sort,
+                    order: order1,
+                    scanned
                 };
             } finally{
                 client.close();
@@ -49352,7 +49653,7 @@ var __webpack_modules__ = {
         }
         async function sendToCodexThread(threadId, text, { env = process.env, envelope = buildEnvelope({
             env
-        }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal } = {}) {
+        }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd } = {}) {
             try {
                 const receipt = await sendToCodexThreadInner(threadId, text, {
                     env,
@@ -49363,7 +49664,8 @@ var __webpack_modules__ = {
                     expectedCwd,
                     model,
                     effort,
-                    signal
+                    signal,
+                    freshThreadCwd
                 });
                 return (0, _codex_contract_js__rspack_import_7.Dz)(receipt);
             } catch (err) {
@@ -49385,7 +49687,7 @@ var __webpack_modules__ = {
                 "xhigh"
             ].includes(effort)) throw new RangeError("--effort must be none, minimal, low, medium, high, or xhigh");
         }
-        async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal }) {
+        async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd }) {
             validateModelEffort(model, effort);
             if (![
                 "reject",
@@ -49444,15 +49746,30 @@ var __webpack_modules__ = {
                     });
                 } catch (err) {
                     assertNotCancelled();
-                    if (err instanceof CodexSendError || err instanceof _codex_remote_control_js__rspack_import_8.Rg) throw err;
-                    const explained = explainSendError(err, threadId, env);
-                    if (explained instanceof _codex_remote_control_js__rspack_import_8.Rg) throw explained;
-                    throw new CodexSendError(explained.message, {
-                        delivery: err instanceof CodexRpcError ? "rejected" : err && err.delivery || "unknown",
-                        reason: err instanceof CodexRpcError ? /no rollout found|thread not found/i.test(String(err.rpc && err.rpc.message)) ? "unknown-thread" : /active writer/i.test(String(err.rpc && err.rpc.message)) ? "external-owner" : "rejected" : "transport",
-                        threadId,
-                        ...envelope
-                    });
+                    if (freshThreadCwd !== undefined && err instanceof CodexRpcError && /no rollout found/i.test(String(err.rpc && err.rpc.message))) {
+                        resumed = {
+                            thread: {
+                                id: threadId,
+                                status: {
+                                    type: "idle"
+                                }
+                            },
+                            cwd: freshThreadCwd,
+                            ...model ? {
+                                model
+                            } : {}
+                        };
+                    } else {
+                        if (err instanceof CodexSendError || err instanceof _codex_remote_control_js__rspack_import_8.Rg) throw err;
+                        const explained = explainSendError(err, threadId, env);
+                        if (explained instanceof _codex_remote_control_js__rspack_import_8.Rg) throw explained;
+                        throw new CodexSendError(explained.message, {
+                            delivery: err instanceof CodexRpcError ? "rejected" : err && err.delivery || "unknown",
+                            reason: err instanceof CodexRpcError ? /no rollout found|thread not found/i.test(String(err.rpc && err.rpc.message)) ? "unknown-thread" : /active writer/i.test(String(err.rpc && err.rpc.message)) ? "external-owner" : "rejected" : "transport",
+                            threadId,
+                            ...envelope
+                        });
+                    }
                 }
                 assertNotCancelled();
                 if (!isObject(resumed) || !isObject(resumed.thread) || typeof resumed.thread.id !== "string") {
@@ -50564,7 +50881,7 @@ var __webpack_modules__ = {
         });
     },
     "./src/core/desktop-shim-bridge.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
-        const BRIDGE_SOURCE = "#!/usr/bin/env python3\n\"\"\"Stdio JSONL (Desktop) <-> WebSocket-over-unix (managed app-server daemon).\nReversible: remove CODEX_CLI_PATH wrapper. Does not read Desktop private pipes.\n\"\"\"\nfrom __future__ import annotations\nimport base64, hashlib, json, os, select, socket, struct, sys, threading, time\n\nSOCK = os.environ.get(\n    \"CODEX_APP_SERVER_SOCK\",\n    os.path.expanduser(\"~/.codex/app-server-control/app-server-control.sock\"),\n)\nLOG = os.environ.get(\"CODEX_STDIO_BRIDGE_LOG\", os.path.expanduser(\"~/.codex/bin/codex-stdio-to-daemon-ws.log\"))\nWS_GUID = \"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\"\n\n# Wrapper contract: 0 served the session, 1 failed while stdio was still\n# pristine -- no stdin byte consumed and no stdout frame committed (wrapper\n# falls back to real Codex), 2 failed mid-session (wrapper exits promptly so\n# Desktop reconnects; the fallback must never run on half-consumed stdin or\n# dirty stdout).\nEXIT_SERVED = 0\nEXIT_PRE_STDIO = 1\nEXIT_MID_SESSION = 2\n\nCONNECT_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_CONNECT_TIMEOUT\", \"10\"))\n# Bound from connect to the matching first daemon response: a daemon that\n# completes the upgrade but never answers the first RPC must not hold Desktop\n# past this. Only the matching initialize response/error (or the deadline\n# itself) clears it; notifications never do.\nFIRST_MESSAGE_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_FIRST_MESSAGE_TIMEOUT\", \"30\"))\n# Bound on every mid-session socket send and stdout write: a wedged or\n# non-reading peer must not hang Desktop past this. Reads after a successful\n# init block with no timeout so healthy idle sessions survive silence.\nIO_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_IO_TIMEOUT\", \"30\"))\n\ndef log(msg: str) -> None:\n    try:\n        with open(LOG, \"a\") as f:\n            f.write(time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()) + \" \" + msg + \"\\n\")\n    except OSError:\n        pass\n\ndef ws_connect(path: str, timeout: float = CONNECT_TIMEOUT_S):\n    \"\"\"Connect + HTTP upgrade under one absolute monotonic deadline.\n\n    Returns (socket, trailing) where trailing holds bytes coalesced after the\n    upgrade headers (TCP may deliver the 101 and the first WS frame together;\n    discarding them would lose the first message). Requires HTTP/1.1 101 plus\n    a matching Sec-WebSocket-Accept so a 200 (or any non-101) fails fast even\n    when the accept hash happens to be valid.\n    \"\"\"\n    deadline = time.monotonic() + timeout\n    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n    s.settimeout(timeout)\n    try:\n        s.connect(path)\n        key = base64.b64encode(os.urandom(16)).decode()\n        expected = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()\n        req = (\n            f\"GET /rpc HTTP/1.1\\r\\nHost: localhost\\r\\nUpgrade: websocket\\r\\n\"\n            f\"Connection: Upgrade\\r\\nSec-WebSocket-Key: {key}\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n\"\n        ).encode()\n        s.settimeout(max(0.0, deadline - time.monotonic()))\n        s.sendall(req)\n        buf = b\"\"\n        while True:\n            if b\"\\r\\n\\r\\n\" in buf:\n                break\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise TimeoutError(\"WebSocket upgrade timed out\")\n            if len(buf) > 65536:\n                raise ConnectionError(\"WS upgrade headers too large\")\n            s.settimeout(remaining)\n            chunk = s.recv(4096)\n            if not chunk:\n                raise ConnectionError(\"daemon closed during WS upgrade\")\n            buf += chunk\n        head, _, trailing = buf.partition(b\"\\r\\n\\r\\n\")\n        lines = head.split(b\"\\r\\n\")\n        if not lines or lines[0].split(b\" \", 2)[:2] != [b\"HTTP/1.1\", b\"101\"]:\n            raise ConnectionError(f\"WS upgrade failed: {head[:200]!r}\")\n        accept = None\n        for line in lines[1:]:\n            name, sep, value = line.partition(b\":\")\n            if sep and name.strip().lower() == b\"sec-websocket-accept\":\n                accept = value.strip().decode(\"latin-1\")\n        if accept != expected:\n            raise ConnectionError(\"WS upgrade accept mismatch\")\n    except Exception:\n        try:\n            s.close()\n        except OSError:\n            pass\n        raise\n    # Keep one socket mode across reader and writer threads. Reads wait\n    # indefinitely in select; sends use their own absolute deadline.\n    s.setblocking(False)\n    return s, trailing\n\ndef mask_send(sock: socket.socket, payload: bytes, opcode: int = 1, deadline=None) -> None:\n    mask = os.urandom(4)\n    ln = len(payload)\n    if ln < 126:\n        hdr = bytes([0x80 | opcode, 0x80 | ln])\n    elif ln < 65536:\n        hdr = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(\"!H\", ln)\n    else:\n        hdr = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(\"!Q\", ln)\n    view = memoryview(hdr + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))\n    while view:\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise TimeoutError(\"socket write timed out\")\n        _, writable, _ = select.select([], [sock], [], remaining)\n        if not writable:\n            raise TimeoutError(\"socket write timed out\")\n        try:\n            n = sock.send(view)\n        except BlockingIOError:\n            continue\n        if not n:\n            raise ConnectionError(\"socket closed during write\")\n        view = view[n:]\n\ndef locked_send(sock: socket.socket, lock: threading.Lock, payload: bytes, opcode: int = 1, timeout: float = CONNECT_TIMEOUT_S) -> None:\n    \"\"\"Serialized send sharing one monotonic budget across lock wait + send.\n\n    A non-reading peer must never wedge pong writes or timeout cleanup: on\n    expiry raise TimeoutError so the caller closes and exits without hanging.\n    \"\"\"\n    if timeout is None:\n        timeout = CONNECT_TIMEOUT_S\n    deadline = time.monotonic() + timeout\n    if timeout <= 0:\n        raise TimeoutError(\"send budget expired\")\n    if not lock.acquire(timeout=timeout):\n        raise TimeoutError(\"send lock timed out\")\n    try:\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise TimeoutError(\"send budget expired\")\n        mask_send(sock, payload, opcode=opcode, deadline=deadline)\n    finally:\n        lock.release()\n\ndef _buffered_reader(sock: socket.socket, initial: bytes = b\"\"):\n    buf = bytearray(initial)\n    def recv(n):\n        while len(buf) < n:\n            select.select([sock], [], [])\n            try:\n                chunk = sock.recv(n - len(buf))\n            except BlockingIOError:\n                continue\n            if not chunk:\n                raise ConnectionError(\"eof\")\n            buf.extend(chunk)\n        out = bytes(buf[:n])\n        del buf[:n]\n        return out\n    return recv\n\ndef read_frame(recv):\n    hdr = recv(2)\n    fin = bool(hdr[0] & 0x80)\n    opcode = hdr[0] & 0x0F\n    masked = bool(hdr[1] & 0x80)\n    ln = hdr[1] & 0x7F\n    if ln == 126:\n        ln = struct.unpack(\"!H\", recv(2))[0]\n    elif ln == 127:\n        ln = struct.unpack(\"!Q\", recv(8))[0]\n    mask = recv(4) if masked else b\"\"\n    payload = recv(ln)\n    if masked:\n        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))\n    return fin, opcode, payload\n\ndef read_message(recv, send_pong):\n    \"\"\"Next complete data message, assembling continuation frames.\n\n    Control frames are handled inline (pong answered, close reported) so a\n    fragmented message split around a ping still reassembles.\n    \"\"\"\n    opcode = None\n    parts = []\n    while True:\n        fin, op, payload = read_frame(recv)\n        if op == 0x8:\n            return (\"close\", None, b\"\")\n        if op == 0x9:\n            send_pong(payload)\n            continue\n        if op == 0xA:\n            continue\n        if op in (0x1, 0x2):\n            if opcode is not None:\n                raise ConnectionError(\"data frame inside fragmented message\")\n            if fin:\n                return (\"data\", op, payload)\n            opcode = op\n            parts.append(payload)\n            continue\n        if op == 0x0:\n            if opcode is None:\n                raise ConnectionError(\"stray continuation frame\")\n            parts.append(payload)\n            if fin:\n                return (\"data\", opcode, b\"\".join(parts))\n            continue\n        raise ConnectionError(f\"unsupported opcode {op}\")\n\ndef _is_daemon_response(payload: bytes, expect_id=None, known_ids=None) -> bool:\n    \"\"\"True only for the matching JSON-RPC response/error, never a notification.\n\n    The first-RPC timer must survive unrelated daemon notifications and foreign\n    responses: only the response/error whose id matches the client's initialize\n    (or, before it is known, any id the client already sent) proves the first\n    RPC got an answer. Timeouts clear it via the deadline, never via data.\n    \"\"\"\n    try:\n        text = payload.decode(\"utf-8\").strip()\n        msg = json.loads(text)\n    except Exception:\n        return False\n    if not isinstance(msg, dict):\n        return False\n    rid = msg.get(\"id\")\n    if rid is None or \"method\" in msg or (\"result\" not in msg and \"error\" not in msg):\n        return False\n    if expect_id is not None:\n        return rid == expect_id\n    if known_ids:\n        return rid in known_ids\n    return False\n\ndef _bounded_stdout_write(data: bytes, timeout: float = IO_TIMEOUT_S) -> None:\n    \"\"\"Write one daemon frame to stdout without hanging on a non-reading peer.\n\n    Waits for writability under the mid-session write budget and writes via\n    os.write in a loop, so a Desktop that stopped reading cannot hang the\n    bridge and then exit 1 on dirty stdout.\n    \"\"\"\n    if timeout is None:\n        timeout = IO_TIMEOUT_S\n    if timeout <= 0:\n        raise TimeoutError(\"stdout budget expired\")\n    fd = sys.stdout.fileno()\n    deadline = time.monotonic() + timeout\n    was_blocking = os.get_blocking(fd)\n    os.set_blocking(fd, False)\n    try:\n        view = memoryview(data)\n        while view:\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise TimeoutError(\"stdout write timed out\")\n            _, writable, _ = select.select([], [fd], [], remaining)\n            if not writable:\n                raise TimeoutError(\"stdout write timed out\")\n            try:\n                n = os.write(fd, view)\n            except BlockingIOError:\n                continue\n            view = view[n:]\n    finally:\n        os.set_blocking(fd, was_blocking)\n\ndef stdout_writer(sock: socket.socket, recv, send_pong, done: threading.Event, first_msg: threading.Event, output_forwarded: threading.Event, client_ids=None, init_state=None) -> None:\n    try:\n        while True:\n            kind, opcode, payload = read_message(recv, send_pong)\n            if kind == \"close\":\n                log(\"daemon WS close\")\n                return\n            if opcode == 0x1:\n                # Desktop StdioConnection expects newline-delimited JSON text\n                if not payload.endswith(b\"\\n\"):\n                    payload += b\"\\n\"\n            # Commit BEFORE writing: once a daemon byte is about to hit\n            # stdout, the session is dirty and the fallback must never run,\n            # even if the write itself blocks or fails.\n            output_forwarded.set()\n            _bounded_stdout_write(payload)\n            if opcode == 0x1:\n                expect = (init_state or {}).get(\"initialize_id\") if isinstance(init_state, dict) else None\n                if _is_daemon_response(payload, expect, client_ids or ()):\n                    first_msg.set()\n    except Exception as e:\n        log(f\"stdout_writer exit: {e}\")\n    finally:\n        done.set()\n\ndef main() -> int:\n    log(f\"start sock={SOCK}\")\n    try:\n        sock, pending = ws_connect(SOCK)\n    except Exception as e:\n        log(f\"connect failed: {e}\")\n        sys.stderr.write(f\"codex-stdio-to-daemon-ws: {e}\\n\")\n        return EXIT_PRE_STDIO\n    log(\"connected\")\n    connected_at = time.monotonic()\n    first_deadline = connected_at + FIRST_MESSAGE_TIMEOUT_S\n    send_lock = threading.Lock()\n    done = threading.Event()\n    first_msg = threading.Event()\n    output_forwarded = threading.Event()\n    client_ids = set()\n    init_state = {\"initialize_id\": None}\n\n    def _send_timeout() -> float:\n        # Before the first matching daemon response the remaining first-RPC\n        # budget bounds every send; after it each send gets the mid-session\n        # write budget. Idle reads are never timed out.\n        if not first_msg.is_set():\n            return max(0.0, first_deadline - time.monotonic())\n        return IO_TIMEOUT_S\n\n    def _cleanup_timeout() -> float:\n        # Timeout cleanup stays within the expired session budget: once the\n        # first-RPC deadline has passed, close directly instead of opening\n        # fresh windows that let a short budget take several timeout periods.\n        if not first_msg.is_set():\n            return max(0.0, first_deadline - time.monotonic())\n        return CONNECT_TIMEOUT_S\n\n    def send_pong(payload: bytes) -> None:\n        locked_send(sock, send_lock, payload, opcode=0xA, timeout=_send_timeout())\n    recv = _buffered_reader(sock, pending)\n    t = threading.Thread(target=stdout_writer, args=(sock, recv, send_pong, done, first_msg, output_forwarded, client_ids, init_state), daemon=True)\n    t.start()\n    # Byte-precise commit point: the fallback may run only while zero stdin\n    # bytes have left the pipe and no daemon payload was committed to stdout.\n    # Reads use os.read into a userspace line buffer (buffered readline could\n    # readahead past the commit point), and every byte read counts -- even a\n    # blank line. first_msg tracks the matching daemon response/error, never\n    # a notification.\n    stdin_bytes = 0\n    pending_in = b\"\"\n    clean_eof = False\n    try:\n        fd = sys.stdin.fileno()\n        while not done.is_set():\n            if not first_msg.is_set() and time.monotonic() >= first_deadline:\n                log(\"first daemon message timed out\")\n                break\n            ready, _, _ = select.select([fd], [], [], 0.5)\n            if not ready:\n                continue\n            chunk = os.read(fd, 65536)\n            if not chunk:\n                clean_eof = True\n                break\n            stdin_bytes += len(chunk)\n            pending_in += chunk\n            while b\"\\n\" in pending_in:\n                line, _, pending_in = pending_in.partition(b\"\\n\")\n                line = line.strip()\n                if not line:\n                    continue\n                try:\n                    try:\n                        obj = json.loads(line.decode(\"utf-8\"))\n                    except Exception:\n                        obj = None\n                    if isinstance(obj, dict) and obj.get(\"id\") is not None:\n                        client_ids.add(obj.get(\"id\"))\n                        if obj.get(\"method\") == \"initialize\" and init_state[\"initialize_id\"] is None:\n                            init_state[\"initialize_id\"] = obj.get(\"id\")\n                except Exception:\n                    pass\n                try:\n                    locked_send(sock, send_lock, line, timeout=_send_timeout())\n                except TimeoutError as e:\n                    log(f\"stdin forward timed out: {e}\")\n                    break\n                except Exception as e:\n                    log(f\"stdin forward failed: {e}\")\n                    break\n            else:\n                continue\n            break\n    except Exception as e:\n        log(f\"stdin loop exit: {e}\")\n    # Flush any buffered EOF-tail data BEFORE the WS Close: sending Close\n    # first would let the daemon discard the tail.\n    if clean_eof:\n        tail = pending_in.strip()\n        if tail and not done.is_set():\n            try:\n                locked_send(sock, send_lock, tail, timeout=_cleanup_timeout())\n            except Exception as e:\n                log(f\"eof flush failed: {e}\")\n    try:\n        locked_send(sock, send_lock, b\"\", opcode=0x8, timeout=_cleanup_timeout())\n    except Exception as e:\n        log(f\"close send failed: {e}\")\n    try:\n        try:\n            sock.shutdown(socket.SHUT_RDWR)\n        except OSError:\n            pass\n        sock.close()\n    except OSError:\n        pass\n    # Bound termination: wake the reader so no thread is left hung on recv.\n    t.join(timeout=0.5)\n    # A reader still exiting could commit output after this check. In that\n    # case pristine stdio cannot be proven, so never permit fallback.\n    if t.is_alive():\n        output_forwarded.set()\n    if clean_eof:\n        log(\"exit\")\n        return EXIT_SERVED\n    # Reader died, first RPC timed out, post-upgrade I/O timed out, or stdin\n    # broke: fail open only while stdio is still pristine -- no stdin byte\n    # ever consumed AND no daemon payload ever committed to stdout. Committed\n    # output forces a mid-session exit so Desktop reconnects instead of\n    # falling back to stock Codex on a corrupted stream.\n    rc = EXIT_MID_SESSION if (stdin_bytes or output_forwarded.is_set()) else EXIT_PRE_STDIO\n    log(f\"exit rc={rc}\")\n    return rc\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n";
+        const BRIDGE_SOURCE = "#!/usr/bin/env python3\n\"\"\"Stdio JSONL (Desktop) <-> WebSocket-over-unix (managed app-server daemon).\nReversible: remove CODEX_CLI_PATH wrapper. Does not read Desktop private pipes.\n\"\"\"\nfrom __future__ import annotations\nimport base64, hashlib, json, os, select, socket, struct, sys, threading, time\n\nSOCK = os.environ.get(\n    \"CODEX_APP_SERVER_SOCK\",\n    os.path.expanduser(\"~/.codex/app-server-control/app-server-control.sock\"),\n)\nLOG = os.environ.get(\"CODEX_STDIO_BRIDGE_LOG\", os.path.expanduser(\"~/.codex/bin/codex-stdio-to-daemon-ws.log\"))\nWS_GUID = \"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\"\n\n# Wrapper contract: 0 served the session, 1 failed while stdio was still\n# pristine -- no stdin byte consumed and no stdout frame committed (wrapper\n# falls back to real Codex), 2 failed mid-session (wrapper exits promptly so\n# Desktop reconnects; the fallback must never run on half-consumed stdin or\n# dirty stdout).\nEXIT_SERVED = 0\nEXIT_PRE_STDIO = 1\nEXIT_MID_SESSION = 2\n\nCONNECT_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_CONNECT_TIMEOUT\", \"10\"))\n# Bound from connect to the matching first daemon response: a daemon that\n# completes the upgrade but never answers the first RPC must not hold Desktop\n# past this. Only the matching initialize response/error (or the deadline\n# itself) clears it; notifications never do.\nFIRST_MESSAGE_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_FIRST_MESSAGE_TIMEOUT\", \"30\"))\n# Bound on every mid-session socket send and stdout write: a wedged or\n# non-reading peer must not hang Desktop past this. Reads after a successful\n# init block with no timeout so healthy idle sessions survive silence.\nIO_TIMEOUT_S = float(os.environ.get(\"CODEX_BRIDGE_IO_TIMEOUT\", \"30\"))\n\ndef log(msg: str) -> None:\n    try:\n        with open(LOG, \"a\") as f:\n            f.write(time.strftime(\"%Y-%m-%dT%H:%M:%SZ\", time.gmtime()) + \" \" + msg + \"\\n\")\n    except OSError:\n        pass\n\ndef ws_connect(path: str, timeout: float = CONNECT_TIMEOUT_S):\n    \"\"\"Connect + HTTP upgrade under one absolute monotonic deadline.\n\n    Returns (socket, trailing) where trailing holds bytes coalesced after the\n    upgrade headers (TCP may deliver the 101 and the first WS frame together;\n    discarding them would lose the first message). Requires HTTP/1.1 101 plus\n    a matching Sec-WebSocket-Accept so a 200 (or any non-101) fails fast even\n    when the accept hash happens to be valid.\n    \"\"\"\n    deadline = time.monotonic() + timeout\n    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n    s.settimeout(timeout)\n    try:\n        s.connect(path)\n        key = base64.b64encode(os.urandom(16)).decode()\n        expected = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()\n        req = (\n            f\"GET /rpc HTTP/1.1\\r\\nHost: localhost\\r\\nUpgrade: websocket\\r\\n\"\n            f\"Connection: Upgrade\\r\\nSec-WebSocket-Key: {key}\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n\"\n        ).encode()\n        s.settimeout(max(0.0, deadline - time.monotonic()))\n        s.sendall(req)\n        buf = b\"\"\n        while True:\n            if b\"\\r\\n\\r\\n\" in buf:\n                break\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise TimeoutError(\"WebSocket upgrade timed out\")\n            if len(buf) > 65536:\n                raise ConnectionError(\"WS upgrade headers too large\")\n            s.settimeout(remaining)\n            chunk = s.recv(4096)\n            if not chunk:\n                raise ConnectionError(\"daemon closed during WS upgrade\")\n            buf += chunk\n        head, _, trailing = buf.partition(b\"\\r\\n\\r\\n\")\n        lines = head.split(b\"\\r\\n\")\n        if not lines or lines[0].split(b\" \", 2)[:2] != [b\"HTTP/1.1\", b\"101\"]:\n            raise ConnectionError(f\"WS upgrade failed: {head[:200]!r}\")\n        accept = None\n        for line in lines[1:]:\n            name, sep, value = line.partition(b\":\")\n            if sep and name.strip().lower() == b\"sec-websocket-accept\":\n                accept = value.strip().decode(\"latin-1\")\n        if accept != expected:\n            raise ConnectionError(\"WS upgrade accept mismatch\")\n    except Exception:\n        try:\n            s.close()\n        except OSError:\n            pass\n        raise\n    # Keep one socket mode across reader and writer threads. Reads wait\n    # indefinitely in select; sends use their own absolute deadline.\n    s.setblocking(False)\n    return s, trailing\n\ndef mask_send(sock: socket.socket, payload: bytes, opcode: int = 1, deadline=None) -> None:\n    mask = os.urandom(4)\n    ln = len(payload)\n    if ln < 126:\n        hdr = bytes([0x80 | opcode, 0x80 | ln])\n    elif ln < 65536:\n        hdr = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(\"!H\", ln)\n    else:\n        hdr = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(\"!Q\", ln)\n    view = memoryview(hdr + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))\n    while view:\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise TimeoutError(\"socket write timed out\")\n        _, writable, _ = select.select([], [sock], [], remaining)\n        if not writable:\n            raise TimeoutError(\"socket write timed out\")\n        try:\n            n = sock.send(view)\n        except BlockingIOError:\n            continue\n        if not n:\n            raise ConnectionError(\"socket closed during write\")\n        view = view[n:]\n\ndef locked_send(sock: socket.socket, lock: threading.Lock, payload: bytes, opcode: int = 1, timeout: float = CONNECT_TIMEOUT_S) -> None:\n    \"\"\"Serialized send sharing one monotonic budget across lock wait + send.\n\n    A non-reading peer must never wedge pong writes or timeout cleanup: on\n    expiry raise TimeoutError so the caller closes and exits without hanging.\n    \"\"\"\n    if timeout is None:\n        timeout = CONNECT_TIMEOUT_S\n    deadline = time.monotonic() + timeout\n    if timeout <= 0:\n        raise TimeoutError(\"send budget expired\")\n    if not lock.acquire(timeout=timeout):\n        raise TimeoutError(\"send lock timed out\")\n    try:\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise TimeoutError(\"send budget expired\")\n        mask_send(sock, payload, opcode=opcode, deadline=deadline)\n    finally:\n        lock.release()\n\ndef _buffered_reader(sock: socket.socket, initial: bytes = b\"\"):\n    buf = bytearray(initial)\n    def recv(n):\n        while len(buf) < n:\n            select.select([sock], [], [])\n            try:\n                chunk = sock.recv(n - len(buf))\n            except BlockingIOError:\n                continue\n            if not chunk:\n                raise ConnectionError(\"eof\")\n            buf.extend(chunk)\n        out = bytes(buf[:n])\n        del buf[:n]\n        return out\n    return recv\n\ndef read_frame(recv):\n    hdr = recv(2)\n    fin = bool(hdr[0] & 0x80)\n    opcode = hdr[0] & 0x0F\n    masked = bool(hdr[1] & 0x80)\n    ln = hdr[1] & 0x7F\n    if ln == 126:\n        ln = struct.unpack(\"!H\", recv(2))[0]\n    elif ln == 127:\n        ln = struct.unpack(\"!Q\", recv(8))[0]\n    mask = recv(4) if masked else b\"\"\n    payload = recv(ln)\n    if masked:\n        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))\n    return fin, opcode, payload\n\ndef read_message(recv, send_pong):\n    \"\"\"Next complete data message, assembling continuation frames.\n\n    Control frames are handled inline (pong answered, close reported) so a\n    fragmented message split around a ping still reassembles.\n    \"\"\"\n    opcode = None\n    parts = []\n    while True:\n        fin, op, payload = read_frame(recv)\n        if op == 0x8:\n            return (\"close\", None, b\"\")\n        if op == 0x9:\n            send_pong(payload)\n            continue\n        if op == 0xA:\n            continue\n        if op in (0x1, 0x2):\n            if opcode is not None:\n                raise ConnectionError(\"data frame inside fragmented message\")\n            if fin:\n                return (\"data\", op, payload)\n            opcode = op\n            parts.append(payload)\n            continue\n        if op == 0x0:\n            if opcode is None:\n                raise ConnectionError(\"stray continuation frame\")\n            parts.append(payload)\n            if fin:\n                return (\"data\", opcode, b\"\".join(parts))\n            continue\n        raise ConnectionError(f\"unsupported opcode {op}\")\n\ndef _is_daemon_response(payload: bytes, expect_id=None, known_ids=None) -> bool:\n    \"\"\"True only for the matching JSON-RPC response/error, never a notification.\n\n    The first-RPC timer must survive unrelated daemon notifications and foreign\n    responses: only the response/error whose id matches the client's initialize\n    (or, before it is known, any id the client already sent) proves the first\n    RPC got an answer. Timeouts clear it via the deadline, never via data.\n    \"\"\"\n    try:\n        text = payload.decode(\"utf-8\").strip()\n        msg = json.loads(text)\n    except Exception:\n        return False\n    if not isinstance(msg, dict):\n        return False\n    rid = msg.get(\"id\")\n    if rid is None or \"method\" in msg or (\"result\" not in msg and \"error\" not in msg):\n        return False\n    if expect_id is not None:\n        return rid == expect_id\n    if known_ids:\n        return rid in known_ids\n    return False\n\ndef _bounded_stdout_write(data: bytes, timeout: float = IO_TIMEOUT_S) -> None:\n    \"\"\"Write one daemon frame to stdout without hanging on a non-reading peer.\n\n    Waits for writability under the mid-session write budget and writes via\n    os.write in a loop, so a Desktop that stopped reading cannot hang the\n    bridge and then exit 1 on dirty stdout.\n    \"\"\"\n    if timeout is None:\n        timeout = IO_TIMEOUT_S\n    if timeout <= 0:\n        raise TimeoutError(\"stdout budget expired\")\n    fd = sys.stdout.fileno()\n    deadline = time.monotonic() + timeout\n    was_blocking = os.get_blocking(fd)\n    os.set_blocking(fd, False)\n    try:\n        view = memoryview(data)\n        while view:\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise TimeoutError(\"stdout write timed out\")\n            _, writable, _ = select.select([], [fd], [], remaining)\n            if not writable:\n                raise TimeoutError(\"stdout write timed out\")\n            try:\n                n = os.write(fd, view)\n            except BlockingIOError:\n                continue\n            view = view[n:]\n    finally:\n        os.set_blocking(fd, was_blocking)\n\ndef stdout_writer(sock: socket.socket, recv, send_pong, done: threading.Event, first_msg: threading.Event, output_forwarded: threading.Event, client_ids=None, init_state=None) -> None:\n    try:\n        while True:\n            kind, opcode, payload = read_message(recv, send_pong)\n            if kind == \"close\":\n                log(\"daemon WS close\")\n                return\n            if opcode == 0x1:\n                # Desktop StdioConnection expects newline-delimited JSON text\n                if not payload.endswith(b\"\\n\"):\n                    payload += b\"\\n\"\n            # Commit BEFORE writing: once a daemon byte is about to hit\n            # stdout, the session is dirty and the fallback must never run,\n            # even if the write itself blocks or fails.\n            output_forwarded.set()\n            _bounded_stdout_write(payload)\n            if opcode == 0x1:\n                expect = (init_state or {}).get(\"initialize_id\") if isinstance(init_state, dict) else None\n                if _is_daemon_response(payload, expect, client_ids or ()):\n                    first_msg.set()\n    except Exception as e:\n        log(f\"stdout_writer exit: {e}\")\n    finally:\n        done.set()\n\ndef main() -> int:\n    log(f\"start sock={SOCK}\")\n    try:\n        sock, pending = ws_connect(SOCK)\n    except Exception as e:\n        log(f\"connect failed: {e}\")\n        sys.stderr.write(f\"codex-stdio-to-daemon-ws: {e}\\n\")\n        return EXIT_PRE_STDIO\n    log(\"connected\")\n    connected_at = time.monotonic()\n    first_deadline = connected_at + FIRST_MESSAGE_TIMEOUT_S\n    send_lock = threading.Lock()\n    done = threading.Event()\n    first_msg = threading.Event()\n    output_forwarded = threading.Event()\n    client_ids = set()\n    init_state = {\"initialize_id\": None}\n\n    def _send_timeout() -> float:\n        # Before the first matching daemon response the remaining first-RPC\n        # budget bounds every send; after it each send gets the mid-session\n        # write budget. Idle reads are never timed out.\n        if not first_msg.is_set():\n            return max(0.0, first_deadline - time.monotonic())\n        return IO_TIMEOUT_S\n\n    def _cleanup_timeout() -> float:\n        # Timeout cleanup stays within the expired session budget: once the\n        # first-RPC deadline has passed, close directly instead of opening\n        # fresh windows that let a short budget take several timeout periods.\n        if not first_msg.is_set():\n            return max(0.0, first_deadline - time.monotonic())\n        return CONNECT_TIMEOUT_S\n\n    def send_pong(payload: bytes) -> None:\n        locked_send(sock, send_lock, payload, opcode=0xA, timeout=_send_timeout())\n    recv = _buffered_reader(sock, pending)\n    t = threading.Thread(target=stdout_writer, args=(sock, recv, send_pong, done, first_msg, output_forwarded, client_ids, init_state), daemon=True)\n    t.start()\n    # Byte-precise commit point: the fallback may run only while zero stdin\n    # bytes have left the pipe and no daemon payload was committed to stdout.\n    # Reads use os.read into a userspace line buffer (buffered readline could\n    # readahead past the commit point), and every byte read counts -- even a\n    # blank line. first_msg tracks the matching daemon response/error, never\n    # a notification.\n    stdin_bytes = 0\n    pending_in = b\"\"\n    clean_eof = False\n    try:\n        fd = sys.stdin.fileno()\n        while not done.is_set():\n            if not first_msg.is_set() and time.monotonic() >= first_deadline:\n                log(\"first daemon message timed out\")\n                break\n            ready, _, _ = select.select([fd], [], [], 0.5)\n            if not ready:\n                continue\n            chunk = os.read(fd, 65536)\n            if not chunk:\n                clean_eof = True\n                break\n            stdin_bytes += len(chunk)\n            pending_in += chunk\n            while b\"\\n\" in pending_in:\n                line, _, pending_in = pending_in.partition(b\"\\n\")\n                line = line.strip()\n                if not line:\n                    continue\n                try:\n                    try:\n                        obj = json.loads(line.decode(\"utf-8\"))\n                    except Exception:\n                        obj = None\n                    if isinstance(obj, dict) and obj.get(\"id\") is not None:\n                        client_ids.add(obj.get(\"id\"))\n                        if obj.get(\"method\") == \"initialize\" and init_state[\"initialize_id\"] is None:\n                            init_state[\"initialize_id\"] = obj.get(\"id\")\n                except Exception:\n                    pass\n                try:\n                    locked_send(sock, send_lock, line, timeout=_send_timeout())\n                except TimeoutError as e:\n                    log(f\"stdin forward timed out: {e}\")\n                    break\n                except Exception as e:\n                    log(f\"stdin forward failed: {e}\")\n                    break\n            else:\n                continue\n            break\n    except Exception as e:\n        log(f\"stdin loop exit: {e}\")\n    # Flush any buffered EOF-tail data BEFORE the WS Close: sending Close\n    # first would let the daemon discard the tail.\n    if clean_eof:\n        tail = pending_in.strip()\n        if tail and not done.is_set():\n            try:\n                locked_send(sock, send_lock, tail, timeout=_cleanup_timeout())\n            except Exception as e:\n                log(f\"eof flush failed: {e}\")\n    try:\n        locked_send(sock, send_lock, b\"\", opcode=0x8, timeout=_cleanup_timeout())\n    except Exception as e:\n        log(f\"close send failed: {e}\")\n    try:\n        try:\n            sock.shutdown(socket.SHUT_RDWR)\n        except OSError:\n            pass\n        sock.close()\n    except OSError:\n        pass\n    # Bound termination: wake the reader so no thread is left hung on recv.\n    t.join(timeout=0.5)\n    # A reader still exiting could commit output after this check. In that\n    # case pristine stdio cannot be proven, so never permit fallback.\n    if t.is_alive():\n        output_forwarded.set()\n    if clean_eof and (stdin_bytes or output_forwarded.is_set()):\n        log(\"exit\")\n        return EXIT_SERVED\n    # Reader died, first RPC timed out, post-upgrade I/O timed out, or stdin\n    # broke: fail open only while stdio is still pristine -- no stdin byte\n    # ever consumed AND no daemon payload ever committed to stdout. Committed\n    # output forces a mid-session exit so Desktop reconnects instead of\n    # falling back to stock Codex on a corrupted stream.\n    rc = EXIT_MID_SESSION if (stdin_bytes or output_forwarded.is_set()) else EXIT_PRE_STDIO\n    log(f\"exit rc={rc}\")\n    return rc\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n";
         __webpack_require__.d(__webpack_exports__, {}, {
             w: BRIDGE_SOURCE
         });
@@ -50613,19 +50930,30 @@ var __webpack_modules__ = {
             let daemon = false;
             let proxy = false;
             let generate = false;
+            let oneShot = false;
             for (const arg of argv ?? []){
+                if ([
+                    "--print-startup-config",
+                    "--startup-sign-out",
+                    "help",
+                    "--help",
+                    "-h",
+                    "--version",
+                    "-V"
+                ].includes(arg)) oneShot = true;
                 if (arg === "app-server") appServer = true;
                 else if (arg === "daemon") daemon = true;
                 else if (arg === "proxy") proxy = true;
                 else if (arg === "generate-ts" || arg === "generate-json-schema") generate = true;
             }
-            return appServer && !daemon && !proxy && !generate;
+            return appServer && !daemon && !proxy && !generate && !oneShot;
         }
         function renderWrapperScript({ realPath, bridgePath, wrapperLogPath, codexHome, bridgeLogPath }) {
             return `#!/bin/bash
 # Installed by \`gbot codex desktop-shim install\`. Rewrites ChatGPT Desktop's
 # \`codex ... app-server\` spawn into a stdio<->WebSocket bridge onto the managed
 # daemon's control socket. Reversible: \`gbot codex desktop-shim uninstall\`.
+# Startup configuration, sign-out, help and version requests use the real CLI.
 # The daemon is kept up by the LaunchAgent login script, not here: this hot path
 # never starts the daemon itself, so a wedged daemon lock cannot hang
 # Desktop. Fail-open runs ONLY while stdio is still pristine (no stdin
@@ -50658,9 +50986,10 @@ if [[ ! -x "$REAL" ]]; then
   fi
 fi
 
-has_app_server=0; has_daemon=0; has_proxy=0; has_generate=0
+has_app_server=0; has_daemon=0; has_proxy=0; has_generate=0; has_one_shot=0
 for a in "$@"; do
   case "$a" in
+    --print-startup-config|--startup-sign-out|help|--help|-h|--version|-V) has_one_shot=1 ;;
     app-server) has_app_server=1 ;;
     daemon) has_daemon=1 ;;
     proxy) has_proxy=1 ;;
@@ -50674,7 +51003,7 @@ preflight() {
   python3 -c 'import os,socket,sys; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(float(os.environ.get("CODEX_DESKTOP_PREFLIGHT_TIMEOUT","3"))); s.connect(sys.argv[1]); s.close()' "$SOCK" 2>/dev/null
 }
 
-if [[ "$has_app_server" -eq 1 && "$has_daemon" -eq 0 && "$has_proxy" -eq 0 && "$has_generate" -eq 0 ]]; then
+if [[ "$has_app_server" -eq 1 && "$has_daemon" -eq 0 && "$has_proxy" -eq 0 && "$has_generate" -eq 0 && "$has_one_shot" -eq 0 ]]; then
   if [[ -f "$BRIDGE" ]] && command -v python3 >/dev/null 2>&1; then
     if preflight; then
       echo "$(ts) rewrite -> stdio-ws bridge" >>"$LOG" 2>/dev/null || true
@@ -50736,6 +51065,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
   launchctl unsetenv CODEX_APP_SERVER_WS_URL 2>/dev/null || true
   echo "$(ts) CODEX_CLI_PATH=$(launchctl getenv CODEX_CLI_PATH)"
   if [[ -x "$REAL" ]]; then
+    # launchd gives login jobs a 256-file soft limit; a busy daemon (many threads, shell pipes,
+    # sqlite handles) exhausts it ("Too many open files") and turns fail. Raise it before the
+    # daemon starts: it inherits this limit.
+    ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+    echo "$(ts) open-file limit $(ulimit -n)"
     "$REAL" app-server daemon start >/dev/null 2>&1 || true
     echo "$(ts) daemon start attempted"
   fi
@@ -51120,7 +51454,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function formatCodexThread(t) {
             const title = t.name ? " - " + stripTerminalControls(t.name) : "";
             const preview = t.preview ? "\n    " + stripTerminalControls(String(t.preview).replace(/\s+/g, " ")).slice(0, 200) : "";
-            return stripTerminalControls(t.id) + "  " + stripTerminalControls(t.status) + title + "\n    " + stripTerminalControls(t.cwd ?? "") + preview;
+            const at = typeof t.updatedAt === "number" && Number.isFinite(t.updatedAt) ? new Date(t.updatedAt > 1e11 ? t.updatedAt : t.updatedAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "";
+            return stripTerminalControls(t.id) + "  " + stripTerminalControls(t.status) + title + "\n    " + stripTerminalControls(t.cwd ?? "") + (at ? "  (updated " + at + ")" : "") + preview;
         }
         function shellQuote(value) {
             return "'" + String(value).replace(/'/g, "'\\''") + "'";
@@ -51146,7 +51481,27 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             for (const warning of s.warnings ?? [])lines.push("warning: " + String(warning));
             return lines.join("\n");
         }
+        const DELIVERY_HINTS = {
+            busy: "The thread is mid-turn. Wait for it to go idle, or send with --when-busy steer (managed --reply-to-grok sends steer an active turn by default).",
+            "thread-error": "Codex reports the thread in systemError. That is usually the Codex daemon failing (e.g. out of file descriptors: `gbot codex status`, then `codex app-server daemon restart` when no turn is running) or a broken rollout file; the thread needs a healthy daemon or to be opened in a Codex client.",
+            "unknown-status": "This gbot does not know the thread status the daemon reported; upgrade gbot or check `gbot codex list-threads`.",
+            "experimental-disabled": "--when-busy queue needs GROK_BOT_CODEX_EXPERIMENTAL=1 on a daemon with the experimental queue API; otherwise wait for idle or use --when-busy steer.",
+            "submission-rejected": "The Codex daemon refused the message; see the detail text.",
+            transport: "The connection to the Codex daemon dropped; delivery is unknown. Check the thread before resending."
+        };
+        function describeDelivery(out, { managed = false } = {}) {
+            const delivery = String(out?.delivery ?? "unknown");
+            if (delivery === "rejected") {
+                const reason = typeof out.reason === "string" && out.reason ? out.reason : "rejected";
+                const detail = typeof out.detail === "string" && out.detail ? out.detail : typeof out.error === "string" ? out.error : "";
+                const hint = DELIVERY_HINTS[reason] ?? "";
+                return `Delivery rejected (${stripTerminalControls(reason)})${detail ? `: ${stripTerminalControls(detail)}` : ""}${hint ? `\n${hint}` : ""}`;
+            }
+            if (managed) return `Delivery ${delivery}; terminal answer returns to Grok automatically. If the turn fails, the failure text (including the Codex error) is sent back instead of a final answer.`;
+            return `Delivery ${delivery}`;
+        }
         __webpack_require__.d(__webpack_exports__, {
+            Ks: ()=>describeDelivery,
             P2: ()=>formatCodexStatus,
             bM: ()=>formatRecord,
             e_: ()=>formatCodexQueue,
@@ -59571,6 +59926,42 @@ else:
             Ih: ()=>secretStoreOptions,
             M6: ()=>secretStoreOffMessage,
             Wj: ()=>isTestMode
+        });
+    },
+    "./src/core/sender-prefix.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_os__rspack_import_0 = __webpack_require__("node:os");
+        const oneLine = (value)=>String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/[\]]/g, ")").trim();
+        function machineName(env = process.env) {
+            try {
+                return oneLine(env.GROK_BOT_MACHINE_NAME || (0, node_os__rspack_import_0.hostname)());
+            } catch  {
+                return "";
+            }
+        }
+        function codexSenderPrefix({ threadId, machine, cwd, details = [], env = process.env } = {}) {
+            const id = oneLine(threadId);
+            if (!id) return "";
+            const where = oneLine(machine ?? machineName(env));
+            const dir = oneLine(cwd);
+            const head = "from Codex thread " + id + (where ? " @ " + where : "") + (dir ? (where ? ", " : " ") + "cwd " + dir : "");
+            const reply = "reply: codex_send({threadId:\"" + id + "\", message:\"...\"})" + (where ? " via MCP on " + where : " via MCP") + " (or CLI: gbot codex send " + id + " \"...\")";
+            return "[" + [
+                head,
+                ...details.map(oneLine).filter(Boolean),
+                reply
+            ].join("; ") + "]";
+        }
+        function withCodexSender(text, fields) {
+            const prefix = codexSenderPrefix(fields);
+            return prefix ? prefix + "\n" + text : text;
+        }
+        function envCodexThreadId(env = process.env) {
+            const id = env.CODEX_THREAD_ID?.trim();
+            return id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined;
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Wh: ()=>envCodexThreadId,
+            Xt: ()=>withCodexSender
         });
     },
     "./src/core/stdin-message.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {

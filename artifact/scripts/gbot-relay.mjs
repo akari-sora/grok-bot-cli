@@ -23533,7 +23533,8 @@ var __webpack_modules__ = {
                 expectedCwd: resolvedCwd,
                 model,
                 effort,
-                signal
+                signal,
+                freshThreadCwd: resolvedCwd
             });
         }
         const CODEX_VERSION_PROBE_TIMEOUT_MS = 3000;
@@ -23698,7 +23699,52 @@ var __webpack_modules__ = {
             };
         }
         const THREAD_LIST_MAX_LIMIT = 200;
-        async function listCodexThreads({ limit = 20, cursor, modelProviders = [], env = process.env } = {}) {
+        const THREAD_SORT_KEYS = null && {
+            updated: "updated_at",
+            created: "created_at",
+            recency: "recency_at"
+        };
+        const GBOT_CURSOR = "gbot1:";
+        const DURATION_MS = null && {
+            s: 1000,
+            m: 60000,
+            h: 3600000,
+            d: 86400000,
+            w: 604800000
+        };
+        const toSeconds = (value)=>value > 1e11 ? value / 1000 : value;
+        function parseActiveWithin(text) {
+            const m = /^(\d+(?:\.\d+)?)\s*([smhdw])$/i.exec(String(text).trim());
+            if (!m) throw new RangeError("--active-within must look like 30m, 12h, 7d or 2w");
+            return Number(m[1]) * DURATION_MS[m[2].toLowerCase()];
+        }
+        function parseSince(value) {
+            const text = String(value).trim();
+            const n = /^\d+(?:\.\d+)?$/.test(text) ? toSeconds(Number(text)) : Date.parse(text) / 1000;
+            if (!Number.isFinite(n)) throw new RangeError("--since must be an ISO date/time or epoch seconds");
+            return n;
+        }
+        function encodeThreadCursor(state) {
+            return GBOT_CURSOR + Buffer.from(JSON.stringify(state)).toString("base64url");
+        }
+        function decodeThreadCursor(cursor) {
+            if (cursor === undefined) return {
+                skip: 0
+            };
+            if (!cursor.startsWith(GBOT_CURSOR)) return {
+                c: cursor,
+                skip: 0
+            };
+            try {
+                const v = JSON.parse(Buffer.from(cursor.slice(GBOT_CURSOR.length), "base64url").toString("utf8"));
+                if (isObject(v) && Number.isInteger(v.skip) && v.skip >= 0 && (v.c === undefined || typeof v.c === "string")) return {
+                    c: v.c,
+                    skip: v.skip
+                };
+            } catch  {}
+            throw new RangeError("--cursor is not a valid thread cursor");
+        }
+        async function listCodexThreads({ limit = 20, cursor, modelProviders = [], modelProvider, sort = "updated", order: order1 = "desc", query, since, activeWithin, cwd, archived, sourceKinds, now = Date.now(), env = process.env } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > THREAD_LIST_MAX_LIMIT) {
                 throw new RangeError("--limit must be an integer 1-" + THREAD_LIST_MAX_LIMIT);
             }
@@ -23706,45 +23752,125 @@ var __webpack_modules__ = {
             if (!Array.isArray(modelProviders) || modelProviders.some((p)=>typeof p !== "string")) {
                 throw new RangeError("modelProviders must be an array of strings (empty = all providers)");
             }
+            if (!Object.hasOwn(THREAD_SORT_KEYS, sort)) throw new RangeError("--sort must be one of: " + Object.keys(THREAD_SORT_KEYS).join(", "));
+            if (order1 !== "asc" && order1 !== "desc") throw new RangeError("--order must be asc or desc");
+            if (query !== undefined && (typeof query !== "string" || !query.trim())) throw new RangeError("--query must be a non-empty string");
+            if (sourceKinds !== undefined && (!Array.isArray(sourceKinds) || sourceKinds.some((k)=>typeof k !== "string" || !k))) {
+                throw new RangeError("--source-kind must be a non-empty string");
+            }
+            const providers = modelProvider ? [
+                ...modelProviders,
+                modelProvider
+            ] : modelProviders;
+            const needle = query?.trim().toLowerCase();
+            const cutoffs = [];
+            if (since !== undefined) cutoffs.push(parseSince(since));
+            if (activeWithin !== undefined) cutoffs.push((now - parseActiveWithin(activeWithin)) / 1000);
+            const cutoff = cutoffs.length ? Math.max(...cutoffs) : undefined;
+            const clientSide = needle !== undefined || cutoff !== undefined;
+            const activityOf = (t)=>typeof t.updatedAt === "number" ? toSeconds(t.updatedAt) : typeof t.createdAt === "number" ? toSeconds(t.createdAt) : null;
+            const keep = (t)=>{
+                if (cutoff !== undefined) {
+                    const at = activityOf(t);
+                    if (at === null || at < cutoff) return false;
+                }
+                if (needle !== undefined && ![
+                    t.name,
+                    t.preview,
+                    t.id
+                ].some((f)=>typeof f === "string" && f.toLowerCase().includes(needle))) return false;
+                return true;
+            };
+            const pageSize = clientSide ? THREAD_LIST_MAX_LIMIT : limit;
+            const start = decodeThreadCursor(cursor);
             const { client } = await openSession(env);
             try {
                 const baseParams = {
-                    limit,
-                    modelProviders,
-                    ...cursor !== undefined ? {
-                        cursor
+                    limit: pageSize,
+                    modelProviders: providers,
+                    sortKey: THREAD_SORT_KEYS[sort],
+                    ...order1 === "asc" ? {
+                        sortDirection: "asc"
+                    } : {},
+                    ...cwd ? {
+                        cwd
+                    } : {},
+                    ...archived === true ? {
+                        archived: true
+                    } : {},
+                    ...sourceKinds?.length ? {
+                        sourceKinds
                     } : {}
                 };
-                let out;
-                let usedStateDbOnly = true;
-                try {
-                    out = await client.request("thread/list", {
-                        ...baseParams,
-                        useStateDbOnly: true
-                    });
-                } catch (err) {
-                    throw transportError(err);
-                }
-                if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
-                if (out.data.length === 0 && cursor === undefined && (out.nextCursor == null || out.nextCursor === "")) {
+                const fetchPage = async (pageCursor, useStateDbOnly)=>{
                     try {
-                        out = await client.request("thread/list", {
+                        return await client.request("thread/list", {
                             ...baseParams,
-                            useStateDbOnly: false
+                            ...pageCursor !== undefined ? {
+                                cursor: pageCursor
+                            } : {},
+                            useStateDbOnly
                         });
-                        usedStateDbOnly = false;
                     } catch (err) {
                         throw transportError(err);
                     }
+                };
+                const checkPage = (out)=>{
                     if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
+                    if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
+                };
+                const threads = [];
+                let usedStateDbOnly = true;
+                let scanned = 0;
+                let nextCursor = null;
+                let pageCursor = start.c;
+                let skip = start.skip;
+                for(;;){
+                    let out = await fetchPage(pageCursor, true);
+                    checkPage(out);
+                    if (out.data.length === 0 && pageCursor === undefined && (out.nextCursor == null || out.nextCursor === "")) {
+                        out = await fetchPage(pageCursor, false);
+                        usedStateDbOnly = false;
+                        checkPage(out);
+                    }
+                    const rows = out.data.map(summarizeThread);
+                    scanned += rows.length;
+                    let matches = rows.filter(keep);
+                    const pageSkip = skip;
+                    if (skip) {
+                        matches = matches.slice(skip);
+                        skip = 0;
+                    }
+                    const need = limit - threads.length;
+                    if (matches.length > need) {
+                        threads.push(...matches.slice(0, need));
+                        nextCursor = encodeThreadCursor({
+                            ...pageCursor !== undefined ? {
+                                c: pageCursor
+                            } : {},
+                            skip: pageSkip + need
+                        });
+                        break;
+                    }
+                    threads.push(...matches);
+                    const more = out.nextCursor || null;
+                    const last = rows[rows.length - 1];
+                    const pastCutoff = cutoff !== undefined && sort === "updated" && order1 === "desc" && last !== undefined && (activityOf(last) ?? -Infinity) < cutoff;
+                    if (!more || pastCutoff) break;
+                    if (threads.length >= limit) {
+                        nextCursor = more;
+                        break;
+                    }
+                    pageCursor = more;
                 }
-                if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
-                const threads = out.data.map(summarizeThread);
                 return {
                     threads,
-                    nextCursor: out.nextCursor ?? null,
+                    nextCursor,
                     limit,
-                    useStateDbOnly: usedStateDbOnly
+                    useStateDbOnly: usedStateDbOnly,
+                    sort,
+                    order: order1,
+                    scanned
                 };
             } finally{
                 client.close();
@@ -24001,7 +24127,7 @@ var __webpack_modules__ = {
         }
         async function sendToCodexThread(threadId, text, { env = process.env, envelope = buildEnvelope({
             env
-        }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal } = {}) {
+        }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd } = {}) {
             try {
                 const receipt = await sendToCodexThreadInner(threadId, text, {
                     env,
@@ -24012,7 +24138,8 @@ var __webpack_modules__ = {
                     expectedCwd,
                     model,
                     effort,
-                    signal
+                    signal,
+                    freshThreadCwd
                 });
                 return (0, _codex_contract_js__rspack_import_7.Dz)(receipt);
             } catch (err) {
@@ -24034,7 +24161,7 @@ var __webpack_modules__ = {
                 "xhigh"
             ].includes(effort)) throw new RangeError("--effort must be none, minimal, low, medium, high, or xhigh");
         }
-        async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal }) {
+        async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd }) {
             validateModelEffort(model, effort);
             if (![
                 "reject",
@@ -24093,15 +24220,30 @@ var __webpack_modules__ = {
                     });
                 } catch (err) {
                     assertNotCancelled();
-                    if (err instanceof CodexSendError || err instanceof _codex_remote_control_js__rspack_import_8.Rg) throw err;
-                    const explained = explainSendError(err, threadId, env);
-                    if (explained instanceof _codex_remote_control_js__rspack_import_8.Rg) throw explained;
-                    throw new CodexSendError(explained.message, {
-                        delivery: err instanceof CodexRpcError ? "rejected" : err && err.delivery || "unknown",
-                        reason: err instanceof CodexRpcError ? /no rollout found|thread not found/i.test(String(err.rpc && err.rpc.message)) ? "unknown-thread" : /active writer/i.test(String(err.rpc && err.rpc.message)) ? "external-owner" : "rejected" : "transport",
-                        threadId,
-                        ...envelope
-                    });
+                    if (freshThreadCwd !== undefined && err instanceof CodexRpcError && /no rollout found/i.test(String(err.rpc && err.rpc.message))) {
+                        resumed = {
+                            thread: {
+                                id: threadId,
+                                status: {
+                                    type: "idle"
+                                }
+                            },
+                            cwd: freshThreadCwd,
+                            ...model ? {
+                                model
+                            } : {}
+                        };
+                    } else {
+                        if (err instanceof CodexSendError || err instanceof _codex_remote_control_js__rspack_import_8.Rg) throw err;
+                        const explained = explainSendError(err, threadId, env);
+                        if (explained instanceof _codex_remote_control_js__rspack_import_8.Rg) throw explained;
+                        throw new CodexSendError(explained.message, {
+                            delivery: err instanceof CodexRpcError ? "rejected" : err && err.delivery || "unknown",
+                            reason: err instanceof CodexRpcError ? /no rollout found|thread not found/i.test(String(err.rpc && err.rpc.message)) ? "unknown-thread" : /active writer/i.test(String(err.rpc && err.rpc.message)) ? "external-owner" : "rejected" : "transport",
+                            threadId,
+                            ...envelope
+                        });
+                    }
                 }
                 assertNotCancelled();
                 if (!isObject(resumed) || !isObject(resumed.thread) || typeof resumed.thread.id !== "string") {
@@ -25155,19 +25297,30 @@ var __webpack_modules__ = {
             let daemon = false;
             let proxy = false;
             let generate = false;
+            let oneShot = false;
             for (const arg of argv ?? []){
+                if ([
+                    "--print-startup-config",
+                    "--startup-sign-out",
+                    "help",
+                    "--help",
+                    "-h",
+                    "--version",
+                    "-V"
+                ].includes(arg)) oneShot = true;
                 if (arg === "app-server") appServer = true;
                 else if (arg === "daemon") daemon = true;
                 else if (arg === "proxy") proxy = true;
                 else if (arg === "generate-ts" || arg === "generate-json-schema") generate = true;
             }
-            return appServer && !daemon && !proxy && !generate;
+            return appServer && !daemon && !proxy && !generate && !oneShot;
         }
         function renderWrapperScript({ realPath, bridgePath, wrapperLogPath, codexHome, bridgeLogPath }) {
             return `#!/bin/bash
 # Installed by \`gbot codex desktop-shim install\`. Rewrites ChatGPT Desktop's
 # \`codex ... app-server\` spawn into a stdio<->WebSocket bridge onto the managed
 # daemon's control socket. Reversible: \`gbot codex desktop-shim uninstall\`.
+# Startup configuration, sign-out, help and version requests use the real CLI.
 # The daemon is kept up by the LaunchAgent login script, not here: this hot path
 # never starts the daemon itself, so a wedged daemon lock cannot hang
 # Desktop. Fail-open runs ONLY while stdio is still pristine (no stdin
@@ -25200,9 +25353,10 @@ if [[ ! -x "$REAL" ]]; then
   fi
 fi
 
-has_app_server=0; has_daemon=0; has_proxy=0; has_generate=0
+has_app_server=0; has_daemon=0; has_proxy=0; has_generate=0; has_one_shot=0
 for a in "$@"; do
   case "$a" in
+    --print-startup-config|--startup-sign-out|help|--help|-h|--version|-V) has_one_shot=1 ;;
     app-server) has_app_server=1 ;;
     daemon) has_daemon=1 ;;
     proxy) has_proxy=1 ;;
@@ -25216,7 +25370,7 @@ preflight() {
   python3 -c 'import os,socket,sys; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.settimeout(float(os.environ.get("CODEX_DESKTOP_PREFLIGHT_TIMEOUT","3"))); s.connect(sys.argv[1]); s.close()' "$SOCK" 2>/dev/null
 }
 
-if [[ "$has_app_server" -eq 1 && "$has_daemon" -eq 0 && "$has_proxy" -eq 0 && "$has_generate" -eq 0 ]]; then
+if [[ "$has_app_server" -eq 1 && "$has_daemon" -eq 0 && "$has_proxy" -eq 0 && "$has_generate" -eq 0 && "$has_one_shot" -eq 0 ]]; then
   if [[ -f "$BRIDGE" ]] && command -v python3 >/dev/null 2>&1; then
     if preflight; then
       echo "$(ts) rewrite -> stdio-ws bridge" >>"$LOG" 2>/dev/null || true
@@ -25278,6 +25432,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
   launchctl unsetenv CODEX_APP_SERVER_WS_URL 2>/dev/null || true
   echo "$(ts) CODEX_CLI_PATH=$(launchctl getenv CODEX_CLI_PATH)"
   if [[ -x "$REAL" ]]; then
+    # launchd gives login jobs a 256-file soft limit; a busy daemon (many threads, shell pipes,
+    # sqlite handles) exhausts it ("Too many open files") and turns fail. Raise it before the
+    # daemon starts: it inherits this limit.
+    ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+    echo "$(ts) open-file limit $(ulimit -n)"
     "$REAL" app-server daemon start >/dev/null 2>&1 || true
     echo "$(ts) daemon start attempted"
   fi
@@ -29879,12 +30038,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         });
     },
     "./src/core/relay/completion.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
-        var _records_js__rspack_import_0 = __webpack_require__("./src/core/relay/records.js");
-        function createCompletion({ state, codex, update, newRecord, runnable }) {
+        var _sender_prefix_js__rspack_import_0 = __webpack_require__("./src/core/sender-prefix.js");
+        var _detail_js__rspack_import_2 = __webpack_require__("./src/core/relay/detail.js");
+        var _records_js__rspack_import_1 = __webpack_require__("./src/core/relay/records.js");
+        function createCompletion({ env = process.env, state, codex, update, newRecord, runnable }) {
             let offset = 0;
             async function completions() {
                 const groups = new Map();
-                for (const r of (0, _records_js__rspack_import_0.V0)(state.read()))if (r.kind === "codex" && r.submission === "accepted" && r.turnId && !(0, _records_js__rspack_import_0.Fo)(r) && ![
+                for (const r of (0, _records_js__rspack_import_1.V0)(state.read()))if (r.kind === "codex" && r.submission === "accepted" && r.turnId && !(0, _records_js__rspack_import_1.Fo)(r) && ![
                     "capacity",
                     "hop-limit"
                 ].includes(r.reason) && runnable(r)) {
@@ -29933,10 +30094,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         continue;
                     }
                     if (result.execution.error && /coverage|Invalid|anchor/.test(result.execution.error)) continue;
+                    const turnError = (0, _detail_js__rspack_import_2.m)(result.execution.error);
                     const changes = [];
                     let returnId = null;
                     if (first.returnToGrok) {
-                        returnId = "return:" + (0, _records_js__rspack_import_0.tW)([
+                        returnId = "return:" + (0, _records_js__rspack_import_1.tW)([
                             first.targetId,
                             first.threadId,
                             first.turnId
@@ -29950,8 +30112,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                                 continue;
                             }
                             const sources = group.flatMap((r)=>r.sourceIds), suffix = result.reply.truncated ? "\n[Output truncated]" : "";
-                            let output = result.reply.text || `Codex turn ${execution} with no final text.`;
-                            const prefix = `[Codex ${first.threadId}; turn ${first.turnId}; status ${execution}; sources ${sources.slice(0, 8).map((id)=>id.slice(0, 128)).join(", ")}${sources.length > 8 ? " (additional source IDs retained in relay state)" : ""}]\n`;
+                            let output = result.reply.text || `Codex turn ${execution} with no final text${turnError ? `: ${turnError}` : "."}`;
+                            const prefix = (0, _sender_prefix_js__rspack_import_0.xA)({
+                                threadId: first.threadId,
+                                cwd: first.expectedCwd,
+                                env,
+                                details: [
+                                    `turn ${first.turnId}`,
+                                    `status ${execution}`,
+                                    `sources ${sources.slice(0, 8).map((id)=>id.slice(0, 128)).join(", ")}${sources.length > 8 ? " (additional source IDs retained in relay state)" : ""}`
+                                ]
+                            }) + "\n";
                             const budget = 65536 - Buffer.byteLength(prefix + suffix) - 32;
                             let truncated = false;
                             while(Buffer.byteLength(output) > budget){
@@ -29965,14 +30136,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                                 hop: first.hop + 1,
                                 maxHops: first.maxHops
                             });
-                            changes.push((0, _records_js__rspack_import_0.op)("records", outgoing));
+                            changes.push((0, _records_js__rspack_import_1.op)("records", outgoing));
                         }
                     }
-                    for (const r of group)changes.push((0, _records_js__rspack_import_0.op)("records", {
+                    for (const r of group)changes.push((0, _records_js__rspack_import_1.op)("records", {
                         ...r,
                         execution,
                         reason: null,
-                        returnId
+                        returnId,
+                        ...execution !== "completed" && turnError ? {
+                            detail: turnError
+                        } : {}
                     }));
                     await state.commit(changes);
                 }
@@ -30056,6 +30230,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             Q: CONTROL_BYTES
         });
     },
+    "./src/core/relay/detail.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        function errorDetail(value) {
+            const raw = typeof value === "string" ? value : value instanceof Error ? value.message : "";
+            const text = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+            return text ? text.slice(0, 1024) : undefined;
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            m: ()=>errorDetail
+        });
+    },
     "./src/core/relay/engine.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_os__rspack_import_1 = __webpack_require__("node:os");
@@ -30064,22 +30248,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _codex_js__rspack_import_4 = __webpack_require__("./src/core/relay/codex.js");
         var _records_js__rspack_import_5 = __webpack_require__("./src/core/relay/records.js");
         var _intake_js__rspack_import_6 = __webpack_require__("./src/core/relay/intake.js");
-        var _completion_js__rspack_import_7 = __webpack_require__("./src/core/relay/completion.js");
-        var _gateway_js__rspack_import_8 = __webpack_require__("./src/core/gateway.js");
-        var _logins_js__rspack_import_9 = __webpack_require__("./src/core/logins.js");
+        var _sender_prefix_js__rspack_import_7 = __webpack_require__("./src/core/sender-prefix.js");
+        var _completion_js__rspack_import_8 = __webpack_require__("./src/core/relay/completion.js");
+        var _detail_js__rspack_import_11 = __webpack_require__("./src/core/relay/detail.js");
+        var _gateway_js__rspack_import_9 = __webpack_require__("./src/core/gateway.js");
+        var _logins_js__rspack_import_10 = __webpack_require__("./src/core/logins.js");
         function createGateway(accountScope) {
             const account = typeof accountScope === "string" && accountScope ? accountScope : undefined;
             return {
-                resolve: async (ref)=>(0, _gateway_js__rspack_import_8.qE)(await (0, _gateway_js__rspack_import_8.Vq)({
+                resolve: async (ref)=>(0, _gateway_js__rspack_import_9.qE)(await (0, _gateway_js__rspack_import_9.Vq)({
                         account
                     }), ref),
-                tail: async (id)=>(0, _gateway_js__rspack_import_8.bA)(await (0, _gateway_js__rspack_import_8.Vq)({
+                tail: async (id)=>(0, _gateway_js__rspack_import_9.bA)(await (0, _gateway_js__rspack_import_9.Vq)({
                         account
                     }), id, 200),
                 send: async (id, text, extra = {})=>{
                     let session;
                     try {
-                        session = await (0, _gateway_js__rspack_import_8.Vq)({
+                        session = await (0, _gateway_js__rspack_import_9.Vq)({
                             account,
                             signal: extra.signal
                         });
@@ -30087,12 +30273,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         if (error && typeof error === "object" && error.delivery == null) error.delivery = "rejected";
                         throw error;
                     }
-                    return (0, _gateway_js__rspack_import_8.LV)(session, id, text, extra);
+                    return (0, _gateway_js__rspack_import_9.LV)(session, id, text, extra);
                 }
             };
         }
         async function openRelayEngine({ stateDir, profile, env = process.env, gateway, accountScope, clock = Date.now, openSession, openConversation, limits } = {}) {
-            const fromEnv = (0, _logins_js__rspack_import_9.SH)(env);
+            const fromEnv = (0, _logins_js__rspack_import_10.SH)(env);
             let pinnedScope = fromEnv;
             if (accountScope != null && accountScope !== "") {
                 if (typeof accountScope !== "string" || !/^[0-9a-f]{64}$/.test(accountScope)) {
@@ -30139,10 +30325,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const change = async (section, value)=>state.commit([
                     (0, _records_js__rspack_import_5.op)(section, value)
                 ]);
-            const update = async (id, patch)=>change("records", {
+            const update = async (id, patch)=>{
+                const next = {
                     ...state.read().records[id],
                     ...patch
-                });
+                };
+                for (const key of Object.keys(next))if (next[key] === undefined) delete next[key];
+                return change("records", next);
+            };
             const { envelope, newRecord } = (0, _records_js__rspack_import_5.w4)({
                 env,
                 clock
@@ -30154,7 +30344,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 newRecord,
                 stoppedBindings
             });
-            const completions = (0, _completion_js__rspack_import_7.P)({
+            const completions = (0, _completion_js__rspack_import_8.P)({
+                env,
                 state,
                 codex,
                 update,
@@ -30244,6 +30435,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     }
                 } catch (error) {
                     result = {
+                        detail: (0, _detail_js__rspack_import_11.m)(error),
                         delivery: error.delivery === "rejected" ? "rejected" : "unknown",
                         reason: error.delivery === "rejected" ? error.reason === "cancelled" ? "cancelled" : "submission-rejected" : "transport-uncertain"
                     };
@@ -30257,7 +30449,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     submission: delivery,
                     messageId: typeof result?.messageId === "string" ? result.messageId : null,
                     turnId: typeof result?.turnId === "string" ? result.turnId : null,
-                    reason: delivery === "unknown" ? "delivery-unknown" : delivery === "rejected" ? (result.reason ?? "rejected").slice(0, 1024) : null
+                    reason: delivery === "unknown" ? "delivery-unknown" : delivery === "rejected" ? (result.reason ?? "rejected").slice(0, 1024) : null,
+                    detail: delivery === "accepted" ? undefined : (0, _detail_js__rspack_import_11.m)(result.detail ?? result.error ?? result.message)
                 });
                 return state.read().records[id];
             }
@@ -30302,9 +30495,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     if (old.fingerprint !== fingerprint) throw new Error("Idempotency conflict");
                     return (0, _records_js__rspack_import_5.R9)(old);
                 }
-                const text = (0, _records_js__rspack_import_5.Lo)(input.message);
+                const raw = (0, _records_js__rspack_import_5.Lo)(input.message);
                 envelope(input);
                 const r = await route(input);
+                const text = kind === "grok-request" ? (0, _records_js__rspack_import_5.Lo)((0, _sender_prefix_js__rspack_import_7.Xt)(raw, {
+                    threadId: r.threadId,
+                    cwd: r.expectedCwd,
+                    env
+                })) : raw;
                 await baseline(r.targetId);
                 if (state.read().targets[r.targetId].state !== "running") throw new Error("Target coverage is paused");
                 const record = newRecord(kind, id, r, text, {
@@ -31086,7 +31284,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     bindingId: record.bindingId
                 },
                 execution: record.execution,
-                reason: record.reason
+                reason: record.reason,
+                ...record.detail ? {
+                    detail: record.detail
+                } : {}
             };
         }
         function createRecordFactory({ env, clock }) {
@@ -31246,6 +31447,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 "paused"
             ]),
             reason,
+            detail: zod__rspack_import_4.YjP().max(1024).optional(),
             turnId: relayId.nullable(),
             requestId: relayId.nullable(),
             messageId: relayId.nullable(),
@@ -31774,6 +31976,42 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         __webpack_require__.d(__webpack_exports__, {
             Ih: ()=>secretStoreOptions1
+        });
+    },
+    "./src/core/sender-prefix.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_os__rspack_import_0 = __webpack_require__("node:os");
+        const oneLine = (value)=>String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/[\]]/g, ")").trim();
+        function machineName(env = process.env) {
+            try {
+                return oneLine(env.GROK_BOT_MACHINE_NAME || (0, node_os__rspack_import_0.hostname)());
+            } catch  {
+                return "";
+            }
+        }
+        function codexSenderPrefix({ threadId, machine, cwd, details = [], env = process.env } = {}) {
+            const id = oneLine(threadId);
+            if (!id) return "";
+            const where = oneLine(machine ?? machineName(env));
+            const dir = oneLine(cwd);
+            const head = "from Codex thread " + id + (where ? " @ " + where : "") + (dir ? (where ? ", " : " ") + "cwd " + dir : "");
+            const reply = "reply: codex_send({threadId:\"" + id + "\", message:\"...\"})" + (where ? " via MCP on " + where : " via MCP") + " (or CLI: gbot codex send " + id + " \"...\")";
+            return "[" + [
+                head,
+                ...details.map(oneLine).filter(Boolean),
+                reply
+            ].join("; ") + "]";
+        }
+        function withCodexSender(text, fields) {
+            const prefix = codexSenderPrefix(fields);
+            return prefix ? prefix + "\n" + text : text;
+        }
+        function envCodexThreadId(env = process.env) {
+            const id = env.CODEX_THREAD_ID?.trim();
+            return id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined;
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Xt: ()=>withCodexSender,
+            xA: ()=>codexSenderPrefix
         });
     },
     "./src/core/store.js" (__unused_rspack___webpack_module__, __unused_rspack___webpack_exports__, __webpack_require__) {
