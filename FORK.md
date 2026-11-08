@@ -14,12 +14,12 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 Use Node.js 22.19+ (22.x) or 24.2+, with the Grok Bot desktop app signed in once on the same OS user. The generated CLI uses [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain), which is absent in Node 23 and Node 24.0–24.1; the launcher rejects those versions with a nonzero exit and a version diagnostic.
 
-Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.6` release and install that file.
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.7` release and install that file.
 
 macOS or Linux:
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/790ab8f79970115a98c7fb5f3e07791c/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/3562acc9b72ba4f1f433acbb01d58c08/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell:
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/790ab8f79970115a98c7fb5f3e07791c/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/3562acc9b72ba4f1f433acbb01d58c08/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -132,7 +132,7 @@ On a new machine, install the fork and then import. Do not install with `npm ins
 ```sh
 scripts/install-fork.sh --config gbot-accounts.json
 # Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
-scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.6
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.7
 ```
 
 The script clones `https://gitlab.com/aa22396584/grok-bot-cli.git` into `$XDG_CACHE_HOME/grok-bot-cli/src` (default `~/.cache/grok-bot-cli/src`; on Windows, `%LOCALAPPDATA%\grok-bot-cli\src`). `--config` is made absolute before any directory change. The ref may contain only `[A-Za-z0-9._/-]`, must not start with `-`, and is passed to git after `--`. A ref after `--` is that ref (`-- v1.2` does not install `main`). The script fetches the ref, checks that the resolved commit matches `^[0-9a-f]{40}([0-9a-f]{24})?$`, checks it out with `git checkout --detach <sha>` (no path separator), prints it, and refuses a dirty cache. `npm pack` writes to an installer-owned temporary directory outside the checkout; that directory is removed after the run. The installer never deletes unknown cache files. A cache containing a `.tgz` left by an older installer is refused unchanged; preserve or move that cache and use a clean cache location rather than asking this installer to migrate it. It then runs `gbot --version` and `gbot accounts` (an accounts failure does not skip import), `gbot config import` when `--config` was given, and `gbot wake --check --account <alias>` for each alias. A failed import or wake exits non-zero. When import reports logins missing, wake checks for those aliases are skipped, the other aliases are still checked, and the script exits 3. It refuses to run as root or Administrator unless `--allow-root` (PowerShell `-AllowRoot`) is given. `--dry-run` and PowerShell `-DryRun` print the steps and do not run git or npm. The script does not store or print tokens. `scripts/install-fork.sh` is executable.
@@ -392,12 +392,12 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 
 使用 Node.js 22.19+（22.x）或 24.2+，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。產生的 CLI 使用 [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain)；Node 23 與 Node 24.0–24.1 沒有此功能，啟動器會以非零結束碼與版本說明拒絕執行。GitLab（https://gitlab.com/aa22396584/grok-bot-cli）是主要遠端。
 
-不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.6` 附的套件檔再安裝。
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.7` 附的套件檔再安裝。
 
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/790ab8f79970115a98c7fb5f3e07791c/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/3562acc9b72ba4f1f433acbb01d58c08/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -405,7 +405,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/790ab8f79970115a98c7fb5f3e07791c/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/3562acc9b72ba4f1f433acbb01d58c08/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -510,7 +510,7 @@ gbot config import gbot-accounts.json --replace
 ```sh
 scripts/install-fork.sh --config gbot-accounts.json
 # Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
-scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.6
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.7
 ```
 
 腳本把 `https://gitlab.com/aa22396584/grok-bot-cli.git` clone 到 `$XDG_CACHE_HOME/grok-bot-cli/src`（預設 `~/.cache/grok-bot-cli/src`；Windows 是 `%LOCALAPPDATA%\grok-bot-cli\src`）。`--config` 會先變成絕對路徑，再換目錄。ref 只能含 `[A-Za-z0-9._/-]`，不能以 `-` 開頭，並在 `--` 之後傳給 git。`-- v1.2` 不會改裝 `main`。腳本從遠端取出該 ref，確認解析出的 commit 符合 `^[0-9a-f]{40}([0-9a-f]{24})?$`，再用 `git checkout --detach <sha>`（不加路徑分隔的 `--`）檢出，印出它，並拒絕髒的 cache。`npm pack` 只會寫入 checkout 外由安裝程式建立的私有暫存目錄，並在結束時清除該目錄；安裝程式不會刪除未知的 cache 檔案。若 cache 含舊安裝程式留下的 `.tgz`，腳本會原樣保留並拒絕該 cache；請保留或移開舊 cache，使用乾淨的 cache 位置。它只安裝這次 `npm pack` 剛印出的檔案。需要 `npm ci` 是因為 `npm pack` 會跑 `agent-bundle prepack`，用已提交的 `artifact/` 填 `dist/`。接著執行 `gbot --version` 與 `gbot accounts`（accounts 失敗不會跳過 import）；有 `--config` 時執行 `gbot config import`；每個別名再跑 `gbot wake --check --account <別名>`。import 或 wake 失敗會以非 0 結束。import 回報尚未登入時，會跳過那些別名的 wake 檢查、仍檢查其餘別名，並以 3 結束。以 root 或 Administrator 執行會拒絕，除非加上 `--allow-root`（PowerShell 是 `-AllowRoot`）。`--dry-run` 與 PowerShell `-DryRun` 只印步驟，不跑 git 或 npm。腳本不儲存、也不印 token。`scripts/install-fork.sh` 可執行。
