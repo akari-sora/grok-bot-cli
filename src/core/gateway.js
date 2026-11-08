@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { AppAuthError, loadAppAccessToken } from "./app-auth.js";
 import { cursorClientVersion, forgetCachedAppVersion } from "./client-version.js";
@@ -9,6 +9,7 @@ import { secretStoreOptions } from "./secret-store.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
 import { assertAllowedCredentialUrl, redactKnownSecrets, redactSecrets } from "./url-policy.js";
 import { grokApproval, grokApprovalResponseSchema } from "./grok-approvals.js";
+import { fetchStoreBytes } from "./migration-capture.js";
 
 export class GatewayError extends Error {
   constructor(message, info = {}) {
@@ -1930,8 +1931,78 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
   };
 }
 
+// A transcript row body or store blob: the box transcript entry as JSON. Anything else is unreadable.
+function entryObject(text) {
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Bodies the server keeps in the store, read like the app: PresignSandBoxStoreReads for blobs/<sha256>,
+// 8 at a time, kept only when the bytes match the hash. A blob that cannot be read stays unreadable.
+async function transcriptBlobs(session, hashes) {
+  const out = new Map();
+  for (let i = 0; i < hashes.length; i += 8) {
+    const batch = hashes.slice(i, i + 8);
+    try {
+      const data = await backendCall(session, "PresignSandBoxStoreReads", { relPaths: batch.map((h) => "blobs/" + h) });
+      const urls = new Map((Array.isArray(data?.instructions) ? data.instructions : []).map((x) => [x?.relPath, x?.url]));
+      await Promise.all(batch.map(async (h) => {
+        const url = urls.get("blobs/" + h);
+        if (typeof url !== "string" || !url) return;
+        try {
+          const { bytes } = await fetchStoreBytes(url, { cap: 64 * 1024 * 1024 });
+          if (createHash("sha256").update(bytes).digest("hex") === h) out.set(h, bytes);
+        } catch (error) {
+          debug("transcript blob unreadable: " + (error instanceof Error ? error.message : String(error)));
+        }
+      }));
+    } catch (error) {
+      debug("PresignSandBoxStoreReads failed: " + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+  return out;
+}
+
+// The tail of a server-hosted bot (0.78.x: it has no box gateway), read the way the app reads it:
+// ListGrokBotTranscriptEntries for the main session with limit + 1, newest first. Each row's body is
+// the entry the box tail returned, so an entry is that body plus `seq`, oldest first like the box tail.
+// A row with no readable body keeps its id, kind and seq with `unreadable: true`, and the page counts it.
+async function backendTail(session, rec, limit) {
+  const data = await backendCall(session, "ListGrokBotTranscriptEntries", { agentId: rec.id, limit: limit + 1 });
+  const rows = (Array.isArray(data?.entries) ? data.entries : [])
+    .filter((row) => row && typeof row === "object" && Number.isSafeInteger(Number(row.seq)))
+    .sort((a, b) => Number(b.seq) - Number(a.seq))
+    .slice(0, limit)
+    .reverse();
+  const bodies = rows.map((row) => (typeof row.body === "string" && row.body ? entryObject(Buffer.from(row.body, "base64").toString("utf8")) : null));
+  const hashes = [...new Set(rows.filter((row, i) => !bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row) => row.blobHash))];
+  const blobs = hashes.length ? await transcriptBlobs(session, hashes) : new Map();
+  const entries = [];
+  let unreadable = 0;
+  rows.forEach((row, i) => {
+    const body = bodies[i] ?? (blobs.has(row.blobHash) ? entryObject(blobs.get(row.blobHash).toString("utf8")) : null);
+    const seq = Number(row.seq);
+    const entryId = typeof row.entryId === "string" && row.entryId ? row.entryId : "";
+    if (!body) {
+      unreadable += 1;
+      if (entryId) entries.push({ id: entryId, kind: String(row.entryKind || "unknown"), seq, unreadable: true });
+      return;
+    }
+    entries.push((typeof body.id === "string" && body.id) || !entryId ? { ...body, seq } : { ...body, id: entryId, seq });
+  });
+  if (unreadable) debug("transcript tail: " + unreadable + " row bodies unreadable");
+  return { entries, ...(unreadable ? { unreadable } : {}) };
+}
+
 async function transcriptTail(session, rec, limit) {
   const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
+  if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+    return { target: rec, transcript: await backendTail(session, rec, bounded) };
+  }
   const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: bounded });
   return { target: rec, transcript: data };
 }
@@ -1973,7 +2044,7 @@ export async function reconcileDelivery(session, ref, clientNonce) {
     tail = await transcriptTail(session, rec, 200);
   } catch (error) {
     // The server has a status for the nonce that is neither ACCEPTED nor REJECTED nor NOT_FOUND, so it
-    // may still land: keep that answer rather than lose it to a box that is asleep or failing. With no
+    // may still land: keep that answer rather than lose it to a tail read that failed. With no
     // status (none read, or NOT_FOUND) nothing is known, so the error stands.
     if (!backend?.status || backend.status === "NOT_FOUND") throw error;
     const code = error instanceof GatewayError && typeof error.code === "string" && error.code ? error.code : "TAIL_READ_FAILED";

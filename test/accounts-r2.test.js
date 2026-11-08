@@ -1202,9 +1202,8 @@ test("a later relay send stays rejected while the backend keeps answering 401", 
     if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
     if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
     if (target.endsWith("/api/listAgents")) return json({ agents: [] });
-    if (target.endsWith("/api/getAgentTranscriptTail")) {
-      return new Response(JSON.stringify({ entries: [] }), { status: 200 });
-    }
+    // A server bot's tail comes from the backend (0.78.x), not the box gateway.
+    if (rpc === "ListGrokBotTranscriptEntries") return json({ entries: [] });
     prompts.push(body);
     return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
   });

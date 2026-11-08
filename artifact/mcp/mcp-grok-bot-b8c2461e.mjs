@@ -453,8 +453,8 @@ var __webpack_modules__ = {
                     if (void 0 === entry) {
                         entry = __webpack_require__.e(chunkId);
                         promises.push(entry);
-                        var resolve = chunkCache.set.bind(chunkCache, chunkId, null);
-                        entry.then(resolve, ignoreReject);
+                        var resolve1 = chunkCache.set.bind(chunkCache, chunkId, null);
+                        entry.then(resolve1, ignoreReject);
                         chunkCache.set(chunkId, entry);
                     } else null !== entry && promises.push(entry);
                 }
@@ -599,7 +599,7 @@ var __webpack_modules__ = {
             function serializeNumber(number) {
                 return Number.isFinite(number) ? 0 === number && -Infinity === 1 / number ? "$-0" : number : Infinity === number ? "$Infinity" : -Infinity === number ? "$-Infinity" : "$NaN";
             }
-            function processReply(root, formFieldPrefix, temporaryReferences, resolve, reject) {
+            function processReply(root, formFieldPrefix, temporaryReferences, resolve1, reject) {
                 function serializeTypedArray(tag, typedArray) {
                     typedArray = new Blob([
                         new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength)
@@ -611,7 +611,7 @@ var __webpack_modules__ = {
                 }
                 function serializeBinaryReader(reader) {
                     function progress(entry) {
-                        entry.done ? (entry = nextPartId++, data.append(formFieldPrefix + entry, new Blob(buffer)), data.append(formFieldPrefix + streamId, '"$o' + entry.toString(16) + '"'), data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve(data)) : (buffer.push(entry.value), reader.read(new Uint8Array(1024)).then(progress, reject));
+                        entry.done ? (entry = nextPartId++, data.append(formFieldPrefix + entry, new Blob(buffer)), data.append(formFieldPrefix + streamId, '"$o' + entry.toString(16) + '"'), data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve1(data)) : (buffer.push(entry.value), reader.read(new Uint8Array(1024)).then(progress, reject));
                     }
                     null === formData && (formData = new FormData());
                     var data = formData;
@@ -622,7 +622,7 @@ var __webpack_modules__ = {
                 }
                 function serializeReader(reader) {
                     function progress(entry) {
-                        if (entry.done) data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve(data);
+                        if (entry.done) data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve1(data);
                         else try {
                             var partJSON = JSON.stringify(entry.value, resolveToJSON);
                             data.append(formFieldPrefix + streamId, partJSON);
@@ -660,7 +660,7 @@ var __webpack_modules__ = {
                                 return;
                             }
                             pendingParts--;
-                            0 === pendingParts && resolve(data);
+                            0 === pendingParts && resolve1(data);
                         } else try {
                             var _partJSON = JSON.stringify(entry.value, resolveToJSON);
                             data.append(formFieldPrefix + streamId, _partJSON);
@@ -710,7 +710,7 @@ var __webpack_modules__ = {
                                                 var _partJSON2 = serializeModel(value, _lazyId), _data = formData;
                                                 _data.append(formFieldPrefix + _lazyId, _partJSON2);
                                                 pendingParts--;
-                                                0 === pendingParts && resolve(_data);
+                                                0 === pendingParts && resolve1(_data);
                                             } catch (reason) {
                                                 reject(reason);
                                             }
@@ -740,7 +740,7 @@ var __webpack_modules__ = {
                                     partValue = formData;
                                     partValue.append(formFieldPrefix + promiseId, _partJSON3);
                                     pendingParts--;
-                                    0 === pendingParts && resolve(partValue);
+                                    0 === pendingParts && resolve1(partValue);
                                 } catch (reason) {
                                     reject(reason);
                                 }
@@ -833,14 +833,14 @@ var __webpack_modules__ = {
                 var nextPartId = 1, pendingParts = 0, formData = null, writtenObjects = new WeakMap(), modelRoot = root;
                 checkEvalAvailabilityOnceDev();
                 var json = serializeModel(root, 0);
-                null === formData ? resolve(json) : (formData.set(formFieldPrefix + "0", json), 0 === pendingParts && resolve(formData));
+                null === formData ? resolve1(json) : (formData.set(formFieldPrefix + "0", json), 0 === pendingParts && resolve1(formData));
                 return function() {
-                    0 < pendingParts && (pendingParts = 0, null === formData ? resolve(json) : resolve(formData));
+                    0 < pendingParts && (pendingParts = 0, null === formData ? resolve1(json) : resolve1(formData));
                 };
             }
             function encodeFormData(reference) {
-                var resolve, reject, thenable = new Promise(function(res, rej) {
-                    resolve = res;
+                var resolve1, reject, thenable = new Promise(function(res, rej) {
+                    resolve1 = res;
                     reject = rej;
                 });
                 processReply(reference, "", void 0, function(body) {
@@ -851,7 +851,7 @@ var __webpack_modules__ = {
                     }
                     thenable.status = "fulfilled";
                     thenable.value = body;
-                    resolve(body);
+                    resolve1(body);
                 }, function(e) {
                     thenable.status = "rejected";
                     thenable.reason = e;
@@ -3261,7 +3261,7 @@ var __webpack_modules__ = {
                 writable: !0,
                 enumerable: !0,
                 configurable: !0,
-                value: function(resolve, reject) {
+                value: function(resolve1, reject) {
                     var _this = this;
                     switch(this.status){
                         case "resolved_model":
@@ -3270,8 +3270,8 @@ var __webpack_modules__ = {
                         case "resolved_module":
                             initializeModuleChunk(this);
                     }
-                    var resolveCallback = resolve, rejectCallback = reject, wrapperPromise = new Promise(function(res, rej) {
-                        resolve = function(value) {
+                    var resolveCallback = resolve1, rejectCallback = reject, wrapperPromise = new Promise(function(res, rej) {
+                        resolve1 = function(value) {
                             wrapperPromise._debugInfo = _this._debugInfo;
                             res(value);
                         };
@@ -3283,12 +3283,12 @@ var __webpack_modules__ = {
                     wrapperPromise.then(resolveCallback, rejectCallback);
                     switch(this.status){
                         case "fulfilled":
-                            "function" === typeof resolve && resolve(this.value);
+                            "function" === typeof resolve1 && resolve1(this.value);
                             break;
                         case "pending":
                         case "pending_weak":
                         case "blocked":
-                            "function" === typeof resolve && (null === this.value && (this.value = []), this.value.push(resolve));
+                            "function" === typeof resolve1 && (null === this.value && (this.value = []), this.value.push(resolve1));
                             "function" === typeof reject && (null === this.reason && (this.reason = []), this.reason.push(reject));
                             break;
                         case "halted":
@@ -3422,8 +3422,8 @@ var __webpack_modules__ = {
                 return new Map();
             };
             __rspack_unused_export = function(value, options) {
-                return new Promise(function(resolve, reject) {
-                    var abort = processReply(value, "", options && options.temporaryReferences ? options.temporaryReferences : void 0, resolve, reject);
+                return new Promise(function(resolve1, reject) {
+                    var abort = processReply(value, "", options && options.temporaryReferences ? options.temporaryReferences : void 0, resolve1, reject);
                     if (options && options.signal) {
                         var signal = options.signal;
                         if (signal.aborted) abort(signal.reason);
@@ -3519,8 +3519,8 @@ var __webpack_modules__ = {
                 if (void 0 === entry) {
                     entry = __webpack_require__.e(chunkId);
                     promises.push(entry);
-                    var resolve = chunkCache.set.bind(chunkCache, chunkId, null);
-                    entry.then(resolve, ignoreReject);
+                    var resolve1 = chunkCache.set.bind(chunkCache, chunkId, null);
+                    entry.then(resolve1, ignoreReject);
                     chunkCache.set(chunkId, entry);
                 } else null !== entry && promises.push(entry);
             }
@@ -3559,7 +3559,7 @@ var __webpack_modules__ = {
         function serializeNumber(number) {
             return Number.isFinite(number) ? 0 === number && -Infinity === 1 / number ? "$-0" : number : Infinity === number ? "$Infinity" : -Infinity === number ? "$-Infinity" : "$NaN";
         }
-        function processReply(root, formFieldPrefix, temporaryReferences, resolve, reject) {
+        function processReply(root, formFieldPrefix, temporaryReferences, resolve1, reject) {
             function serializeTypedArray(tag, typedArray) {
                 typedArray = new Blob([
                     new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength)
@@ -3571,7 +3571,7 @@ var __webpack_modules__ = {
             }
             function serializeBinaryReader(reader) {
                 function progress(entry) {
-                    entry.done ? (entry = nextPartId++, data.append(formFieldPrefix + entry, new Blob(buffer)), data.append(formFieldPrefix + streamId, '"$o' + entry.toString(16) + '"'), data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve(data)) : (buffer.push(entry.value), reader.read(new Uint8Array(1024)).then(progress, reject));
+                    entry.done ? (entry = nextPartId++, data.append(formFieldPrefix + entry, new Blob(buffer)), data.append(formFieldPrefix + streamId, '"$o' + entry.toString(16) + '"'), data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve1(data)) : (buffer.push(entry.value), reader.read(new Uint8Array(1024)).then(progress, reject));
                 }
                 null === formData && (formData = new FormData());
                 var data = formData;
@@ -3582,7 +3582,7 @@ var __webpack_modules__ = {
             }
             function serializeReader(reader) {
                 function progress(entry) {
-                    if (entry.done) data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve(data);
+                    if (entry.done) data.append(formFieldPrefix + streamId, "C"), pendingParts--, 0 === pendingParts && resolve1(data);
                     else try {
                         var partJSON = JSON.stringify(entry.value, resolveToJSON);
                         data.append(formFieldPrefix + streamId, partJSON);
@@ -3620,7 +3620,7 @@ var __webpack_modules__ = {
                             return;
                         }
                         pendingParts--;
-                        0 === pendingParts && resolve(data);
+                        0 === pendingParts && resolve1(data);
                     } else try {
                         var partJSON$21 = JSON.stringify(entry.value, resolveToJSON);
                         data.append(formFieldPrefix + streamId, partJSON$21);
@@ -3666,7 +3666,7 @@ var __webpack_modules__ = {
                                             var partJSON$24 = serializeModel(value, lazyId$23), data$25 = formData;
                                             data$25.append(formFieldPrefix + lazyId$23, partJSON$24);
                                             pendingParts--;
-                                            0 === pendingParts && resolve(data$25);
+                                            0 === pendingParts && resolve1(data$25);
                                         } catch (reason) {
                                             reject(reason);
                                         }
@@ -3696,7 +3696,7 @@ var __webpack_modules__ = {
                                 partValue = formData;
                                 partValue.append(formFieldPrefix + promiseId, partJSON$27);
                                 pendingParts--;
-                                0 === pendingParts && resolve(partValue);
+                                0 === pendingParts && resolve1(partValue);
                             } catch (reason) {
                                 reject(reason);
                             }
@@ -3786,15 +3786,15 @@ var __webpack_modules__ = {
                 return JSON.stringify(model, resolveToJSON);
             }
             var nextPartId = 1, pendingParts = 0, formData = null, writtenObjects = new WeakMap(), modelRoot = root, json = serializeModel(root, 0);
-            null === formData ? resolve(json) : (formData.set(formFieldPrefix + "0", json), 0 === pendingParts && resolve(formData));
+            null === formData ? resolve1(json) : (formData.set(formFieldPrefix + "0", json), 0 === pendingParts && resolve1(formData));
             return function() {
-                0 < pendingParts && (pendingParts = 0, null === formData ? resolve(json) : resolve(formData));
+                0 < pendingParts && (pendingParts = 0, null === formData ? resolve1(json) : resolve1(formData));
             };
         }
         var boundCache = new WeakMap();
         function encodeFormData(reference) {
-            var resolve, reject, thenable = new Promise(function(res, rej) {
-                resolve = res;
+            var resolve1, reject, thenable = new Promise(function(res, rej) {
+                resolve1 = res;
                 reject = rej;
             });
             processReply(reference, "", void 0, function(body) {
@@ -3805,7 +3805,7 @@ var __webpack_modules__ = {
                 }
                 thenable.status = "fulfilled";
                 thenable.value = body;
-                resolve(body);
+                resolve1(body);
             }, function(e) {
                 thenable.status = "rejected";
                 thenable.reason = e;
@@ -3942,7 +3942,7 @@ var __webpack_modules__ = {
             writable: !0,
             enumerable: !0,
             configurable: !0,
-            value: function(resolve, reject) {
+            value: function(resolve1, reject) {
                 switch(this.status){
                     case "resolved_model":
                         initializeModelChunk(this);
@@ -3952,12 +3952,12 @@ var __webpack_modules__ = {
                 }
                 switch(this.status){
                     case "fulfilled":
-                        "function" === typeof resolve && resolve(this.value);
+                        "function" === typeof resolve1 && resolve1(this.value);
                         break;
                     case "pending":
                     case "pending_weak":
                     case "blocked":
-                        "function" === typeof resolve && (null === this.value && (this.value = []), this.value.push(resolve));
+                        "function" === typeof resolve1 && (null === this.value && (this.value = []), this.value.push(resolve1));
                         "function" === typeof reject && (null === this.reason && (this.reason = []), this.reason.push(reject));
                         break;
                     case "halted":
@@ -4995,8 +4995,8 @@ var __webpack_modules__ = {
             return new Map();
         };
         __rspack_unused_export = function(value, options) {
-            return new Promise(function(resolve, reject) {
-                var abort = processReply(value, "", options && options.temporaryReferences ? options.temporaryReferences : void 0, resolve, reject);
+            return new Promise(function(resolve1, reject) {
+                var abort = processReply(value, "", options && options.temporaryReferences ? options.temporaryReferences : void 0, resolve1, reject);
                 if (options && options.signal) {
                     var signal = options.signal;
                     if (signal.aborted) abort(signal.reason);
@@ -5559,8 +5559,8 @@ var __webpack_modules__ = {
             function lazyInitializer(payload) {
                 if (-1 === payload._status) {
                     var resolveDebugValue = null, rejectDebugValue = null, ioInfo = payload._ioInfo;
-                    null != ioInfo && (ioInfo.start = ioInfo.end = performance.now(), ioInfo.value = new Promise(function(resolve, reject) {
-                        resolveDebugValue = resolve;
+                    null != ioInfo && (ioInfo.start = ioInfo.end = performance.now(), ioInfo.value = new Promise(function(resolve1, reject) {
+                        resolveDebugValue = resolve1;
                         rejectDebugValue = reject;
                     }));
                     ioInfo = payload._result;
@@ -5651,19 +5651,19 @@ var __webpack_modules__ = {
                 prevActScopeDepth !== actScopeDepth - 1 && console.error("You seem to have overlapping act() calls, this is not supported. Be sure to await previous act() calls before making a new one. ");
                 actScopeDepth = prevActScopeDepth;
             }
-            function recursivelyFlushAsyncActWork(returnValue, resolve, reject) {
+            function recursivelyFlushAsyncActWork(returnValue, resolve1, reject) {
                 var queue = ReactSharedInternals.actQueue;
                 if (null !== queue) if (0 !== queue.length) try {
                     flushActQueue(queue);
                     enqueueTask(function() {
-                        return recursivelyFlushAsyncActWork(returnValue, resolve, reject);
+                        return recursivelyFlushAsyncActWork(returnValue, resolve1, reject);
                     });
                     return;
                 } catch (error) {
                     ReactSharedInternals.thrownErrors.push(error);
                 }
                 else ReactSharedInternals.actQueue = null;
-                0 < ReactSharedInternals.thrownErrors.length ? (queue = aggregateErrors(ReactSharedInternals.thrownErrors), ReactSharedInternals.thrownErrors.length = 0, reject(queue)) : resolve(returnValue);
+                0 < ReactSharedInternals.thrownErrors.length ? (queue = aggregateErrors(ReactSharedInternals.thrownErrors), ReactSharedInternals.thrownErrors.length = 0, reject(queue)) : resolve1(returnValue);
             }
             function flushActQueue(queue) {
                 if (!isFlushing) {
@@ -5834,14 +5834,14 @@ var __webpack_modules__ = {
                         didAwaitActCall || didWarnNoAwaitAct || (didWarnNoAwaitAct = !0, console.error("You called act(async () => ...) without await. This could lead to unexpected testing behaviour, interleaving multiple act calls and mixing their scopes. You should - await act(async () => ...);"));
                     });
                     return {
-                        then: function(resolve, reject) {
+                        then: function(resolve1, reject) {
                             didAwaitActCall = !0;
                             thenable.then(function(returnValue) {
                                 popActScope(prevActQueue, prevActScopeDepth);
                                 if (0 === prevActScopeDepth) {
                                     try {
                                         flushActQueue(queue), enqueueTask(function() {
-                                            return recursivelyFlushAsyncActWork(returnValue, resolve, reject);
+                                            return recursivelyFlushAsyncActWork(returnValue, resolve1, reject);
                                         });
                                     } catch (error$0) {
                                         ReactSharedInternals.thrownErrors.push(error$0);
@@ -5851,7 +5851,7 @@ var __webpack_modules__ = {
                                         ReactSharedInternals.thrownErrors.length = 0;
                                         reject(_thrownError);
                                     }
-                                } else resolve(returnValue);
+                                } else resolve1(returnValue);
                             }, function(error) {
                                 popActScope(prevActQueue, prevActScopeDepth);
                                 0 < ReactSharedInternals.thrownErrors.length ? (error = aggregateErrors(ReactSharedInternals.thrownErrors), ReactSharedInternals.thrownErrors.length = 0, reject(error)) : reject(error);
@@ -5866,11 +5866,11 @@ var __webpack_modules__ = {
                 }), ReactSharedInternals.actQueue = null);
                 if (0 < ReactSharedInternals.thrownErrors.length) throw callback = aggregateErrors(ReactSharedInternals.thrownErrors), ReactSharedInternals.thrownErrors.length = 0, callback;
                 return {
-                    then: function(resolve, reject) {
+                    then: function(resolve1, reject) {
                         didAwaitActCall = !0;
                         0 === prevActScopeDepth ? (ReactSharedInternals.actQueue = queue, enqueueTask(function() {
-                            return recursivelyFlushAsyncActWork(returnValue$jscomp$0, resolve, reject);
-                        })) : resolve(returnValue$jscomp$0);
+                            return recursivelyFlushAsyncActWork(returnValue$jscomp$0, resolve1, reject);
+                        })) : resolve1(returnValue$jscomp$0);
                     }
                 };
             };
@@ -8136,7 +8136,7 @@ var __webpack_modules__ = {
             return limit > 0 ? all.slice(0, limit) : all;
         }
         function delay(ms) {
-            return new Promise((resolve)=>setTimeout(resolve, ms));
+            return new Promise((resolve1)=>setTimeout(resolve1, ms));
         }
         __webpack_require__.d(__webpack_exports__, {
             AY: ()=>listThreadsFromDom,
@@ -8230,7 +8230,7 @@ var __webpack_modules__ = {
                 }
                 const url = (0, _loopback_js__rspack_import_1.jv)(rawUrl);
                 signal?.throwIfAborted();
-                await new Promise((resolve, reject)=>{
+                await new Promise((resolve1, reject)=>{
                     const ws = new WebSocket(url);
                     this.#ws = ws;
                     const cleanup = ()=>{
@@ -8248,7 +8248,7 @@ var __webpack_modules__ = {
                     });
                     ws.addEventListener('open', ()=>{
                         cleanup();
-                        resolve();
+                        resolve1();
                     }, {
                         once: true
                     });
@@ -8284,14 +8284,14 @@ var __webpack_modules__ = {
                 };
                 if (params !== undefined) payload.params = params;
                 if (sessionId !== undefined) payload.sessionId = sessionId;
-                return await new Promise((resolve, reject)=>{
+                return await new Promise((resolve1, reject)=>{
                     const timer = setTimeout(()=>{
                         this.#pending.delete(id);
                         reject(new _errors_js__rspack_import_0.sO(`CDP ${method} timed out`));
                     }, 10000);
                     this.#pending.set(id, {
                         timer,
-                        resolve: (value)=>resolve(value),
+                        resolve: (value)=>resolve1(value),
                         reject
                     });
                     try {
@@ -12889,10 +12889,10 @@ var __webpack_modules__ = {
                 pull () {
                     if (void 0 !== terminal) return void 0 === terminal.error ? Promise.resolve() : Promise.reject(terminal.error);
                     options.onPull?.();
-                    return new Promise((resolve, reject)=>{
+                    return new Promise((resolve1, reject)=>{
                         currentPull = {
                             reject,
-                            resolve
+                            resolve: resolve1
                         };
                         latch.openUnsafe();
                     });
@@ -15572,7 +15572,7 @@ var __webpack_modules__ = {
                     siblings: Object.freeze(live.filter((candidate)=>candidate.root === node.root).map(peer))
                 });
             };
-            const resolve = (host, native, fallback)=>{
+            const resolve1 = (host, native, fallback)=>{
                 const carrier = (0, _40_js__rspack_import_3.IC)(host, native);
                 if (void 0 === carrier.conversation) return (0, _736_js__rspack_import_4.hU)('id-not-resolvable');
                 const node = nodeFor(carrier.conversation);
@@ -15804,7 +15804,7 @@ var __webpack_modules__ = {
                         toolCallId
                     }
                 }, keys);
-                return resolve(host, native, 'cursor' === host ? 'inferred' : 'registry');
+                return resolve1(host, native, 'cursor' === host ? 'inferred' : 'registry');
             };
             const registry = {
                 observe (observation) {
@@ -18421,7 +18421,7 @@ var __webpack_modules__ = {
                         Promise.resolve().then(()=>transport.close()),
                         Promise.resolve().then(()=>server.close())
                     ]),
-                    new Promise((resolve)=>setTimeout(resolve, shutdownTimeoutMs))
+                    new Promise((resolve1)=>setTimeout(resolve1, shutdownTimeoutMs))
                 ]);
                 exit(exitCode);
             };
@@ -18867,7 +18867,7 @@ var __webpack_modules__ = {
             }
             async #awaitSettled(record, signal) {
                 if (void 0 !== record.outcome) return;
-                await new Promise((resolve, reject)=>{
+                await new Promise((resolve1, reject)=>{
                     const onAbort = ()=>{
                         reject(new _modelcontextprotocol_server__rspack_import_1.bd(_modelcontextprotocol_server__rspack_import_1.qu.InvalidRequest, 'The tasks/result request was cancelled before the task settled.'));
                     };
@@ -18876,7 +18876,7 @@ var __webpack_modules__ = {
                     });
                     record.settled.then(()=>{
                         signal.removeEventListener('abort', onAbort);
-                        resolve();
+                        resolve1();
                     });
                 });
             }
@@ -18887,8 +18887,8 @@ var __webpack_modules__ = {
                 const createdAt = mcp_tasks_now();
                 const controller = new AbortController();
                 let settle = ()=>void 0;
-                const settled = new Promise((resolve)=>{
-                    settle = resolve;
+                const settled = new Promise((resolve1)=>{
+                    settle = resolve1;
                 });
                 const record = {
                     controller,
@@ -20190,9 +20190,9 @@ var __webpack_modules__ = {
                     const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
                     return `${varKind} ${this.name}${rhs};` + _n;
                 }
-                optimizeNames(names, constants) {
+                optimizeNames(names, constants1) {
                     if (!names[this.name.str]) return;
-                    if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants);
+                    if (this.rhs) this.rhs = optimizeExpr(this.rhs, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20209,9 +20209,9 @@ var __webpack_modules__ = {
                 render({ _n }) {
                     return `${this.lhs} = ${this.rhs};` + _n;
                 }
-                optimizeNames(names, constants) {
+                optimizeNames(names, constants1) {
                     if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects) return;
-                    this.rhs = optimizeExpr(this.rhs, names, constants);
+                    this.rhs = optimizeExpr(this.rhs, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20272,8 +20272,8 @@ var __webpack_modules__ = {
                 optimizeNodes() {
                     return `${this.code}` ? this : void 0;
                 }
-                optimizeNames(names, constants) {
-                    this.code = optimizeExpr(this.code, names, constants);
+                optimizeNames(names, constants1) {
+                    this.code = optimizeExpr(this.code, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20299,12 +20299,12 @@ var __webpack_modules__ = {
                     }
                     return nodes.length > 0 ? this : void 0;
                 }
-                optimizeNames(names, constants) {
+                optimizeNames(names, constants1) {
                     const { nodes } = this;
                     let i = nodes.length;
                     while(i--){
                         const n = nodes[i];
-                        if (n.optimizeNames(names, constants)) continue;
+                        if (n.optimizeNames(names, constants1)) continue;
                         subtractNames(names, n.names);
                         nodes.splice(i, 1);
                     }
@@ -20353,11 +20353,11 @@ var __webpack_modules__ = {
                     if (cond === false || !this.nodes.length) return void 0;
                     return this;
                 }
-                optimizeNames(names, constants) {
+                optimizeNames(names, constants1) {
                     var _a;
-                    this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-                    if (!(super.optimizeNames(names, constants) || this.else)) return;
-                    this.condition = optimizeExpr(this.condition, names, constants);
+                    this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants1);
+                    if (!(super.optimizeNames(names, constants1) || this.else)) return;
+                    this.condition = optimizeExpr(this.condition, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20379,9 +20379,9 @@ var __webpack_modules__ = {
                 render(opts) {
                     return `for(${this.iteration})` + super.render(opts);
                 }
-                optimizeNames(names, constants) {
-                    if (!super.optimizeNames(names, constants)) return;
-                    this.iteration = optimizeExpr(this.iteration, names, constants);
+                optimizeNames(names, constants1) {
+                    if (!super.optimizeNames(names, constants1)) return;
+                    this.iteration = optimizeExpr(this.iteration, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20416,9 +20416,9 @@ var __webpack_modules__ = {
                 render(opts) {
                     return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
                 }
-                optimizeNames(names, constants) {
-                    if (!super.optimizeNames(names, constants)) return;
-                    this.iterable = optimizeExpr(this.iterable, names, constants);
+                optimizeNames(names, constants1) {
+                    if (!super.optimizeNames(names, constants1)) return;
+                    this.iterable = optimizeExpr(this.iterable, names, constants1);
                     return this;
                 }
                 get names() {
@@ -20457,11 +20457,11 @@ var __webpack_modules__ = {
                     (_b = this.finally) === null || _b === void 0 || _b.optimizeNodes();
                     return this;
                 }
-                optimizeNames(names, constants) {
+                optimizeNames(names, constants1) {
                     var _a, _b;
-                    super.optimizeNames(names, constants);
-                    (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants);
-                    (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants);
+                    super.optimizeNames(names, constants1);
+                    (_a = this.catch) === null || _a === void 0 || _a.optimizeNames(names, constants1);
+                    (_b = this.finally) === null || _b === void 0 || _b.optimizeNames(names, constants1);
                     return this;
                 }
                 get names() {
@@ -20716,7 +20716,7 @@ var __webpack_modules__ = {
             function addExprNames(names, from) {
                 return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
             }
-            function optimizeExpr(expr, names, constants) {
+            function optimizeExpr(expr, names, constants1) {
                 if (expr instanceof code_1.Name) return replaceName(expr);
                 if (!canOptimize(expr)) return expr;
                 return new code_1._Code(expr._items.reduce((items, c)=>{
@@ -20726,13 +20726,13 @@ var __webpack_modules__ = {
                     return items;
                 }, []));
                 function replaceName(n) {
-                    const c = constants[n.str];
+                    const c = constants1[n.str];
                     if (c === void 0 || names[n.str] !== 1) return n;
                     delete names[n.str];
                     return c;
                 }
                 function canOptimize(e) {
-                    return e instanceof code_1._Code && e._items.some((c)=>c instanceof code_1.Name && names[c.str] === 1 && constants[c.str] !== void 0);
+                    return e instanceof code_1._Code && e._items.some((c)=>c instanceof code_1.Name && names[c.str] === 1 && constants1[c.str] !== void 0);
                 }
             }
             function subtractNames(names, from) {
@@ -22509,7 +22509,7 @@ var __webpack_modules__ = {
                 ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
                 const schOrFunc = root.refs[ref];
                 if (schOrFunc) return schOrFunc;
-                let _sch = resolve.call(this, root, ref);
+                let _sch = resolve1.call(this, root, ref);
                 if (_sch === void 0) {
                     const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
                     const { schemaId } = this.opts;
@@ -22535,7 +22535,7 @@ var __webpack_modules__ = {
             function sameSchemaEnv(s1, s2) {
                 return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
             }
-            function resolve(root, ref) {
+            function resolve1(root, ref) {
                 let sch;
                 while(typeof (sch = this.refs[ref]) == "string")ref = sch;
                 return sch || this.schemas[ref] || resolveSchema.call(this, root, ref);
@@ -22996,7 +22996,7 @@ var __webpack_modules__ = {
                 else if (typeof uri === "object") uri = parse1(serialize(uri, options), options);
                 return uri;
             }
-            function resolve(baseURI, relativeURI, options) {
+            function resolve1(baseURI, relativeURI, options) {
                 const schemelessOptions = options ? Object.assign({
                     scheme: "null"
                 }, options) : {
@@ -23174,7 +23174,7 @@ var __webpack_modules__ = {
             const fastUri = {
                 SCHEMES,
                 normalize,
-                resolve,
+                resolve: resolve1,
                 resolveComponent,
                 equal,
                 serialize,
@@ -27779,15 +27779,15 @@ var __webpack_modules__ = {
                 };
                 if (isJSONRPCRequest(message)) {
                     this._requestId = message.id;
-                    let resolve;
+                    let resolve1;
                     let reject;
                     const promise = new Promise((promiseResolve, promiseReject)=>{
-                        resolve = promiseResolve;
+                        resolve1 = promiseResolve;
                         reject = promiseReject;
                     });
                     this._deferredResponse = {
                         promise,
-                        resolve,
+                        resolve: resolve1,
                         reject,
                         settled: false
                     };
@@ -28298,9 +28298,9 @@ var __webpack_modules__ = {
                     const streamId = crypto.randomUUID();
                     const initRequest = messages.find((m)=>isInitializeRequest(m));
                     const clientProtocolVersion = initRequest ? initRequest.params.protocolVersion : req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION;
-                    if (this._enableJsonResponse) return new Promise((resolve)=>{
+                    if (this._enableJsonResponse) return new Promise((resolve1)=>{
                         this._streamMapping.set(streamId, {
-                            resolveJson: resolve,
+                            resolveJson: resolve1,
                             cleanup: ()=>{
                                 this._streamMapping.delete(streamId);
                             }
@@ -34979,14 +34979,14 @@ var __webpack_modules__ = {
             return `Multi-round-trip request '${method}' still required input after ${maxRounds} rounds (inputRequired.maxRounds)`;
         }
         function sleep(ms, signal) {
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 if (signal?.aborted) {
                     reject(signal.reason instanceof SdkError1 ? signal.reason : new SdkError1(SdkErrorCode1.RequestTimeout, String(signal.reason)));
                     return;
                 }
                 const timer = setTimeout(()=>{
                     signal?.removeEventListener("abort", onAbort);
-                    resolve();
+                    resolve1();
                 }, ms);
                 const onAbort = ()=>{
                     clearTimeout(timer);
@@ -35664,7 +35664,7 @@ var __webpack_modules__ = {
                 const flowStartedAt = Date.now();
                 let onAbort;
                 let cleanupMessageId;
-                return new Promise((resolve, reject)=>{
+                return new Promise((resolve1, reject)=>{
                     const earlyReject = (error)=>{
                         reject(error);
                     };
@@ -35732,7 +35732,7 @@ var __webpack_modules__ = {
                         }
                         if (decoded.kind === "invalid") return reject(decoded.error);
                         if (decoded.kind === "input_required") {
-                            if (options?.allowInputRequired === true) return resolve(manualInputRequiredValue(decoded));
+                            if (options?.allowInputRequired === true) return resolve1(manualInputRequiredValue(decoded));
                             const flow = {
                                 codec,
                                 request,
@@ -35746,11 +35746,11 @@ var __webpack_modules__ = {
                                         params
                                     }, resultSchema, legOptions)
                             };
-                            return resolve(this._resolveNonCompleteResult(decoded, flow));
+                            return resolve1(this._resolveNonCompleteResult(decoded, flow));
                         }
                         const result = decoded.result;
                         validateStandardSchema(resultSchema, result).then((parseResult)=>{
-                            if (parseResult.success) resolve(parseResult.data);
+                            if (parseResult.success) resolve1(parseResult.data);
                             else reject(new SdkError1(SdkErrorCode1.InvalidResult, `Invalid result for ${request.method}: ${parseResult.error}`));
                         }, reject);
                     });
@@ -36503,7 +36503,7 @@ var __webpack_modules__ = {
             }
             send(message) {
                 if (this._closed) return Promise.reject(new Error("StdioServerTransport is closed"));
-                return new Promise((resolve, reject)=>{
+                return new Promise((resolve1, reject)=>{
                     const json = (0, _src_CX2iR2pK_mjs__rspack_import_1.d)(message);
                     let settled = false;
                     const onError = (error)=>{
@@ -36518,14 +36518,14 @@ var __webpack_modules__ = {
                         settled = true;
                         this._stdout.off("error", onError);
                         this._stdout.off("drain", onDrain);
-                        resolve();
+                        resolve1();
                     };
                     this._stdout.once("error", onError);
                     if (this._stdout.write(json)) {
                         if (settled) return;
                         settled = true;
                         this._stdout.off("error", onError);
-                        resolve();
+                        resolve1();
                     } else if (!settled) this._stdout.once("drain", onDrain);
                 });
             }
@@ -36567,14 +36567,14 @@ var __webpack_modules__ = {
             }
             async whenRequestsAnswered(timeoutMs) {
                 if (this._closed || this._pendingRequests.size === 0) return true;
-                return await new Promise((resolve)=>{
+                return await new Promise((resolve1)=>{
                     const waiter = ()=>{
                         clearTimeout(timer);
-                        resolve(true);
+                        resolve1(true);
                     };
                     const timer = setTimeout(()=>{
                         this._drainWaiters = this._drainWaiters.filter((pending)=>pending !== waiter);
-                        resolve(false);
+                        resolve1(false);
                     }, timeoutMs);
                     this._drainWaiters.push(waiter);
                 });
@@ -46540,8 +46540,8 @@ var __webpack_modules__ = {
                     });
                 },
                 pull () {
-                    return new Promise((resolve)=>{
-                        currentResolve = resolve;
+                    return new Promise((resolve1)=>{
+                        currentResolve = resolve1;
                         latch.openUnsafe();
                     });
                 },
@@ -49434,8 +49434,8 @@ var __webpack_modules__ = {
             const runFork = runForkWith(context);
             return (effect1, options)=>{
                 const fiber = runFork(effect1, options);
-                return new Promise((resolve)=>{
-                    fiber.addObserver((exit)=>resolve(exit));
+                return new Promise((resolve1)=>{
+                    fiber.addObserver((exit)=>resolve1(exit));
                 });
             };
         };
@@ -55742,7 +55742,7 @@ var __webpack_modules__ = {
         const NONE = 0;
         const ASSUMED = 1;
         const PROVEN = 2;
-        function isRecursive(inst, stack, resolve) {
+        function isRecursive(inst, stack, resolve1) {
             const cached = recursive.get(inst);
             if (cached !== undefined) return cached ? PROVEN : NONE;
             if (stack.has(inst)) return PROVEN;
@@ -55750,7 +55750,7 @@ var __webpack_modules__ = {
             let result = NONE;
             const check = (child)=>{
                 if (result !== PROVEN && child?._zod) {
-                    const answer = isRecursive(child, stack, resolve);
+                    const answer = isRecursive(child, stack, resolve1);
                     if (answer > result) result = answer;
                 }
             };
@@ -55759,7 +55759,7 @@ var __webpack_modules__ = {
                 for (const key of Reflect.ownKeys(sh)){
                     const desc = Object.getOwnPropertyDescriptor(sh, key);
                     if (spread && !desc.enumerable) continue;
-                    const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
+                    const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve1) : NONE;
                     if (child > answer) answer = child;
                 }
                 return answer;
@@ -55820,7 +55820,7 @@ var __webpack_modules__ = {
                     break;
                 case "lazy":
                     {
-                        const inner = def._cachedInner ?? (resolve ? inst._zod.innerType : undefined);
+                        const inner = def._cachedInner ?? (resolve1 ? inst._zod.innerType : undefined);
                         merge(inner ? isRecursive(inner, stack, false) : ASSUMED);
                         break;
                     }
@@ -62371,14 +62371,14 @@ var __webpack_modules__ = {
                         }));
                 });
             });
-            await new Promise((resolve, reject)=>{
+            await new Promise((resolve1, reject)=>{
                 server.once('error', reject);
-                server.listen(path, resolve);
+                server.listen(path, resolve1);
             });
             try {
                 await chmod(path, 384);
             } catch (error) {
-                await new Promise((resolve)=>server.close(resolve));
+                await new Promise((resolve1)=>server.close(resolve1));
                 await unlink(path).catch(()=>{});
                 throw error;
             }
@@ -62398,7 +62398,7 @@ var __webpack_modules__ = {
                     if (closed) return;
                     closed = true;
                     for (const client of clients)client.destroy();
-                    await new Promise((resolve)=>server.close(resolve));
+                    await new Promise((resolve1)=>server.close(resolve1));
                     await unlink(path).catch((error)=>{
                         if (error.code !== 'ENOENT') throw error;
                     });
@@ -62425,7 +62425,7 @@ var __webpack_modules__ = {
                 throw error;
             }
             if (!info.isSocket() || info.uid !== process.getuid() || info.mode & 63) throw Error('Claude channel socket is not private to this user');
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 const socket = (0, node_net__rspack_import_2.connect)(path);
                 let sent = false, settled = false;
                 const finish = (error, result)=>{
@@ -62433,7 +62433,7 @@ var __webpack_modules__ = {
                     settled = true;
                     clearTimeout(timer);
                     socket.destroy();
-                    error ? reject(error) : resolve(result);
+                    error ? reject(error) : resolve1(result);
                 };
                 const lost = (error)=>sent ? finish(null, {
                         delivery: 'unknown',
@@ -62916,7 +62916,7 @@ var __webpack_modules__ = {
             return err;
         }
         function connectCodexAppServer(path, { timeoutMs = 15000, signal, onNotification, onServerRequest, onClose } = {}) {
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2147483647) {
                     throw new RangeError("timeoutMs must be an integer 1-2147483647");
                 }
@@ -63265,7 +63265,7 @@ var __webpack_modules__ = {
                         if (!validateUpgradeHead(head, key)) return failAll(new Error("Codex app-server refused the WebSocket upgrade: " + head.split("\r\n")[0]));
                         upgraded = true;
                         clearTimeout(handshakeTimer);
-                        resolve(client);
+                        resolve1(client);
                     }
                     while(!closed){
                         const frame = decodeFrame(buf);
@@ -64511,18 +64511,18 @@ var __webpack_modules__ = {
                     signal,
                     waitSignal
                 ].filter(Boolean);
-                const stopped = new Promise((resolve)=>{
+                const stopped = new Promise((resolve1)=>{
                     notify = ()=>{
-                        if (abortSignals.some((s)=>s.aborted) || closed) resolve([
+                        if (abortSignals.some((s)=>s.aborted) || closed) resolve1([
                             'unknown',
                             'Observation cancelled'
                         ]);
-                        else if (disconnected) resolve([
+                        else if (disconnected) resolve1([
                             'disconnected',
                             'Codex connection closed'
                         ]);
                     };
-                    timer = setTimeout(()=>resolve(overflow ? [
+                    timer = setTimeout(()=>resolve1(overflow ? [
                             'unknown',
                             'Notification coverage overflow; pending interaction status is uncertain'
                         ] : [
@@ -64649,10 +64649,10 @@ var __webpack_modules__ = {
                                 truncated = true;
                             }
                         }
-                        await new Promise((resolve)=>{
+                        await new Promise((resolve1)=>{
                             const listener = ()=>{
                                 wake.delete(listener);
-                                resolve();
+                                resolve1();
                             };
                             wake.add(listener);
                         });
@@ -64688,13 +64688,13 @@ var __webpack_modules__ = {
                     watchSignal
                 ].filter(Boolean);
                 let timer, listener;
-                const reason = await new Promise((resolve)=>{
+                const reason = await new Promise((resolve1)=>{
                     listener = ()=>{
-                        if (signals.some((s)=>s.aborted) || closed) resolve('cancelled');
-                        else if (disconnected) resolve('disconnected');
-                        else if (events.length >= maxEvents) resolve('event-limit');
+                        if (signals.some((s)=>s.aborted) || closed) resolve1('cancelled');
+                        else if (disconnected) resolve1('disconnected');
+                        else if (events.length >= maxEvents) resolve1('event-limit');
                     };
-                    timer = setTimeout(()=>resolve('timeout'), timeoutMs);
+                    timer = setTimeout(()=>resolve1('timeout'), timeoutMs);
                     wake.add(listener);
                     for (const s of signals)s.addEventListener('abort', listener, {
                         once: true
@@ -65479,10 +65479,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
         var _app_session_js__rspack_import_5 = __webpack_require__("./src/core/app-session.js");
         var _logins_js__rspack_import_6 = __webpack_require__("./src/core/logins.js");
-        var _secret_store_js__rspack_import_10 = __webpack_require__("./src/core/secret-store.js");
+        var _secret_store_js__rspack_import_11 = __webpack_require__("./src/core/secret-store.js");
         var _store_js__rspack_import_7 = __webpack_require__("./src/core/store.js");
         var _url_policy_js__rspack_import_8 = __webpack_require__("./src/core/url-policy.js");
         var _grok_approvals_js__rspack_import_9 = __webpack_require__("./src/core/grok-approvals.js");
+        var _migration_capture_js__rspack_import_10 = __webpack_require__("./src/core/migration-capture.js");
         class GatewayError extends Error {
             constructor(message, info = {}){
                 super((0, _url_policy_js__rspack_import_8.fp)(message));
@@ -65585,7 +65586,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function descriptorSession(account) {
             const loaded = (0, _app_session_js__rspack_import_5.Z2)({
                 account,
-                ...(0, _secret_store_js__rspack_import_10.Ih)()
+                ...(0, _secret_store_js__rspack_import_11.Ih)()
             });
             return loaded ? sessionFields(loaded) : null;
         }
@@ -65668,7 +65669,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scope,
                     home: (0, node_os__rspack_import_1.homedir)(),
                     env: process.env,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
@@ -65726,7 +65727,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scope: session.accountScope,
                     home: (0, node_os__rspack_import_1.homedir)(),
                     env: process.env,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
                 return attachBackend(session, {
                     scope: session.accountScope,
@@ -65743,7 +65744,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             try {
                 choice = (0, _logins_js__rspack_import_6.cq)({
                     account,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
@@ -65793,7 +65794,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } catch  {}
                 return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
             }
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 const abort = ()=>{
                     try {
                         onAbort?.();
@@ -65805,7 +65806,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
                 promise.then((value)=>{
                     signal.removeEventListener("abort", abort);
-                    resolve(value);
+                    resolve1(value);
                 }, (error)=>{
                     signal.removeEventListener("abort", abort);
                     reject(error);
@@ -65974,10 +65975,10 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (signal?.aborted) {
                 return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
             }
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 const timer = setTimeout(()=>{
                     signal?.removeEventListener("abort", onAbort);
-                    resolve();
+                    resolve1();
                 }, ms);
                 const onAbort = ()=>{
                     clearTimeout(timer);
@@ -66231,7 +66232,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             scope,
                             home: (0, node_os__rspack_import_1.homedir)(),
                             env: process.env,
-                            ...(0, _secret_store_js__rspack_import_10.Ih)()
+                            ...(0, _secret_store_js__rspack_import_11.Ih)()
                         });
                         const result = await wakeSandbox(loaded.token, {
                             signal: controller.signal,
@@ -66488,7 +66489,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         scope: auth.scope,
                         home: (0, node_os__rspack_import_1.homedir)(),
                         env: process.env,
-                        ...(0, _secret_store_js__rspack_import_10.Ih)()
+                        ...(0, _secret_store_js__rspack_import_11.Ih)()
                     });
                 } catch (error) {
                     throw scrubOutbound(toGatewayError(error), []);
@@ -67428,8 +67429,96 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 clientNonce: body.clientNonce
             };
         }
+        function entryObject(text) {
+            try {
+                const value = JSON.parse(text);
+                return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+            } catch  {
+                return null;
+            }
+        }
+        async function transcriptBlobs(session, hashes) {
+            const out = new Map();
+            for(let i = 0; i < hashes.length; i += 8){
+                const batch = hashes.slice(i, i + 8);
+                try {
+                    const data = await backendCall(session, "PresignSandBoxStoreReads", {
+                        relPaths: batch.map((h)=>"blobs/" + h)
+                    });
+                    const urls = new Map((Array.isArray(data?.instructions) ? data.instructions : []).map((x)=>[
+                            x?.relPath,
+                            x?.url
+                        ]));
+                    await Promise.all(batch.map(async (h)=>{
+                        const url = urls.get("blobs/" + h);
+                        if (typeof url !== "string" || !url) return;
+                        try {
+                            const { bytes } = await (0, _migration_capture_js__rspack_import_10.$8)(url, {
+                                cap: 64 * 1024 * 1024
+                            });
+                            if ((0, node_crypto__rspack_import_0.createHash)("sha256").update(bytes).digest("hex") === h) out.set(h, bytes);
+                        } catch (error) {
+                            debug("transcript blob unreadable: " + (error instanceof Error ? error.message : String(error)));
+                        }
+                    }));
+                } catch (error) {
+                    debug("PresignSandBoxStoreReads failed: " + (error instanceof Error ? error.message : String(error)));
+                }
+            }
+            return out;
+        }
+        async function backendTail(session, rec, limit) {
+            const data = await backendCall(session, "ListGrokBotTranscriptEntries", {
+                agentId: rec.id,
+                limit: limit + 1
+            });
+            const rows = (Array.isArray(data?.entries) ? data.entries : []).filter((row)=>row && typeof row === "object" && Number.isSafeInteger(Number(row.seq))).sort((a, b)=>Number(b.seq) - Number(a.seq)).slice(0, limit).reverse();
+            const bodies = rows.map((row)=>typeof row.body === "string" && row.body ? entryObject(Buffer.from(row.body, "base64").toString("utf8")) : null);
+            const hashes = [
+                ...new Set(rows.filter((row, i)=>!bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row)=>row.blobHash))
+            ];
+            const blobs = hashes.length ? await transcriptBlobs(session, hashes) : new Map();
+            const entries = [];
+            let unreadable = 0;
+            rows.forEach((row, i)=>{
+                const body = bodies[i] ?? (blobs.has(row.blobHash) ? entryObject(blobs.get(row.blobHash).toString("utf8")) : null);
+                const seq = Number(row.seq);
+                const entryId = typeof row.entryId === "string" && row.entryId ? row.entryId : "";
+                if (!body) {
+                    unreadable += 1;
+                    if (entryId) entries.push({
+                        id: entryId,
+                        kind: String(row.entryKind || "unknown"),
+                        seq,
+                        unreadable: true
+                    });
+                    return;
+                }
+                entries.push(typeof body.id === "string" && body.id || !entryId ? {
+                    ...body,
+                    seq
+                } : {
+                    ...body,
+                    id: entryId,
+                    seq
+                });
+            });
+            if (unreadable) debug("transcript tail: " + unreadable + " row bodies unreadable");
+            return {
+                entries,
+                ...unreadable ? {
+                    unreadable
+                } : {}
+            };
+        }
         async function transcriptTail(session, rec, limit) {
             const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
+            if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+                return {
+                    target: rec,
+                    transcript: await backendTail(session, rec, bounded)
+                };
+            }
             const data = await gatewayCall(session, "getAgentTranscriptTail", {
                 id: rec.id,
                 limit: bounded
@@ -68523,6 +68612,982 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             cq: ()=>resolveGrokBotLogin1
         });
     },
+    "./src/core/migration-capture.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
+        var _migration_js__rspack_import_1 = __webpack_require__("./src/core/migration.js");
+        const ARCHIVE_FORMAT = 'gbot-migration';
+        const ARCHIVE_VERSION = 2;
+        const TRANSCRIPT_PAGE = 500;
+        const DEFAULT_MAX_FILE_BYTES = null && 8 * 1024 * 1024;
+        const DEFAULT_MAX_TOTAL_BYTES = null && 256 * 1024 * 1024;
+        const MAX_TRANSCRIPT_PAGES = 2000;
+        const BLOB_BATCH = 8;
+        const MANIFEST_RANGE = null && 8 * 1024 * 1024;
+        const MANIFEST_PARALLEL = 8;
+        const MAX_MANIFEST_BYTES = null && 1024 * 1024 * 1024;
+        const sha256 = (buf)=>createHash('sha256').update(buf).digest('hex');
+        const SHA_RE = /^[0-9a-f]{64}$/;
+        const object = (v)=>v !== null && typeof v === 'object' && !Array.isArray(v);
+        const str = (v)=>typeof v === 'string' ? v : '';
+        const num = (v)=>{
+            const n = typeof v === 'string' ? Number(v) : v;
+            return Number.isFinite(n) ? n : null;
+        };
+        function assertStoreUrl(raw, env = process.env) {
+            let url;
+            try {
+                url = new URL(raw);
+            } catch  {
+                throw new _migration_js__rspack_import_1.Py('The store returned an invalid read URL.');
+            }
+            const test = env.GROK_BOT_TEST === '1' || env.NODE_ENV === 'test';
+            if (test) {
+                if (![
+                    '127.0.0.1',
+                    'localhost',
+                    '[::1]'
+                ].includes(url.hostname)) throw new _migration_js__rspack_import_1.Py('Store URL must be loopback in test mode.');
+                return url.href;
+            }
+            if (url.protocol !== 'https:' || !/^sand-box-stores\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/.test(url.hostname)) {
+                throw new _migration_js__rspack_import_1.Py('The store returned a read URL for an unexpected host; nothing was fetched.');
+            }
+            return url.href;
+        }
+        async function fetchStoreBytes(url, { cap, headers = {}, fetchImpl = fetch, timeoutMs = 120000 } = {}) {
+            const res = await fetchImpl(assertStoreUrl(url), {
+                redirect: 'error',
+                headers,
+                signal: AbortSignal.timeout(timeoutMs)
+            });
+            if (!(res.status === 200 || res.status === 206)) {
+                await res.body?.cancel?.();
+                const error = new _migration_js__rspack_import_1.Py(`Store read failed (HTTP ${res.status}).`);
+                error.status = res.status;
+                throw error;
+            }
+            const reader = res.body?.getReader();
+            if (!reader) throw new _migration_js__rspack_import_1.Py('Store read returned no body.');
+            const chunks = [];
+            let size = 0;
+            try {
+                for(;;){
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    size += value.byteLength;
+                    if (cap && size > cap) throw new _migration_js__rspack_import_1.Py('Store object exceeds the read budget.');
+                    chunks.push(Buffer.from(value));
+                }
+            } finally{
+                try {
+                    await reader.cancel();
+                } catch  {}
+            }
+            return {
+                bytes: Buffer.concat(chunks),
+                etag: res.headers.get('etag'),
+                contentRange: res.headers.get('content-range')
+            };
+        }
+        function decodeBody(b64) {
+            if (typeof b64 !== 'string' || !b64) return null;
+            try {
+                return JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+            } catch  {
+                return null;
+            }
+        }
+        function normalizeEntry(row, body) {
+            const kind = str(row.entryKind) || str(body?.kind) || 'unknown';
+            const base = {
+                seq: num(row.seq),
+                entryId: str(row.entryId) || str(body?.id) || null,
+                kind
+            };
+            const ts = num(body?.timestampMs) ?? num(body?.createdAt) ?? null;
+            if (body && kind === 'message' && (body.role === 'user' || body.role === 'assistant')) {
+                return {
+                    ...base,
+                    role: body.role,
+                    text: typeof body.content === 'string' ? body.content : JSON.stringify(body.content ?? ''),
+                    timestampMs: ts
+                };
+            }
+            if (body && kind === 'send-message' && body.message?.type === 'text') {
+                return {
+                    ...base,
+                    role: 'assistant',
+                    text: str(body.message.content),
+                    timestampMs: ts
+                };
+            }
+            return {
+                ...base,
+                role: 'event',
+                text: body ? JSON.stringify(body.event ?? body).slice(0, 2000) : '',
+                timestampMs: ts
+            };
+        }
+        async function readFullTranscript({ rpc, readBlobs, agentId, sessionId = '' }) {
+            const rows = new Map();
+            let beforeSeq;
+            let generation;
+            let pages = 0;
+            for(;;){
+                if (++pages > MAX_TRANSCRIPT_PAGES) throw new MigrationError("Transcript pagination did not end.");
+                const body = {
+                    agentId,
+                    limit: TRANSCRIPT_PAGE + 1,
+                    ...sessionId ? {
+                        sessionId
+                    } : {},
+                    ...beforeSeq === undefined ? {} : {
+                        beforeSeq: String(beforeSeq)
+                    },
+                    ...generation ? {
+                        generation
+                    } : {}
+                };
+                const page = await rpc("ListGrokBotTranscriptEntries", body);
+                const entries = Array.isArray(page?.entries) ? page.entries : [];
+                if (generation === undefined) generation = num(page?.generation) ?? 0;
+                else if ((num(page?.generation) ?? 0) !== generation) throw new MigrationError("The transcript changed generation during the read; run the capture again.");
+                let min = Infinity;
+                for (const e of entries){
+                    const seq = num(e.seq);
+                    if (seq === null) throw new MigrationError("Transcript row without a sequence number.");
+                    const seen = rows.get(seq);
+                    if (seen && JSON.stringify(seen) !== JSON.stringify(e)) throw new MigrationError(`Transcript row ${seq} changed during the read; run the capture again.`);
+                    rows.set(seq, e);
+                    min = Math.min(min, seq);
+                }
+                if (!entries.length || min <= 1) break;
+                if (beforeSeq !== undefined && min >= beforeSeq) throw new MigrationError("Transcript pagination did not advance.");
+                beforeSeq = min;
+            }
+            const ordered = [
+                ...rows.values()
+            ].sort((a, b)=>num(a.seq) - num(b.seq));
+            const missing = ordered.filter((e)=>!e.body && (e.blobHash || e.bodyOmitted));
+            const blobs = missing.length ? await readBlobs(missing.map((e)=>e.blobHash).filter((h)=>SHA_RE.test(h ?? ''))) : new Map();
+            const out = [];
+            let unreadable = 0;
+            for (const e of ordered){
+                let body = decodeBody(e.body);
+                if (!body && e.blobHash && blobs.has(e.blobHash)) {
+                    try {
+                        body = JSON.parse(blobs.get(e.blobHash).toString('utf8'));
+                    } catch  {
+                        body = null;
+                    }
+                }
+                if (!body) unreadable++;
+                out.push({
+                    row: {
+                        seq: e.seq,
+                        entryKind: e.entryKind,
+                        entryId: e.entryId ?? null,
+                        updatedSeq: e.updatedSeq ?? null
+                    },
+                    body,
+                    message: normalizeEntry(e, body)
+                });
+            }
+            const seqs = out.map((e)=>num(e.row.seq));
+            const gaps = [];
+            for(let i = 1; i < seqs.length; i++)if (seqs[i] !== seqs[i - 1] + 1) gaps.push([
+                seqs[i - 1],
+                seqs[i]
+            ]);
+            return {
+                entries: out,
+                pages,
+                generation,
+                unreadable,
+                firstSeq: seqs[0] ?? null,
+                lastSeq: seqs.at(-1) ?? null,
+                gaps
+            };
+        }
+        async function readStoreManifest({ presign, fetchImpl = fetch }) {
+            for(let attempt = 0; attempt < 3; attempt++){
+                const url = await presign('manifest.json');
+                const first = await fetchStoreBytes(url, {
+                    cap: MANIFEST_RANGE,
+                    headers: {
+                        Range: `bytes=0-${MANIFEST_RANGE - 1}`
+                    },
+                    fetchImpl
+                });
+                const total = Number(/\/(\d+)$/.exec(first.contentRange ?? '')?.[1] ?? first.bytes.length);
+                if (!Number.isSafeInteger(total) || total > MAX_MANIFEST_BYTES) throw new MigrationError('The box store manifest is too large.');
+                const parts = [
+                    first.bytes
+                ];
+                const ranges = [];
+                for(let start = first.bytes.length; start < total; start += MANIFEST_RANGE)ranges.push([
+                    start,
+                    Math.min(total, start + MANIFEST_RANGE) - 1
+                ]);
+                let changed = false;
+                for(let i = 0; i < ranges.length && !changed; i += MANIFEST_PARALLEL){
+                    const batch = await Promise.allSettled(ranges.slice(i, i + MANIFEST_PARALLEL).map(([a, b])=>fetchStoreBytes(url, {
+                            cap: b - a + 1,
+                            headers: {
+                                Range: `bytes=${a}-${b}`,
+                                ...first.etag ? {
+                                    'If-Match': first.etag
+                                } : {}
+                            },
+                            fetchImpl
+                        })));
+                    for (const r of batch){
+                        if (r.status === 'rejected') {
+                            if (r.reason?.status === 412) {
+                                changed = true;
+                                break;
+                            }
+                            throw r.reason;
+                        }
+                        parts.push(r.value.bytes);
+                    }
+                }
+                if (changed) continue;
+                const bytes = Buffer.concat(parts);
+                if (bytes.length !== total) throw new MigrationError('The box store manifest read was incomplete.');
+                let parsed;
+                try {
+                    parsed = JSON.parse(bytes.toString('utf8'));
+                } catch  {
+                    throw new MigrationError('The box store manifest is not valid JSON.');
+                }
+                if (!object(parsed?.entries)) throw new MigrationError('Unsupported box store manifest.');
+                return {
+                    updatedAtMs: num(parsed.updatedAtMs),
+                    version: parsed.version,
+                    entries: parsed.entries,
+                    bytes: total
+                };
+            }
+            throw new MigrationError('The box store manifest kept changing during the read; run the capture again.');
+        }
+        const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|\.?credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
+        const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.azure|\.oci|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|\.config\/rclone|\.config\/hub|\.config\/op|\.config\/doctl|\.local\/share\/keyrings|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;
+        const isSecretPath = (p)=>SECRET_PATH.test(p) || SECRET_DIR.test(p);
+        const secretEntries = (entries)=>Object.fromEntries(Object.entries(entries).filter(([p])=>isSecretPath(p)));
+        const UNSAFE_PATH = /(^\/|\\|\0|(^|\/)\.\.?(\/|$))/;
+        const isUnsafeBoxPath = (p)=>typeof p !== 'string' || !p || UNSAFE_PATH.test(p);
+        function selectBoxFiles(entries, { agentId, referenced = [], skillDirs = [], projects = [] }) {
+            const picks = new Map();
+            const secretShas = new Set(Object.entries(entries).filter(([p, e])=>isSecretPath(p) && e?.sha).map(([, e])=>e.sha));
+            const add = (path, reason)=>{
+                const entry = entries[path];
+                if (!entry || picks.has(path) || isSecretPath(path) || isUnsafeBoxPath(path) || entry.sha && secretShas.has(entry.sha)) return;
+                picks.set(path, {
+                    path,
+                    entry,
+                    reason
+                });
+            };
+            const prefixes = [
+                [
+                    `home/box/sand-data/agents/${agentId}/`,
+                    'bot-data'
+                ],
+                [
+                    'home/box/sand-data/user-memory/',
+                    'user-memory'
+                ],
+                ...projects.map((slug)=>[
+                        `home/box/sand-data/projects/${slug}/`,
+                        'project-memory'
+                    ]),
+                [
+                    `home/box/sand-data/agent-transcripts/${agentId}/`,
+                    "box-transcript"
+                ],
+                ...skillDirs.map((d)=>[
+                        `home/box/sand-data/workflows/${d}/`,
+                        'skill'
+                    ])
+            ];
+            for (const path of Object.keys(entries)){
+                for (const [prefix, reason] of prefixes)if (path.startsWith(prefix)) add(path, reason);
+            }
+            for (const ref of referenced){
+                const p = ref.replace(/^\/+/, '').replace(/^~\//, 'home/box/').replace(/^home\/box\/agent-data\//, 'home/box/sand-data/');
+                if (entries[p]) add(p, 'referenced');
+                else {
+                    const dir = p.endsWith('/') ? p : p + '/';
+                    for (const path of Object.keys(entries))if (path.startsWith(dir) && !path.slice(dir.length).includes('/')) add(path, 'referenced');
+                }
+            }
+            return [
+                ...picks.values()
+            ].sort((a, b)=>a.path.localeCompare(b.path));
+        }
+        function referencedBoxPaths(texts) {
+            const found = new Set();
+            for (const t of texts){
+                for (const m of String(t ?? '').matchAll(/(?:\/home\/box\/|\/workspace\/|~\/)[A-Za-z0-9._\-/]+[A-Za-z0-9_\-]/g)){
+                    const p = m[0].startsWith('~/') ? '/home/box/' + m[0].slice(2) : m[0];
+                    if (!p.includes('..')) found.add(p);
+                }
+            }
+            return [
+                ...found
+            ].sort();
+        }
+        function parseCron(schedule) {
+            const s = str(schedule).trim();
+            const m = /^CRON_TZ=(\S+)\s+(.+)$/.exec(s);
+            return m ? {
+                cron: m[2].trim(),
+                timezone: m[1]
+            } : {
+                cron: s,
+                timezone: null
+            };
+        }
+        function normalizeAutomation(record) {
+            const trigger = object(record.trigger) ? record.trigger : {};
+            const schedule = str(trigger.schedule) || str(record.schedule);
+            const isCron = trigger.type === 'cron' || !!schedule && !trigger.listeners;
+            const listeners = Array.isArray(trigger.listeners) ? trigger.listeners : [];
+            const eventKinds = [
+                ...new Set(listeners.map((l)=>str(l?.type)).filter(Boolean))
+            ];
+            const { cron, timezone } = isCron ? parseCron(schedule) : {
+                cron: '',
+                timezone: null
+            };
+            return {
+                id: str(record.id),
+                name: str(record.name),
+                prompt: str(record.prompt),
+                enabled: record.isEnabled === true,
+                trigger: isCron ? 'schedule' : eventKinds.length === 1 ? eventKinds[0] : eventKinds.length ? 'other' : 'other',
+                scheduleCron: cron,
+                timezone,
+                scheduleText: str(record.triggerDescription),
+                triggerDetails: isCron ? '' : JSON.stringify(listeners),
+                lastRunAt: record.lastRunAt ?? null,
+                nextRunAt: record.nextRunAt ?? null,
+                runs: Array.isArray(record.runs) ? record.runs.length : 0,
+                provenance: str(record.provenance),
+                boxPath: str(record.filePath)
+            };
+        }
+        async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes = DEFAULT_MAX_FILE_BYTES, maxTotalBytes = DEFAULT_MAX_TOTAL_BYTES, now = ()=>new Date() }) {
+            const progress = io.onProgress ?? (()=>{});
+            const coverage = {};
+            const note = (area, status, detail = {})=>{
+                coverage[area] = {
+                    status,
+                    ...detail
+                };
+            };
+            const attempt = async (area, fn, onError)=>{
+                try {
+                    return await fn();
+                } catch (error) {
+                    const message = String(error?.message ?? error).slice(0, 300);
+                    note(area, /403|permission/i.test(message) ? 'unavailable' : /404|not_found|not available/i.test(message) ? 'not-applicable' : 'failed', {
+                        reason: message
+                    });
+                    return onError;
+                }
+            };
+            progress('roster');
+            const roster = await io.rpc('ListGrokBotAgents', {});
+            const row = (roster?.agents ?? []).find((a)=>a?.agentId === agentId || a?.legacyAgentId === agentId);
+            if (!row) throw new MigrationError('The selected bot is not in this login\'s roster.');
+            const bot = {
+                id: row.agentId,
+                serverId: str(row.id),
+                name: str(row.name),
+                title: str(row.title),
+                instructions: str(row.description),
+                kind: row.kind === 'GROK_BOT_AGENT_KIND_ROOM' ? 'group' : 'bot',
+                harness: str(row.harness),
+                avatar: {
+                    shape: str(row.avatarShape),
+                    color: str(row.avatarColor)
+                },
+                createdAtMs: num(row.createdAtMs),
+                updatedAtMs: num(row.updatedAtMs),
+                members: Array.isArray(row.memberAgentIds) ? row.memberAgentIds : []
+            };
+            note('identity', 'complete', {
+                source: 'ListGrokBotAgents'
+            });
+            const groups = (roster?.agents ?? []).filter((a)=>a?.kind === 'GROK_BOT_AGENT_KIND_ROOM' && (a.memberAgentIds ?? []).includes(agentId)).map((a)=>({
+                    id: str(a.agentId),
+                    name: str(a.name),
+                    members: (a.memberAgentIds ?? []).map((m)=>{
+                        const peer = (roster.agents ?? []).find((x)=>x?.agentId === m);
+                        return {
+                            id: m,
+                            name: str(peer?.name)
+                        };
+                    })
+                }));
+            note('groups', 'complete', {
+                count: groups.length,
+                note: groups.length ? 'Group chats are listed; their conversations belong to the group, not this bot.' : undefined
+            });
+            const blobReader = async (hashes)=>{
+                const out = new Map();
+                for(let i = 0; i < hashes.length; i += BLOB_BATCH){
+                    const batch = hashes.slice(i, i + BLOB_BATCH);
+                    const urls = await io.presignMany(batch.map((h)=>'blobs/' + h));
+                    await Promise.all(batch.map(async (h)=>{
+                        const url = urls.get('blobs/' + h);
+                        if (!url) return;
+                        const { bytes } = await fetchStoreBytes(url, {
+                            cap: 64 * 1024 * 1024,
+                            fetchImpl: io.fetchImpl
+                        });
+                        if (sha256(bytes) === h) out.set(h, bytes);
+                    }));
+                }
+                return out;
+            };
+            progress('sessions');
+            const sessions = await attempt('sessions', async ()=>{
+                const r = await io.rpc('ListGrokBotAgentSessions', {
+                    agentId
+                });
+                const list = Array.isArray(r?.sessions) ? r.sessions : [];
+                note('sessions', 'complete', {
+                    count: list.length
+                });
+                return list.map((s)=>({
+                        sessionId: str(s.sessionId),
+                        kind: str(s.kind),
+                        createdAtMs: num(s.createdAtMs),
+                        lastActivityAtMs: num(s.lastActivityAtMs)
+                    }));
+            }, []);
+            const transcripts = [];
+            for (const sessionId of [
+                '',
+                ...sessions.map((s)=>s.sessionId).filter(Boolean)
+            ]){
+                progress("transcript " + (sessionId || 'main'));
+                const t = await attempt("transcript" + (sessionId ? ':' + sessionId : ''), ()=>readFullTranscript({
+                        rpc: io.rpc,
+                        readBlobs: blobReader,
+                        agentId,
+                        sessionId
+                    }), null);
+                if (t) transcripts.push({
+                    sessionId,
+                    ...t
+                });
+            }
+            const main = transcripts.find((t)=>t.sessionId === '');
+            if (main) {
+                const messages = main.entries.filter((e)=>e.message.role === 'user' || e.message.role === 'assistant').length;
+                note("transcript", main.unreadable ? 'partial' : 'complete', {
+                    source: "ListGrokBotTranscriptEntries (beforeSeq pagination)",
+                    rows: main.entries.length,
+                    messages,
+                    firstSeq: main.firstSeq,
+                    lastSeq: main.lastSeq,
+                    pages: main.pages,
+                    unreadableRows: main.unreadable,
+                    seqGaps: main.gaps.length,
+                    note: main.gaps.length ? 'Sequence numbers with no row (deleted, rolled back or never written); the API returns nothing for them.' : undefined
+                });
+            }
+            progress('automations');
+            const automations = await attempt('automations', async ()=>{
+                const r = await io.rpc('ListGrokBotAgentAutomations', {
+                    agentId,
+                    timeZone
+                });
+                const list = (r?.automations ?? []).map((a)=>{
+                    try {
+                        return normalizeAutomation(JSON.parse(a.recordJson));
+                    } catch  {
+                        return null;
+                    }
+                });
+                note('automations', list.includes(null) ? 'partial' : 'complete', {
+                    count: list.filter(Boolean).length
+                });
+                return list.filter(Boolean);
+            }, []);
+            await attempt('routines', async ()=>{
+                const r = await io.rpc('ListGrokBotAgentRoutines', {
+                    agentId,
+                    timeZone
+                });
+                note('routines', 'complete', {
+                    count: (r?.routines ?? []).length,
+                    note: 'Routines are listed with automations.'
+                });
+            });
+            progress('tasks');
+            const todos = await attempt('todos', async ()=>{
+                const r = await io.rpc('ListGrokBotAgentTodos', {
+                    agentId
+                });
+                const list = (r?.todos ?? []).map((t)=>({
+                        id: str(t.id),
+                        content: str(t.content),
+                        status: str(t.status).replace('TODO_STATUS_', '').toLowerCase(),
+                        createdAt: num(t.createdAt),
+                        updatedAt: num(t.updatedAt),
+                        dependencies: t.dependencies ?? []
+                    }));
+                note('todos', 'complete', {
+                    count: list.length,
+                    open: list.filter((t)=>t.status === 'pending' || t.status === 'in_progress').length
+                });
+                return list;
+            }, []);
+            const tasks = await attempt('tasks', async ()=>{
+                const a = await io.rpc('ListGrokBotAgentTasks', {
+                    agentId,
+                    includeRecentlyDone: true
+                });
+                const b = await io.rpc('ListGrokBotTasks', {
+                    agentId
+                });
+                const list = [
+                    ...(a?.tasks ?? []).map((t)=>({
+                            source: 'agent-task',
+                            ...t
+                        })),
+                    ...(b?.tasks ?? []).map((t)=>({
+                            source: 'task',
+                            ...t
+                        }))
+                ];
+                note('tasks', 'complete', {
+                    count: list.length
+                });
+                return list;
+            }, []);
+            const subagents = await attempt('subagents', async ()=>{
+                const r = await io.rpc('ListGrokBotSubagents', {
+                    agentId
+                });
+                const list = (r?.subagents ?? []).map((a)=>({
+                        id: str(a.id ?? a.subagentId),
+                        name: str(a.name ?? a.title),
+                        status: str(a.status ?? a.state)
+                    }));
+                note('subagents', 'complete', {
+                    running: list.length
+                });
+                return list;
+            }, []);
+            progress('memory (server)');
+            const serverMemories = await attempt('serverMemories', async ()=>{
+                const r = await io.rpc('ListGrokBotUserBotMemories', {
+                    agentId
+                });
+                const list = (r?.memories ?? []).map((m)=>({
+                        id: str(m.factId),
+                        text: str(m.text),
+                        learnedAtMs: num(m.learnedAtMs)
+                    }));
+                note('serverMemories', 'complete', {
+                    count: list.length
+                });
+                return list;
+            }, []);
+            if (coverage.serverMemories?.status === 'unavailable') coverage.serverMemories.note = 'Team-bot memory API only; personal bot memory is read from the box store below.';
+            progress('skills');
+            const serverSkills = await attempt('serverSkills', async ()=>{
+                const r = await io.rpc('ListGrokBotAgentSkills', {
+                    agentId
+                });
+                const list = (r?.skills ?? []).map((s)=>({
+                        id: str(s.id),
+                        name: str(s.name),
+                        description: str(s.description),
+                        body: str(s.body),
+                        source: str(s.source)
+                    }));
+                note('serverSkills', 'complete', {
+                    count: list.length
+                });
+                return list;
+            }, []);
+            const plugins = await attempt('connectors', async ()=>{
+                const r = await io.rpc('GetGrokBotAgentPlugins', {
+                    agentId,
+                    includeMcpConfig: false
+                });
+                const list = (r?.plugins ?? []).map((p)=>({
+                        id: String(p.pluginId ?? ''),
+                        name: str(p.displayName) || str(p.name),
+                        description: str(p.description),
+                        installMode: str(p.installMode),
+                        mcpServers: p.mcpServerNames ?? []
+                    }));
+                note('connectors', 'complete', {
+                    count: list.length,
+                    note: 'Connector logins and OAuth grants stay in Grok Bot; they cannot be exported.'
+                });
+                return list;
+            }, []);
+            const library = await attempt('libraryDocs', async ()=>{
+                const r = await io.rpc('ListGrokBotLibraryDocs', {
+                    agentId
+                });
+                const list = (r?.docs ?? []).map((d)=>({
+                        title: str(d.title),
+                        url: str(d.url),
+                        provider: str(d.provider),
+                        kind: str(d.kind)
+                    }));
+                note('libraryDocs', 'complete', {
+                    count: list.length
+                });
+                return list;
+            }, []);
+            const serverFiles = await attempt('serverFiles', async ()=>{
+                let pageToken = '';
+                const list = [];
+                do {
+                    const r = await io.rpc('ListGrokBotAgentFiles', {
+                        agentId,
+                        pageToken
+                    });
+                    for (const f of r?.files ?? [])list.push({
+                        path: str(f.path ?? f.relPath ?? f.name),
+                        size: num(f.size ?? f.sizeBytes)
+                    });
+                    pageToken = str(r?.nextPageToken);
+                }while (pageToken);
+                note('serverFiles', 'complete', {
+                    count: list.length,
+                    note: list.length ? 'Listed only; agent files live in the box store and are captured from there.' : undefined
+                });
+                return list;
+            }, []);
+            progress('box store manifest');
+            const files = [];
+            const skipped = [];
+            const store = await attempt('boxStore', ()=>readStoreManifest({
+                    presign: io.presign,
+                    fetchImpl: io.fetchImpl
+                }), null);
+            if (store) {
+                const texts = [
+                    bot.instructions,
+                    ...automations.map((a)=>a.prompt),
+                    ...todos.map((t)=>t.content),
+                    ...(main?.entries ?? []).filter((e)=>e.message.role !== 'event').map((e)=>e.message.text)
+                ];
+                const skillDirs = new Set();
+                for (const path of Object.keys(store.entries)){
+                    const m = /^home\/box\/sand-data\/workflows\/([^/.][^/]*)\/SKILL\.md$/.exec(path);
+                    if (m) skillDirs.add(m[1]);
+                }
+                const memoryTexts = [];
+                let projects = [];
+                const pjPath = `home/box/sand-data/agents/${agentId}/projects.json`;
+                const pj = store.entries[pjPath];
+                if (pj?.kind === 'file' && SHA_RE.test(str(pj.sha)) && selectBoxFiles({
+                    [pjPath]: pj,
+                    ...secretEntries(store.entries)
+                }, {
+                    agentId,
+                    referenced: [
+                        '/' + pjPath
+                    ]
+                }).length) {
+                    const got = (await blobReader([
+                        pj.sha
+                    ])).get(pj.sha);
+                    try {
+                        const parsed = JSON.parse(got?.toString('utf8') ?? 'null');
+                        const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.projects) ? parsed.projects : Array.isArray(parsed?.joined) ? parsed.joined : [];
+                        projects = list.map((p)=>typeof p === 'string' ? p : str(p?.slug)).filter((p)=>/^[A-Za-z0-9._-]+$/.test(p));
+                    } catch  {}
+                }
+                const picks0 = selectBoxFiles(store.entries, {
+                    agentId,
+                    skillDirs: [
+                        ...skillDirs
+                    ],
+                    projects
+                });
+                const picks = selectBoxFiles(store.entries, {
+                    agentId,
+                    skillDirs: [
+                        ...skillDirs
+                    ],
+                    projects,
+                    referenced: referencedBoxPaths(texts)
+                });
+                let total = 0;
+                const toRead = [];
+                for (const p of picks){
+                    const e = p.entry;
+                    if (e.kind === 'symlink') {
+                        files.push({
+                            boxPath: '/' + p.path,
+                            reason: p.reason,
+                            kind: 'symlink',
+                            target: str(e.target)
+                        });
+                        continue;
+                    }
+                    if (e.kind !== 'file' || !SHA_RE.test(str(e.sha))) {
+                        skipped.push({
+                            boxPath: '/' + p.path,
+                            reason: 'not a regular file'
+                        });
+                        continue;
+                    }
+                    if (e.size > maxFileBytes) {
+                        skipped.push({
+                            boxPath: '/' + p.path,
+                            reason: `larger than ${maxFileBytes} bytes (${e.size})`,
+                            size: e.size
+                        });
+                        continue;
+                    }
+                    if (total + e.size > maxTotalBytes) {
+                        skipped.push({
+                            boxPath: '/' + p.path,
+                            reason: 'total size budget reached',
+                            size: e.size
+                        });
+                        continue;
+                    }
+                    total += e.size;
+                    toRead.push(p);
+                }
+                progress(`box files (${toRead.length})`);
+                const blobs = await blobReader([
+                    ...new Set(toRead.map((p)=>p.entry.sha))
+                ]);
+                for (const p of toRead){
+                    const bytes = blobs.get(p.entry.sha);
+                    if (!bytes) {
+                        skipped.push({
+                            boxPath: '/' + p.path,
+                            reason: 'blob unreadable or digest mismatch'
+                        });
+                        continue;
+                    }
+                    if (bytes.length !== p.entry.size) {
+                        skipped.push({
+                            boxPath: '/' + p.path,
+                            reason: `size ${bytes.length} differs from the manifest (${p.entry.size})`
+                        });
+                        continue;
+                    }
+                    files.push({
+                        boxPath: '/' + p.path,
+                        reason: p.reason,
+                        kind: 'file',
+                        size: bytes.length,
+                        sha256: p.entry.sha,
+                        mode: p.entry.mode ?? null,
+                        bytes
+                    });
+                    if (p.path.includes('/memory/') && p.path.endsWith('.md')) memoryTexts.push(bytes.toString('utf8'));
+                }
+                const memoryRefs = referencedBoxPaths(memoryTexts).filter((r)=>!picks.some((p)=>'/' + p.path === r));
+                if (memoryRefs.length) {
+                    const have = new Set([
+                        ...files.map((f)=>f.boxPath),
+                        ...skipped.map((x)=>x.boxPath)
+                    ]);
+                    const extra = [];
+                    for (const p of selectBoxFiles(store.entries, {
+                        agentId: '\0',
+                        referenced: memoryRefs
+                    })){
+                        if (have.has('/' + p.path) || p.path.startsWith('home/box/sand-data/user-memory/')) continue;
+                        const e = p.entry;
+                        if (e.kind !== 'file' || !SHA_RE.test(str(e.sha))) {
+                            skipped.push({
+                                boxPath: '/' + p.path,
+                                reason: 'not a regular file'
+                            });
+                            continue;
+                        }
+                        if (e.size > maxFileBytes) {
+                            skipped.push({
+                                boxPath: '/' + p.path,
+                                reason: `larger than ${maxFileBytes} bytes (${e.size})`,
+                                size: e.size
+                            });
+                            continue;
+                        }
+                        if (total + e.size > maxTotalBytes) {
+                            skipped.push({
+                                boxPath: '/' + p.path,
+                                reason: 'total size budget reached',
+                                size: e.size
+                            });
+                            continue;
+                        }
+                        total += e.size;
+                        extra.push(p);
+                    }
+                    const extraBlobs = await blobReader([
+                        ...new Set(extra.map((p)=>p.entry.sha))
+                    ]);
+                    for (const p of extra){
+                        const bytes = extraBlobs.get(p.entry.sha);
+                        if (!bytes) {
+                            skipped.push({
+                                boxPath: '/' + p.path,
+                                reason: 'blob unreadable or digest mismatch'
+                            });
+                            continue;
+                        }
+                        if (bytes.length !== p.entry.size) {
+                            skipped.push({
+                                boxPath: '/' + p.path,
+                                reason: `size ${bytes.length} differs from the manifest (${p.entry.size})`
+                            });
+                            continue;
+                        }
+                        files.push({
+                            boxPath: '/' + p.path,
+                            reason: 'referenced-by-memory',
+                            kind: 'file',
+                            size: bytes.length,
+                            sha256: p.entry.sha,
+                            mode: p.entry.mode ?? null,
+                            bytes
+                        });
+                    }
+                }
+                const refs = referencedBoxPaths(texts);
+                const credentialRefs = refs.filter((r)=>isSecretPath(r.replace(/^\/+/, '')));
+                for (const r of credentialRefs)skipped.push({
+                    boxPath: r,
+                    reason: 'credential path; never exported (sign in again on the destination)'
+                });
+                const unresolved = refs.filter((r)=>!credentialRefs.includes(r) && !files.some((f)=>f.boxPath === r || f.boxPath.startsWith(r + '/') || f.boxPath === r.replace('/home/box/agent-data/', '/home/box/sand-data/')) && !skipped.some((s)=>s.boxPath === r));
+                note('boxStore', skipped.length || unresolved.length ? 'partial' : 'complete', {
+                    source: 'box store manifest',
+                    manifestUpdatedAtMs: store.updatedAtMs,
+                    manifestBytes: store.bytes,
+                    captured: files.length,
+                    skipped: skipped.length,
+                    botFiles: picks0.length,
+                    projects,
+                    unresolvedReferences: unresolved,
+                    credentialReferences: credentialRefs.length
+                });
+            }
+            const memory = files.filter((f)=>f.kind === 'file' && /\/(memory|user-memory)\//.test(f.boxPath) && f.boxPath.endsWith('.md'));
+            note('memory', memory.length ? 'complete' : store ? 'empty' : 'failed', {
+                source: 'box store: own memory/, shared user-memory/ (every assistant\'s shard), joined projects',
+                own: memory.filter((f)=>f.boxPath.includes(`/agents/${agentId}/memory/`)).length,
+                sharedUser: memory.filter((f)=>f.boxPath.includes('/user-memory/')).length,
+                project: memory.filter((f)=>f.boxPath.includes('/projects/')).length
+            });
+            return {
+                format: ARCHIVE_FORMAT,
+                version: ARCHIVE_VERSION,
+                capturedAt: now().toISOString(),
+                source: {
+                    platform: 'grok-bot',
+                    harness: bot.harness
+                },
+                bot,
+                groups,
+                sessions,
+                transcripts,
+                automations,
+                todos,
+                tasks,
+                subagents,
+                serverMemories,
+                serverSkills,
+                connectors: plugins,
+                library,
+                serverFiles,
+                files,
+                skipped,
+                coverage
+            };
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            $8: ()=>fetchStoreBytes
+        });
+    },
+    "./src/core/migration.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_fs__rspack_import_0 = __webpack_require__("node:fs");
+        var node_path__rspack_import_1 = __webpack_require__("node:path");
+        const MAX_MIGRATION_BYTES = null && 64 * 1024 * 1024;
+        class MigrationError1 extends Error {
+            constructor(message){
+                super(message);
+                this.name = 'MigrationError';
+            }
+        }
+        const fail = (message)=>{
+            throw new MigrationError1(message);
+        };
+        function regularBytes(path, cap = MAX_MIGRATION_BYTES) {
+            const before = lstatSync(path);
+            if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail('Expected a regular, non-linked file.');
+            const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+            try {
+                const stat = fstatSync(fd);
+                if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== before.dev || stat.ino !== before.ino || stat.size > cap) fail('Unsafe or oversized migration file.');
+                const chunks = [];
+                let size = 0;
+                for(;;){
+                    const chunk = Buffer.alloc(Math.min(64 * 1024, cap - size + 1));
+                    const n = readSync(fd, chunk, 0, chunk.length, null);
+                    if (!n) break;
+                    size += n;
+                    if (size > cap) fail('Migration file exceeds read budget.');
+                    chunks.push(chunk.subarray(0, n));
+                }
+                return Buffer.concat(chunks);
+            } finally{
+                closeSync(fd);
+            }
+        }
+        function parseBytes(bytes) {
+            try {
+                return JSON.parse(new TextDecoder('utf-8', {
+                    fatal: true
+                }).decode(bytes));
+            } catch  {
+                fail('Migration file is not valid UTF-8 JSON.');
+            }
+        }
+        function directory(path) {
+            const full = resolve(path);
+            const st = lstatSync(full);
+            if (!st.isDirectory() || st.isSymbolicLink()) fail('Expected an archive directory (not a file or a symlink): ' + full);
+            return realpathSync(full);
+        }
+        function safeRelative(path) {
+            return typeof path === 'string' && path.length <= 200 && path.split('/').every((part)=>/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(part) && !part.endsWith('.') && !/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part));
+        }
+        function privateWrite(path, bytes) {
+            const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 384);
+            try {
+                writeFileSync(fd, bytes);
+                fsyncSync(fd);
+            } finally{
+                closeSync(fd);
+            }
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            Py: ()=>MigrationError1
+        });
+    },
     "./src/core/relay/control.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_string_decoder__rspack_import_0 = __webpack_require__("node:string_decoder");
         var node_net__rspack_import_1 = __webpack_require__("node:net");
@@ -68534,7 +69599,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         const CONTROL_TIMEOUT = 45000;
         function relayRequest(options, method, input = {}, { timeoutMs = CONTROL_TIMEOUT, signal, requestId = (0, node_crypto__rspack_import_2.randomUUID)() } = {}) {
             const { socketPath, profile } = (0, _profile_js__rspack_import_3.hQ)(options);
-            return new Promise((resolve, reject)=>{
+            return new Promise((resolve1, reject)=>{
                 const decoder = new node_string_decoder__rspack_import_0.StringDecoder("utf8");
                 let buffer = "", bytes = 0, settled = false, connected = false;
                 const socket = (0, node_net__rspack_import_1.connect)(socketPath);
@@ -68544,7 +69609,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     clearTimeout(timer);
                     signal?.removeEventListener("abort", abort);
                     socket.destroy();
-                    error ? reject(error) : resolve(value);
+                    error ? reject(error) : resolve1(value);
                 };
                 const uncertain = ()=>Object.assign(Error(`Relay control connection lost; do not resend with a new requestId (${requestId}). Check bridge status.`), {
                         requestId
@@ -68679,7 +69744,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } catch (error) {
                     if (!unavailable1(error)) throw error;
                 }
-                await new Promise((resolve)=>setTimeout(resolve, 75));
+                await new Promise((resolve1)=>setTimeout(resolve1, 75));
             }
             throw Error("Relay worker startup failed or timed out; no untracked send was attempted. Inspect bridge status and the relay owner lock.");
         }
@@ -69923,9 +70988,9 @@ __webpack_require__.c = __webpack_module_cache__;
         var currentDeps;
         var outerResolve;
         var reject;
-        var promise = new Promise((resolve, rej)=>{
+        var promise = new Promise((resolve1, rej)=>{
             reject = rej;
-            outerResolve = resolve;
+            outerResolve = resolve1;
         });
         promise[rspackExports] = exports;
         promise[rspackQueues] = (fn)=>{
@@ -69947,8 +71012,8 @@ __webpack_require__.c = __webpack_module_cache__;
                     return d[rspackExports];
                 });
             };
-            var promise = new Promise((resolve)=>{
-                fn = ()=>resolve(getResult);
+            var promise = new Promise((resolve1)=>{
+                fn = ()=>resolve1(getResult);
                 fn.r = 0;
                 var fnQueue = (q)=>q !== queue && !depQueues.has(q) && (depQueues.add(q), q && !q.d && (fn.r++, q.push(fn)));
                 currentDeps.map((dep)=>dep[rspackDefer] || dep[rspackQueues](fnQueue));

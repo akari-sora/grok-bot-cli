@@ -31734,10 +31734,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         var _headers_js__rspack_import_4 = __webpack_require__("./src/core/headers.js");
         var _app_session_js__rspack_import_5 = __webpack_require__("./src/core/app-session.js");
         var _logins_js__rspack_import_6 = __webpack_require__("./src/core/logins.js");
-        var _secret_store_js__rspack_import_10 = __webpack_require__("./src/core/secret-store.js");
+        var _secret_store_js__rspack_import_11 = __webpack_require__("./src/core/secret-store.js");
         var _store_js__rspack_import_7 = __webpack_require__("./src/core/store.js");
         var _url_policy_js__rspack_import_8 = __webpack_require__("./src/core/url-policy.js");
         var _grok_approvals_js__rspack_import_9 = __webpack_require__("./src/core/grok-approvals.js");
+        var _migration_capture_js__rspack_import_10 = __webpack_require__("./src/core/migration-capture.js");
         class GatewayError extends Error {
             constructor(message, info = {}){
                 super((0, _url_policy_js__rspack_import_8.fp)(message));
@@ -31840,7 +31841,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         function descriptorSession(account) {
             const loaded = (0, _app_session_js__rspack_import_5.Z2)({
                 account,
-                ...(0, _secret_store_js__rspack_import_10.Ih)()
+                ...(0, _secret_store_js__rspack_import_11.Ih)()
             });
             return loaded ? sessionFields(loaded) : null;
         }
@@ -31923,7 +31924,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scope,
                     home: (0, node_os__rspack_import_1.homedir)(),
                     env: process.env,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
@@ -31981,7 +31982,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     scope: session.accountScope,
                     home: (0, node_os__rspack_import_1.homedir)(),
                     env: process.env,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
                 return attachBackend(session, {
                     scope: session.accountScope,
@@ -31998,7 +31999,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             try {
                 choice = (0, _logins_js__rspack_import_6.cq)({
                     account,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
@@ -32486,7 +32487,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             scope,
                             home: (0, node_os__rspack_import_1.homedir)(),
                             env: process.env,
-                            ...(0, _secret_store_js__rspack_import_10.Ih)()
+                            ...(0, _secret_store_js__rspack_import_11.Ih)()
                         });
                         const result = await wakeSandbox(loaded.token, {
                             signal: controller.signal,
@@ -32680,7 +32681,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             try {
                 choice = (0, _logins_js__rspack_import_6.cq)({
                     account: selected,
-                    ...(0, _secret_store_js__rspack_import_10.Ih)()
+                    ...(0, _secret_store_js__rspack_import_11.Ih)()
                 });
             } catch (error) {
                 throw scrubOutbound(toGatewayError(error), []);
@@ -32698,7 +32699,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         scope,
                         home: (0, node_os__rspack_import_1.homedir)(),
                         env: process.env,
-                        ...(0, _secret_store_js__rspack_import_10.Ih)()
+                        ...(0, _secret_store_js__rspack_import_11.Ih)()
                     });
                 } catch (error) {
                     throw scrubOutbound(toGatewayError(error), []);
@@ -32743,7 +32744,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         scope: auth.scope,
                         home: (0, node_os__rspack_import_1.homedir)(),
                         env: process.env,
-                        ...(0, _secret_store_js__rspack_import_10.Ih)()
+                        ...(0, _secret_store_js__rspack_import_11.Ih)()
                     });
                 } catch (error) {
                     throw scrubOutbound(toGatewayError(error), []);
@@ -33683,8 +33684,96 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 clientNonce: body.clientNonce
             };
         }
+        function entryObject(text) {
+            try {
+                const value = JSON.parse(text);
+                return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+            } catch  {
+                return null;
+            }
+        }
+        async function transcriptBlobs(session, hashes) {
+            const out = new Map();
+            for(let i = 0; i < hashes.length; i += 8){
+                const batch = hashes.slice(i, i + 8);
+                try {
+                    const data = await backendCall(session, "PresignSandBoxStoreReads", {
+                        relPaths: batch.map((h)=>"blobs/" + h)
+                    });
+                    const urls = new Map((Array.isArray(data?.instructions) ? data.instructions : []).map((x)=>[
+                            x?.relPath,
+                            x?.url
+                        ]));
+                    await Promise.all(batch.map(async (h)=>{
+                        const url = urls.get("blobs/" + h);
+                        if (typeof url !== "string" || !url) return;
+                        try {
+                            const { bytes } = await (0, _migration_capture_js__rspack_import_10.$8)(url, {
+                                cap: 64 * 1024 * 1024
+                            });
+                            if ((0, node_crypto__rspack_import_0.createHash)("sha256").update(bytes).digest("hex") === h) out.set(h, bytes);
+                        } catch (error) {
+                            debug("transcript blob unreadable: " + (error instanceof Error ? error.message : String(error)));
+                        }
+                    }));
+                } catch (error) {
+                    debug("PresignSandBoxStoreReads failed: " + (error instanceof Error ? error.message : String(error)));
+                }
+            }
+            return out;
+        }
+        async function backendTail(session, rec, limit) {
+            const data = await backendCall(session, "ListGrokBotTranscriptEntries", {
+                agentId: rec.id,
+                limit: limit + 1
+            });
+            const rows = (Array.isArray(data?.entries) ? data.entries : []).filter((row)=>row && typeof row === "object" && Number.isSafeInteger(Number(row.seq))).sort((a, b)=>Number(b.seq) - Number(a.seq)).slice(0, limit).reverse();
+            const bodies = rows.map((row)=>typeof row.body === "string" && row.body ? entryObject(Buffer.from(row.body, "base64").toString("utf8")) : null);
+            const hashes = [
+                ...new Set(rows.filter((row, i)=>!bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row)=>row.blobHash))
+            ];
+            const blobs = hashes.length ? await transcriptBlobs(session, hashes) : new Map();
+            const entries = [];
+            let unreadable = 0;
+            rows.forEach((row, i)=>{
+                const body = bodies[i] ?? (blobs.has(row.blobHash) ? entryObject(blobs.get(row.blobHash).toString("utf8")) : null);
+                const seq = Number(row.seq);
+                const entryId = typeof row.entryId === "string" && row.entryId ? row.entryId : "";
+                if (!body) {
+                    unreadable += 1;
+                    if (entryId) entries.push({
+                        id: entryId,
+                        kind: String(row.entryKind || "unknown"),
+                        seq,
+                        unreadable: true
+                    });
+                    return;
+                }
+                entries.push(typeof body.id === "string" && body.id || !entryId ? {
+                    ...body,
+                    seq
+                } : {
+                    ...body,
+                    id: entryId,
+                    seq
+                });
+            });
+            if (unreadable) debug("transcript tail: " + unreadable + " row bodies unreadable");
+            return {
+                entries,
+                ...unreadable ? {
+                    unreadable
+                } : {}
+            };
+        }
         async function transcriptTail(session, rec, limit) {
             const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
+            if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+                return {
+                    target: rec,
+                    transcript: await backendTail(session, rec, bounded)
+                };
+            }
             const data = await gatewayCall(session, "getAgentTranscriptTail", {
                 id: rec.id,
                 limit: bounded
@@ -36047,6 +36136,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
+            $8: ()=>fetchStoreBytes,
             U8: ()=>captureBot
         }, {
             CR: DEFAULT_MAX_FILE_BYTES,

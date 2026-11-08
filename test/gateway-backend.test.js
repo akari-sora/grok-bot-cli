@@ -11,12 +11,14 @@ import test from "node:test";
 import { grokBotGatewayDescriptorPath } from "../src/core/app-session.js";
 
 import { outcomeFromError } from "../src/core/codex/contract.js";
-import { summarize } from "../src/core/format.js";
+import { formatTranscript, summarize } from "../src/core/format.js";
+import { transcriptDelta } from "../src/core/transcript.js";
 import {
   addGroupMember,
   connectGateway,
   createGroup,
   deleteAgent,
+  getTranscriptTail,
   hasBackend,
   listAgents,
   listGrokApprovals,
@@ -34,6 +36,7 @@ const ACCESS = "synthetic-backend-access-do-not-leak";
 const GATEWAY = "synthetic-box-gateway-do-not-leak";
 const BACKEND = "http://127.0.0.1:1350";
 const BOX = "http://127.0.0.1:1351";
+const STORE = "http://127.0.0.1:1352";
 const SERVICE = BACKEND + "/aiserver.v1.GrokBotService/";
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -118,9 +121,10 @@ function withEnv(values, fn) {
 
 /**
  * Routes every fetch: EnsureSandBox answers a running box, other GrokBotService RPCs go to `rpcs[name]`,
- * box gateway calls to `box[method]`. A handler returns a value (sent as JSON) or a Response, or throws.
+ * box gateway calls to `box[method]`, presigned store reads to `store[path]` (bytes). A handler returns a
+ * value (sent as JSON) or a Response, or throws.
  */
-function mockApi(t, { rpcs = {}, box = {} } = {}) {
+function mockApi(t, { rpcs = {}, box = {}, store = {} } = {}) {
   const calls = [];
   const routes = {
     GetGrokBotRuntimeCapabilities: () => CAPS_ON,
@@ -138,6 +142,10 @@ function mockApi(t, { rpcs = {}, box = {} } = {}) {
     calls.push({ target, rpc, method, body, headers });
     if (rpc === "EnsureSandBox") {
       return json({ runState: "SAND_BOX_RUN_STATE_RUNNING", gatewayUrl: BOX, gatewayToken: GATEWAY });
+    }
+    if (target.startsWith(STORE + "/")) {
+      const bytes = store[target.slice(STORE.length)];
+      return bytes ? new Response(bytes) : new Response("missing", { status: 404 });
     }
     const handler = rpc ? routes[rpc] : boxRoutes[method];
     if (!handler) return json({ code: "unimplemented", message: "no mock for " + target }, 501);
@@ -157,6 +165,17 @@ async function backendSession(t, routes, extraEnv = {}) {
 
 const rpcCalls = (calls, rpc) => calls.filter((call) => call.rpc === rpc);
 const boxCalls = (calls, method) => calls.filter((call) => call.method === method);
+// A ListGrokBotTranscriptEntries page as the live server answers it (2026-11-08): newest first, each
+// row's body the transcript entry JSON in base64, seq and updatedSeq as int64 strings. `entries` are
+// box-tail shaped (oldest first); seq moves from the entry to the row, and an entry without one gets
+// its position.
+const tailPage = (entries) => ({
+  entries: entries.map(({ seq: given, ...body }, index) => {
+    const seq = String(given ?? index + 1);
+    return { seq, entryKind: body.kind ?? "message", entryId: body.id, updatedSeq: seq, body: Buffer.from(JSON.stringify(body)).toString("base64") };
+  }).reverse(),
+  updatedSeqLocked: true,
+});
 
 test("a CURSOR_ACCESS_TOKEN session reaches the backend with the access token and the app headers", async (t) => {
   const { calls, run } = await backendSession(t);
@@ -590,14 +609,14 @@ test("a failed box notify mirror does not fail the update", async (t) => {
 test("reconcile asks GetGrokBotSendStatus first and reads the transcript tail only when it is not accepted", async (t) => {
   let status = () => ({ status: "GROK_BOT_SEND_STATUS_ACCEPTED", echoEntryId: "t106u", acceptedAtMs: "1" });
   const { calls, run } = await backendSession(t, {
-    rpcs: { GetGrokBotSendStatus: () => status() },
-    box: {
-      getAgentTranscriptTail: () => ({ entries: [{ id: "t5u", role: "user", clientNonce: "nonce-r", seq: 5 }] }),
+    rpcs: {
+      GetGrokBotSendStatus: () => status(),
+      ListGrokBotTranscriptEntries: () => tailPage([{ kind: "message", id: "t5u", role: "user", clientNonce: "nonce-r", seq: 5 }]),
     },
   });
   const viaStatus = await run((session) => reconcileDelivery(session, "General", "nonce-r"));
   assert.deepEqual({ ...viaStatus, target: viaStatus.target.id }, { target: "bot-1", clientNonce: "nonce-r", status: "delivered", entryId: "t106u", sendStatus: "ACCEPTED" });
-  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
   status = () => ({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" });
   const viaTail = await run((session) => reconcileDelivery(session, "General", "nonce-r"));
   assert.equal(viaTail.status, "delivered");
@@ -644,8 +663,8 @@ test("approval responses use ResolveGrokBotAutoReviewApproval and ResolveGrokBot
     rpcs: {
       ResolveGrokBotAutoReviewApproval: () => ({ dispatched: true, workflowId: "wf-review" }),
       ResolveGrokBotLocalToolPermission: () => ({ dispatched: true, workflowId: "wf-local" }),
+      ListGrokBotTranscriptEntries: () => tailPage(approvalCards()),
     },
-    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
   });
   await run(async (session) => {
     const listed = await listGrokApprovals(session, "General");
@@ -678,7 +697,7 @@ test("approval responses use ResolveGrokBotAutoReviewApproval and ResolveGrokBot
 
 test("approval responses refuse a persistent grant, a stale card, and a truncated accept before any resolve call", async (t) => {
   const cards = approvalCards();
-  const { calls, run } = await backendSession(t, { box: { getAgentTranscriptTail: () => ({ entries: cards }) } });
+  const { calls, run } = await backendSession(t, { rpcs: { ListGrokBotTranscriptEntries: () => tailPage(cards) } });
   await run(async (session) => {
     await assert.rejects(respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "always" }));
     await assert.rejects(respondGrokApproval(session, "General", { entryId: "card-review", requestId: "ask-review", decision: "never" }));
@@ -702,8 +721,8 @@ test("an approval refusal is a definite rejection with the server's failure code
         dispatched: false,
         refusal: { failureCode: "approval/expired", message: "This request already timed out." },
       }),
+      ListGrokBotTranscriptEntries: () => tailPage(approvalCards()),
     },
-    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
   });
   const error = await run((session) => respondGrokApproval(session, "General", { entryId: "card-local", requestId: "ask-local", decision: "decline" }))
     .then(() => assert.fail("expected a refusal"), (err) => err);
@@ -720,8 +739,8 @@ test("an approval RPC error keeps the Connect code and never carries the access 
     rpcs: {
       ResolveGrokBotAutoReviewApproval: () => connectError("permission_denied", "token " + ACCESS + " may not resolve this card", 403),
       ResolveGrokBotLocalToolPermission: () => connectError("failed_precondition", "the machine is offline", 400),
+      ListGrokBotTranscriptEntries: () => tailPage(approvalCards()),
     },
-    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
   });
   const denied = await run((session) => respondGrokApproval(session, "General", { entryId: "card-review", requestId: "ask-review", decision: "accept" }))
     .then(() => assert.fail("expected an error"), (err) => err);
@@ -762,8 +781,10 @@ test("reconcile reports PENDING and UNKNOWN_DURABILITY as pending, never as not 
   let status = "GROK_BOT_SEND_STATUS_PENDING";
   let entries = [];
   const { calls, run } = await backendSession(t, {
-    rpcs: { GetGrokBotSendStatus: () => (status ? { status } : {}) },
-    box: { getAgentTranscriptTail: () => ({ entries }) },
+    rpcs: {
+      GetGrokBotSendStatus: () => (status ? { status } : {}),
+      ListGrokBotTranscriptEntries: () => tailPage(entries),
+    },
   });
   for (const [answer, name] of [
     ["GROK_BOT_SEND_STATUS_PENDING", "PENDING"],
@@ -779,7 +800,7 @@ test("reconcile reports PENDING and UNKNOWN_DURABILITY as pending, never as not 
   }
   // The tail still wins when it already shows the message.
   status = "GROK_BOT_SEND_STATUS_PENDING";
-  entries = [{ id: "t8u", role: "user", clientNonce: "nonce-p" }];
+  entries = [{ kind: "message", id: "t8u", role: "user", clientNonce: "nonce-p" }];
   const landed = await run((session) => reconcileDelivery(session, "General", "nonce-p"));
   assert.deepEqual({ status: landed.status, entryId: landed.entryId, sendStatus: landed.sendStatus }, { status: "delivered", entryId: "t8u", sendStatus: "PENDING" });
   status = "GROK_BOT_SEND_STATUS_NOT_FOUND";
@@ -791,14 +812,16 @@ test("reconcile reports PENDING and UNKNOWN_DURABILITY as pending, never as not 
 
 test("reconcile reports REJECTED as rejected, with the rejection code, without reading the tail", async (t) => {
   const { calls, run } = await backendSession(t, {
-    rpcs: { GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_REJECTED", rejectionCode: "send/too-long" }) },
-    box: { getAgentTranscriptTail: () => ({ entries: [] }) },
+    rpcs: {
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_REJECTED", rejectionCode: "send/too-long" }),
+      ListGrokBotTranscriptEntries: () => tailPage([]),
+    },
   });
   const out = await run((session) => reconcileDelivery(session, "General", "nonce-x"));
   assert.deepEqual({ ...out, target: out.target.id }, {
     target: "bot-1", clientNonce: "nonce-x", status: "rejected", sendStatus: "REJECTED", rejectionCode: "send/too-long",
   });
-  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
 });
 
 test("a truncated server roster resolves ids only, so no send, delete, update or member change hits the wrong bot", async (t) => {
@@ -1299,9 +1322,10 @@ test("auto-review cards of a non-temporal bot go to the box gateway; local-tool 
       ListGrokBotAgents: () => ({ agents: [bot("bot-1", "General"), bot("bot-9", "Old Box", { harness: "box" })] }),
       ResolveGrokBotAutoReviewApproval: () => ({ dispatched: true }),
       ResolveGrokBotLocalToolPermission: () => local(),
+      // A box-harness bot the server lists: its transcript is on the backend too.
+      ListGrokBotTranscriptEntries: () => tailPage(approvalCards()),
     },
     box: {
-      getAgentTranscriptTail: () => ({ entries: approvalCards() }),
       resolveAutoReviewApproval: () => ({}),
       resolveLocalToolPermission: () => ({}),
     },
@@ -1334,8 +1358,8 @@ test("an approval answer with dispatched false is reported as unknown, not accep
     rpcs: {
       ResolveGrokBotAutoReviewApproval: () => ({ dispatched: false }),
       ResolveGrokBotLocalToolPermission: () => ({}),
+      ListGrokBotTranscriptEntries: () => tailPage(approvalCards()),
     },
-    box: { getAgentTranscriptTail: () => ({ entries: approvalCards() }) },
   });
   await run(async (session) => {
     for (const [entryId, requestId] of [["card-review", "ask-review"], ["card-local", "ask-local"]]) {
@@ -1362,8 +1386,10 @@ test("a truncated roster leaves box-only rows out, so an id past the cut is refu
 
 test("reconcile reads a send status newer than this build as pending", async (t) => {
   const { run } = await backendSession(t, {
-    rpcs: { GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_QUEUED_FOR_REVIEW" }) },
-    box: { getAgentTranscriptTail: () => ({ entries: [] }) },
+    rpcs: {
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_QUEUED_FOR_REVIEW" }),
+      ListGrokBotTranscriptEntries: () => tailPage([]),
+    },
   });
   const out = await run((session) => reconcileDelivery(session, "General", "nonce-new"));
   assert.deepEqual({ status: out.status, sendStatus: out.sendStatus }, { status: "pending", sendStatus: "QUEUED_FOR_REVIEW" });
@@ -1374,8 +1400,8 @@ test("reconcile keeps a known send status when the transcript tail cannot be rea
   const { calls, run } = await backendSession(t, {
     rpcs: {
       GetGrokBotSendStatus: () => (status === null ? connectError("unavailable", "down", 503) : { status }),
+      ListGrokBotTranscriptEntries: () => connectError("unavailable", "transcript store down", 503),
     },
-    box: { getAgentTranscriptTail: () => json({ error: "box down" }, 502) },
   });
   for (const [answer, name] of [
     ["GROK_BOT_SEND_STATUS_PENDING", "PENDING"],
@@ -1390,7 +1416,7 @@ test("reconcile keeps a known send status when the transcript tail cannot be rea
     assert.ok(out.tailError.length > 0);
     assert.equal("scanned" in out, false, "nothing was scanned");
   }
-  // With NOT_FOUND, or no status at all, nothing is known, so the box error stands.
+  // With NOT_FOUND, or no status at all, nothing is known, so the tail error stands.
   status = "GROK_BOT_SEND_STATUS_NOT_FOUND";
   await assert.rejects(run((session) => reconcileDelivery(session, "General", "nonce-t")));
   status = null;
@@ -1444,4 +1470,114 @@ test("bots create on 0.78 goes to the backend like the app: a client id, the tem
   assert.equal(sent.body.kickstartRequested, false);
   assert.equal(rec.id, sent.body.agentId);
   assert.equal(boxCalls(calls, "createAgent").length, 0, "the removed box gateway is not called");
+});
+
+// --- Transcript tail on the backend (0.78.x: a server-hosted bot has no box gateway) -----------------
+
+// Shaped like the live rows of a demo bot (2026-11-08), with synthetic ids and text.
+const tailUser = { kind: "message", id: "t3u", role: "user", content: "Plan a trip.", isStreaming: false, timestampMs: 1794120039993, clientNonce: "nonce-live", requestId: "req-1", seq: 11 };
+const tailReply = { kind: "send-message", id: "t3s0", message: { type: "text", content: "Here is the plan." }, timestampMs: 1794120043786, requestId: "req-1", seq: 12 };
+const tailEvent = { kind: "event", id: "event-1", event: { type: "automation", action: "created" }, timestampMs: 1794120051474, seq: 13 };
+
+test("a server bot's thread tail comes from ListGrokBotTranscriptEntries, oldest first, never the box", async (t) => {
+  const older = { kind: "message", id: "t2u", role: "user", content: "Earlier.", clientNonce: "nonce-old", requestId: "req-0", seq: 10 };
+  const { calls, run } = await backendSession(t, {
+    rpcs: { ListGrokBotTranscriptEntries: () => tailPage([older, tailUser, tailReply, tailEvent]) },
+  });
+  const out = await run((session) => getTranscriptTail(session, "General", 3));
+  assert.equal(out.target.id, "bot-1");
+  // The row body is the entry the box tail returned; seq comes from the row, as a number.
+  assert.deepEqual(out.transcript, { entries: [tailUser, tailReply, tailEvent] });
+  const listed = rpcCalls(calls, "ListGrokBotTranscriptEntries");
+  // Like the app: the main session, limit + 1.
+  assert.deepEqual(listed.map((call) => call.body), [{ agentId: "bot-1", limit: 4 }]);
+  assert.equal(listed[0].headers.authorization, "Bearer " + ACCESS);
+  assert.equal(listed[0].headers["x-cursor-client-type"], "sand");
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  // What gbot thread prints and what --after, the relay and the MCP tool page through.
+  assert.match(formatTranscript(out), /\[user t3u\] Plan a trip\.\n\[send-message t3s0\] Here is the plan\.\n\[event event-1\] /);
+  assert.deepEqual(transcriptDelta(out.transcript, { after: "t3u" }).entries.map((entry) => entry.id), ["t3s0", "event-1"]);
+});
+
+test("a tail body kept in the store is read from blobs/<sha256>; one that cannot be read is marked unreadable", async (t) => {
+  const stored = { kind: "send-message", id: "t4s0", message: { type: "text", content: "A long reply." }, requestId: "req-2" };
+  const bytes = Buffer.from(JSON.stringify(stored));
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const tampered = "0".repeat(64);
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      ListGrokBotTranscriptEntries: () => ({
+        entries: [
+          { seq: "7", entryKind: "send-message", entryId: "t4s2", updatedSeq: "7", bodyOmitted: true },
+          { seq: "6", entryKind: "send-message", entryId: "t4s1", updatedSeq: "6", blobHash: tampered },
+          { seq: "5", entryKind: "send-message", entryId: "t4s0", updatedSeq: "5", blobHash: hash },
+        ],
+      }),
+      PresignSandBoxStoreReads: (body) => ({ instructions: body.relPaths.map((relPath) => ({ relPath, url: STORE + "/" + relPath })) }),
+    },
+    store: { ["/blobs/" + hash]: bytes, ["/blobs/" + tampered]: Buffer.from("other bytes") },
+  });
+  const out = await run((session) => getTranscriptTail(session, "General", 40));
+  assert.deepEqual(out.transcript, {
+    entries: [
+      { ...stored, seq: 5 },
+      // The bytes do not match the hash, and an omitted body without a hash has nothing to read.
+      { id: "t4s1", kind: "send-message", seq: 6, unreadable: true },
+      { id: "t4s2", kind: "send-message", seq: 7, unreadable: true },
+    ],
+    unreadable: 2,
+  });
+  assert.deepEqual(rpcCalls(calls, "PresignSandBoxStoreReads").map((call) => call.body), [{ relPaths: ["blobs/" + hash, "blobs/" + tampered] }]);
+  const storeReads = calls.filter((call) => call.target.startsWith(STORE + "/"));
+  assert.equal(storeReads.length, 2);
+  assert.equal(JSON.stringify(storeReads.map((call) => call.headers)).includes(ACCESS), false, "the access token never goes to the store");
+});
+
+test("reconcile finds a send whose delivery was unknown in the backend tail by its clientNonce, the send's messageId", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: {
+      SendGrokBotUserMessage: () => connectError("unavailable", "upstream reset", 503),
+      // Not indexed yet: only the transcript shows the message landed.
+      GetGrokBotSendStatus: () => ({ status: "GROK_BOT_SEND_STATUS_NOT_FOUND" }),
+      ListGrokBotTranscriptEntries: () => tailPage([
+        tailUser,
+        tailReply,
+        { kind: "message", id: "t4u", role: "user", content: "Another.", clientNonce: "nonce-other", requestId: "req-3", seq: 14 },
+      ]),
+    },
+  });
+  const unknown = await run((session) => sendPrompt(session, "General", "Plan a trip.", { clientNonce: "nonce-live" }))
+    .then(() => assert.fail("expected an unknown delivery"), (err) => err);
+  assert.equal(unknown.delivery, "unknown");
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage")[0].body.messageId, "nonce-live");
+  const out = await run((session) => reconcileDelivery(session, "General", "nonce-live"));
+  assert.deepEqual({ ...out, target: out.target.id }, {
+    target: "bot-1", clientNonce: "nonce-live", status: "delivered", entryId: "t3u", seq: 11, sendStatus: "NOT_FOUND",
+  });
+  assert.deepEqual(rpcCalls(calls, "ListGrokBotTranscriptEntries").map((call) => call.body), [{ agentId: "bot-1", limit: 201 }]);
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1, "reconcile never sends");
+});
+
+test("without an access token, or for a box-only bot, the tail stays on the box gateway", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "gbot-backend-tail-box-"));
+  const entries = [{ id: "b1", role: "user", clientNonce: "nonce-box", seq: 1 }];
+  const calls = mockApi(t, {
+    box: {
+      listAgents: () => ({ agents: [{ id: "bot-1", name: "General", isGroup: false }, { id: "box-only", name: "Local Box", harness: "box" }] }),
+      getAgentTranscriptTail: () => ({ entries }),
+    },
+  });
+  const viaOverride = await withEnv(envFor(home, { GROK_BOT_GATEWAY_URL: BOX, GROK_BOT_GATEWAY_TOKEN: GATEWAY }), async () => {
+    const session = await connectGateway();
+    assert.equal(hasBackend(session), false);
+    return getTranscriptTail(session, "General", 5);
+  });
+  assert.deepEqual(viaOverride.transcript, { entries });
+  assert.equal(calls.filter((call) => call.rpc).length, 0, "no backend call without an access token");
+  // With the backend, a bot only the box lists still reads the box.
+  const boxOnly = await withEnv(envFor(home), async () => getTranscriptTail(await connectGateway(), "box-only", 5));
+  assert.deepEqual(boxOnly.transcript, { entries });
+  assert.deepEqual(boxCalls(calls, "getAgentTranscriptTail").map((call) => call.body), [{ id: "bot-1", limit: 5 }, { id: "box-only", limit: 5 }]);
+  assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
 });
