@@ -326,14 +326,17 @@ function convertedFiles(snapshot, includeSkills) {
     'Large AGENTS.md files may be truncated by OpenClaw\'s bootstrap limits; verified bytes do not prove prompt inclusion.\n');
   return files;
 }
+function convertedForTarget(snapshot, includeSkills, to) {
+  return to === 'openclaw' ? convertedFiles(snapshot, includeSkills)
+    : destinationFiles(snapshot, { to, includeSkills, sourceReport: report(snapshot) });
+}
 export function planMigration(archive, { to = 'openclaw', includeSkills = false } = {}) {
-  if (to !== 'openclaw' || typeof includeSkills !== 'boolean') fail('Only the openclaw staging target is supported.');
+  if (!MIGRATION_TARGETS.includes(to) || typeof includeSkills !== 'boolean') fail('Only supported migration targets are allowed.');
   const { snapshot, digest } = readArchive(archive);
-  const files = convertedFiles(snapshot, includeSkills);
+  const files = convertedForTarget(snapshot, includeSkills, to);
   return {
-    ...snapshotSummary(snapshot), to, sourceDigest: digest, includeSkills,
-    scope: 'offline-workspace-staging', runtimeActivated: false, files: fileIndex(files),
-    exitCode: snapshot.errors.length ? 3 : 0,
+    ...snapshotSummary(snapshot), ...targetCapability(to), to, sourceDigest: digest, includeSkills,
+    files: fileIndex(files), exitCode: snapshot.errors.length ? 3 : 0,
   };
 }
 export function applyMigration(archive, { out = '', to = 'openclaw', includeSkills = false, yes = false } = {}) {
@@ -344,25 +347,27 @@ export function applyMigration(archive, { out = '', to = 'openclaw', includeSkil
   if (destination === sourceRoot || destination.startsWith(sourceRoot + sep)) fail('Staging output must be outside the source archive.');
   const plan = planMigration(archive, { to, includeSkills });
   if (plan.counts.failedReads) fail('Archive contains failed reads; repair the source export before apply.');
-  if (!plan.counts.bots) fail('Archive has no bots to stage.');
+  if (!plan.counts.bots && to !== 'portable') fail('Archive has no bots to stage.');
   const { snapshot, digest } = readArchive(archive);
   if (digest !== plan.sourceDigest) fail('Archive changed during planning.');
-  const files = convertedFiles(snapshot, includeSkills);
-  const manifest = { format: 'gbot-openclaw-staging', version: MIGRATION_VERSION, sourceDigest: digest, includeSkills, files: fileIndex(files) };
+  const files = convertedForTarget(snapshot, includeSkills, to);
+  const manifest = { format: `gbot-${to}-staging`, version: MIGRATION_VERSION, sourceDigest: digest, includeSkills, files: fileIndex(files) };
   const path = publish(out, files, manifest);
   return { ...verifyMigration(archive, { out: path }), path, runtimeActivated: false, exitCode: 0 };
 }
 export function verifyMigration(archive, { out } = {}) {
   const { snapshot, digest } = readArchive(archive);
+  let target = null;
   if (out !== undefined) {
     const root = directory(out);
     const manifest = parseBytes(regularBytes(join(root, 'manifest.json'), 2 * 1024 * 1024));
     exact(manifest, ['format', 'version', 'sourceDigest', 'includeSkills', 'files'], 'staging manifest');
-    if (manifest.format !== 'gbot-openclaw-staging' || manifest.version !== MIGRATION_VERSION ||
+    target = MIGRATION_TARGETS.find((to) => manifest.format === `gbot-${to}-staging`) ?? null;
+    if (target === null || manifest.version !== MIGRATION_VERSION ||
         manifest.sourceDigest !== digest || typeof manifest.includeSkills !== 'boolean') fail('Staging manifest does not match source.');
-    checkIndex(root, manifest.files, convertedFiles(snapshot, manifest.includeSkills));
+    checkIndex(root, manifest.files, convertedForTarget(snapshot, manifest.includeSkills, target));
   }
-  return { ...snapshotSummary(snapshot), verified: true, sourceDigest: digest,
+  return { ...snapshotSummary(snapshot), verified: true, sourceDigest: digest, target,
     scope: out === undefined ? 'archive-integrity' : 'staged-file-integrity', runtimeVerified: false,
     exitCode: snapshot.errors.length ? 3 : 0 };
 }
