@@ -331,3 +331,16 @@ test("an unreadable row holds the incremental cursor, so it is read again once i
   assert.deepEqual(stillDown.entries, []);
   assert.equal(stillDown.cursor, "u1", "the cursor does not move past it");
 });
+
+test("the first read and a gap reset also stop before an unreadable row (round 7)", () => {
+  const page = (a1) => ({ entries: [{ id: "u1", kind: "send-message", text: "one" }, a1, { id: "a2", kind: "send-message", text: "two" }] });
+  const down = { id: "a1", kind: "send-message", unreadable: true };
+  const first = transcriptDelta(page(down));
+  assert.deepEqual(first.entries.map((e) => e.id), ["u1"]);
+  assert.equal(first.cursor, "u1");
+  const gap = transcriptDelta(page(down), { after: "gone" });
+  assert.equal(gap.gapReset, true);
+  assert.equal(gap.cursor, "u1");
+  const back = transcriptDelta(page({ id: "a1", kind: "send-message", text: "back" }), { after: first.cursor });
+  assert.deepEqual(back.entries.map((e) => e.id), ["a1", "a2"], "read once, nothing skipped or repeated");
+});
