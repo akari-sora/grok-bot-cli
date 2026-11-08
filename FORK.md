@@ -1,6 +1,6 @@
 # Fork guide
 
-ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. The package version string stays `0.11.2`. The fork revision is the git tag.
+ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2, with five later upstream fixes cherry-picked in 0.11.2-iml1s.7 (the codex-dot skill, the Codex sender prefix and thread search, Codex delivery detail, `codex new` on newer daemons, the desktop shim passthrough; see CHANGELOG.md). The package version string stays `0.11.2`. The fork revision is the git tag.
 
 Upstream still owns the npm package. Do not `npm install -g grok-bot-cli`. GitLab (https://gitlab.com/aa22396584/grok-bot-cli) is the primary remote. The GitHub mirror is not a public install source.
 

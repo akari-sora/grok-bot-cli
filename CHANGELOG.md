@@ -13,7 +13,8 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 - `bots create` works on 0.78 again: it calls `CreateGrokBotTemporalAgent` as the app does instead of the removed box gateway (404).
 - `thread`, `reconcile`'s tail, the relay, approvals and the MCP thread tool read a server-hosted bot's transcript with `ListGrokBotTranscriptEntries` (was 404 on 0.78); a row whose body cannot be read is marked `unreadable` and a `--after` cursor stops before it. `thread --root` still needs the box gateway.
 - The earlier `migrate` snapshot commands (`targets`, `inspect`, `export`, `plan`, `apply`, `verify`) are replaced.
-- Review: seven rounds with Codex (gpt-6-astra, max reasoning), until the last one found no blocker. Tests: 865 unit, 96 route; Hermes helper, official and real-install contracts.
+- From upstream 0.11.3–0.12.5, cherry-picked (source and tests; upstream authors kept): the codex-dot guidance skill for messaging the Dot assistant from Codex Desktop (026c9fa); Codex→Grok messages carry a "from Codex thread … reply via …" prefix, and `codex list-threads` / `codex_threads` sort by recent activity with `--query`, `--active-within` and cwd/provider/archived filters (c11781b); rejected Codex deliveries and failed turns say why, and the macOS daemon gets a higher open-file limit (efe5e4b); `codex new --cwd DIR "msg"` works on daemons without a rollout before the first turn (7fa32e1); the ChatGPT Desktop shim passes startup, sign-out and help/version commands to the real Codex CLI (a86461d). Upstream's 0.12.x session and reconnect rework is not taken: the fork's Grok Bot 0.78 backend, account selection and `gbot wake` replace it.
+- Review: seven rounds with Codex (gpt-6-astra, max reasoning), until the last one found no blocker. Tests: 899 unit, 99 route; Hermes helper, official and real-install contracts.
 
 ### 0.11.2-iml1s.6
 
