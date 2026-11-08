@@ -12,7 +12,7 @@ export const config = {
     additionalProperties: false,
     properties: {
       archive: { description: 'Verified gbot migration archive directory', type: 'string' },
-      to: { description: 'Destination format; see migrate targets', enum: [...MIGRATION_TARGETS], default: 'openclaw', type: 'string' },
+      to: { description: 'Destination format; see migrate targets', enum: ['openclaw', 'hermes', 'muse', 'dot', 'portable'], default: 'openclaw', type: 'string' },
       includeSkills: { description: 'Include observed user workflow text in native skills or handoff packets', type: 'boolean' },
       out: { description: 'New output directory, not an existing agent home', type: 'string' },
       yes: { description: 'Confirm the reviewed local conversion', type: 'boolean' },
@@ -23,6 +23,7 @@ export const config = {
   positionals: ['archive'],
 } satisfies CliRouteConfig;
 
+// The config above must be literal for agent-bundle; the generated-CLI tests cover every registry entry.
 export const inputSchema = z.object({
   archive: z.string().min(1),
   to: z.enum(MIGRATION_TARGETS).default('openclaw'),
