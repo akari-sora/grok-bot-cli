@@ -59,7 +59,12 @@ Codex (gpt-6-astra, max reasoning, read-only) reviewed all four repos in rounds 
 - Round 1 — request changes: secrets across chunk boundaries, destination path escape, Hermes ownership, `check` running an import, a transcript cut short by a capped page, and more. Fixed in `960fb63` and the matching trinity, muse-web-cli and chatgpt-dot-cli commits.
 - Round 2 — round-1 items 1, 4 and 11 closed; new findings: UTF-16 tokens and token-shaped file names, a credential read before selection, folder collisions, the Hermes write race, Muse receipts and chat ownership, digest answers matched loosely. Fixed in `7fb2da7`, `6ef691a`, trinity `94092a5`, muse-web-cli `19a0c34`, chatgpt-dot-cli `5f4b383`.
 - Round 3 — items 1, 3, 4, 5 and 11 closed; four narrower blockers left (memory files decoded before the byte check, the SOUL write race, Muse after-Enter failures and interleaving, chat delivery of skill scripts and the memory question). Fixed in `50114e7`, `970c33e`, muse-web-cli `3db0982`, trinity `a60dda7`.
-- Round 4 — the close-out review; its verdict is recorded with the merge request.
+- Round 4 — B2, B3b and B4 closed; two left: a long UTF-16 memory file (no NUL in its first 8 KiB) passed as text, and three more ways a Muse send after Enter was recorded as not sent. Fixed in `3b89c6a`, muse-web-cli `75507b8`, trinity `f37e7a0`.
+- Round 5 — **can merge**: B1 and all four after-Enter cases closed (reproduced through the real CLI → seat → migration chain), no new blocker. Its one should-fix (a marked rate-limit reply after another message) is fixed in trinity `b95f07b`. Deferred by agreement: SHA binding inside the two senders, per-item conflicts in preview, `hermes cron create` in the automated contract.
+
+## Final self-check (after the review)
+
+With the final code, `gbot migrate check --accept` on the demo bot (nothing re-sent; questions only, paced): Hermes 7/7 read back and 6/6 questions; Muse and Your dot first showed two false negatives from the new plain-language keyword fallback (a sentence start after a line break, and a role question that asked for projects but not places). Fixed in `706be83`; re-checked: **Muse 7/7, Your dot 7/7**.
 
 ## Incident during the fixes
 
@@ -67,6 +72,6 @@ While a sub-agent tested the new Hermes preflight, running the Hermes runtime wi
 
 ## Automated tests
 
-- grok-bot-cli: `npm run check` (validate, build, artifact validation, typecheck, 854 unit tests, 96 route tests); Hermes helper contract 3/3 against a fake runtime with the real API names, 3/3 against the installed Hermes stores in a scratch home; official importer (bundled export) 4/4.
-- trinity-cli: 231 tests (7 platform skips).
-- muse-web-cli: 137 passed, 2 skipped. chatgpt-dot-cli: 122 tests, all new ones pass; one redirect test (`test_cli_usage_redirect_exits_three`) fails as it did before these changes.
+- grok-bot-cli: `npm run check` (validate, build, artifact validation, typecheck, 856 unit tests, 96 route tests); Hermes helper contract 3/3 against a fake runtime with the real API names, 3/3 against the installed Hermes stores in a scratch home; official importer (bundled export) 4/4.
+- trinity-cli: 234 tests (7 platform skips).
+- muse-web-cli: 139 passed, 2 skipped. chatgpt-dot-cli: 122 tests, all new ones pass; one redirect test (`test_cli_usage_redirect_exits_three`) fails as it did before these changes.
