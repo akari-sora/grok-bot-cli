@@ -109,6 +109,18 @@ Muse／dot 的傳送可中斷續跑：每一步都有 nonce 和 ledger；停了�
 
 0 搬完並驗證；3 搬了但有項目沒驗過，或 `--move-routines` 有排程沒在 Grok Bot 關掉（看報告裡的 ✗）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。報告寫在存檔旁邊：`<存檔>.<目的地>….report.json`。
 
+### 給 agent 用（Claude Code、Codex、Cursor）
+
+`gbot-install install claude`（或 `codex`、`cursor`）裝好 gbot 外掛後，agent 會拿到 `migrate-grok-bot` skill（原文在 `src/skills/migrate-grok-bot/SKILL.md`）。它照下面的方式搬，人也可以照著做：
+
+1. `gbot --json migrate bots --account A`：列出 bot，和你確認要搬哪一個。
+2. `gbot --json migrate capture --account A --bot "<名稱或 id>"`：只讀擷取，先告訴你缺了什麼。
+3. `gbot --json migrate preview <存檔> --to hermes|muse|dot`：把預覽給你看，**等你明確同意**才往下。
+4. `gbot --json migrate import <存檔> --to <目的地> --yes`：匯入、讀回、驗收；看結束碼和報告裡的 ✗。
+5. 中斷或之後再驗：`gbot migrate check <存檔> --to <目的地> --accept`（Muse／dot 續跑用同一個 `import`，不會重送不確定的訊息）。
+
+agent 的規則：沒有你的同意不匯入；不改、不刪 Grok Bot 那邊的 bot；不把存檔內容貼到對話裡（只報數量與名稱）；送 Muse／dot 照 App 的節奏，不加速重試；`--move-routines` 只在你要求時用。
+
 ## English
 
 `gbot migrate` moves one Grok Bot to another agent, reads the destination back, and asks the migrated agent questions to prove it can carry on with the work. It is not a backup and it does not leave you a bundle to paste by hand.
@@ -151,3 +163,15 @@ Known credential paths are not read (a name list, not a guarantee; the same byte
 Muse/dot delivery is resumable and never resends an uncertain message: run the same `gbot migrate import` again. `gbot migrate check` sends no migration content; with `--accept` it sends the acceptance questions.
 
 Exit codes: 0 migrated and verified; 3 imported but something did not verify, or with `--move-routines` a routine was not paused in Grok Bot (see ✗ in the report); 2 usage or missing `--yes`; 1 other errors. The report is written next to the archive.
+
+### For agents (Claude Code, Codex, Cursor)
+
+After `gbot-install install claude` (or `codex`, `cursor`) the gbot plugin gives the agent the `migrate-grok-bot` skill (source: `src/skills/migrate-grok-bot/SKILL.md`). It works like this, and a person can follow the same steps:
+
+1. `gbot --json migrate bots --account A`: list the bots and confirm with the user which to move.
+2. `gbot --json migrate capture --account A --bot "<name or id>"`: read-only capture; say what is missing first.
+3. `gbot --json migrate preview <archive> --to hermes|muse|dot`: show the preview and **wait for an explicit yes**.
+4. `gbot --json migrate import <archive> --to <dest> --yes`: import, read back, ask; read the exit code and the ✗ items in the report.
+5. After an interruption, or later: `gbot migrate check <archive> --to <dest> --accept` (Muse/dot resume with the same `import`; an uncertain message is never sent again).
+
+Rules for agents: no import without the user's yes; never change or delete the bot in Grok Bot; never paste archive contents into a chat (report counts and names); Muse/dot sends follow the apps' pace, no faster retries; `--move-routines` only when the user asks for it.

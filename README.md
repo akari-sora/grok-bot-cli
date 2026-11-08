@@ -287,6 +287,8 @@ gbot wear pair 192.168.1.23:40123
 
 ## Agent integrations / 給 agent 用的整合
 
+**Moving a bot with an agent.** The plugin's `migrate-grok-bot` skill lets Claude Code, Codex or Cursor run `gbot migrate` for you: preview first, import only after your yes, then read back and check ([docs/migration.md](docs/migration.md#for-agents-claude-code-codex-cursor)). 外掛裡的 `migrate-grok-bot` skill 讓 Claude Code、Codex 或 Cursor 替你跑 `gbot migrate`：先預覽、等你同意才匯入、再讀回驗收。
+
 The package also carries an agent plugin named `gbot` for Codex, Claude Code and Cursor: a `grok-bot` MCP server (Grok messages, Codex threads, the managed Grok ↔ Codex bridge, ChatGPT Desktop), a `claude-channel` MCP server for Claude Code, the `talk-to-grok-bot`, `chatgpt-desktop` and `codex-dot` skills, and the `/gbot:codex-send`, `/gbot:codex-threads` and `/gbot:codex-wait` commands. Install it with `gbot-install`, which comes with the same release file:
 
 套件裡也有一個名為 `gbot` 的 agent plugin，給 Codex、Claude Code 與 Cursor 用：`grok-bot` MCP server（Grok 訊息、Codex thread、受管理的 Grok ↔ Codex bridge、ChatGPT Desktop）、給 Claude Code 的 `claude-channel` MCP server、`talk-to-grok-bot`、`chatgpt-desktop` 與 `codex-dot` 三個 skill，以及 `/gbot:codex-send`、`/gbot:codex-threads`、`/gbot:codex-wait` 命令。用同一個 release 檔附帶的 `gbot-install` 安裝：
