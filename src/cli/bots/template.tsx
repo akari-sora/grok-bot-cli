@@ -8,6 +8,8 @@ import { backendFlagsSchema, failureDocumentSchema, openBackendFromInput } from 
 export const config = {
   description: 'Share a server-hosted bot as a Grok Bot template (x.ai/bot link), as the Grok Bot app does; --status shows the template, --show reviews a version, --publish publishes it.',
   exitCode: 'result',
+  // Waiting for the bot to draft its template can take minutes (--wait, default 600 s).
+  render: { maxElapsedMs: 900000 },
   inputJsonSchema: {
     additionalProperties: false,
     properties: {
@@ -133,6 +135,10 @@ const describe = (template: Template): string =>
 
 const whoOf = (target: { readonly id: string; readonly name: string }): string => `bot ${target.name} (${target.id})`;
 
+// Grok Bot cut a 545-character instruction step to exactly 500 characters in a template draft
+// (2026-11-08), so an entry this long was probably cut.
+const TEMPLATE_ENTRY_LIMIT = 500;
+
 const firstLine = (text: string): string => {
   const line = text.trim().split('\n')[0] ?? '';
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
@@ -143,7 +149,7 @@ const recipeText = (recipe: Recipe): string[] => {
   return [
     `Name: ${recipe.profile.name}`,
     `Description: ${recipe.profile.description.trim()}`,
-    list('Memory', recipe.memory.map((item) => `${item.kind ?? 'memory'}: ${firstLine(item.content)}`)),
+    list('Memory', recipe.memory.map((item) => `${item.kind ?? 'memory'}: ${firstLine(item.content)}${item.content.length >= TEMPLATE_ENTRY_LIMIT ? `  [${item.content.length} characters: may be cut; keep each instruction step under ${TEMPLATE_ENTRY_LIMIT}]` : ''}`)),
     list('Skills', recipe.skills.map((skill) => skill.name)),
     list('Routines', recipe.routines.map((routine) => `${routine.name} (${routine.slug})`)),
     list('Plugins', recipe.plugins.map((plugin) => `${plugin.name} (${plugin.pluginId})`)),

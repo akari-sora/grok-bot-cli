@@ -49,3 +49,5 @@ gbot bots template "Move to Hermes" --publish  # 3. 發布
 - 對方需要有 `migrate` 的 gbot release；bot 會檢查 `gbot migrate --help`，沒有時指向那個 release。
 - 從範本建立的副本不會自己開始；說出你要做什麼。
 - 這個 bot 不搬到 Muse 和 Your dot（那兩個還需要 trinity-cli 和各自的工具）；要搬到那裡，直接用 `gbot migrate`。
+- 範本的每一條指示最多 500 字，超過的部分會被截掉（2026-11-08 實測），所以 bot 指示的每一步都要寫短；`--show` 會標出剛好到 500 字的項目。目前上線的是第 3 版。
+- 已經加過舊版的人會保留舊版；重新加一次範本就是最新版。

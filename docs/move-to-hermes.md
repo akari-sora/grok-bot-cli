@@ -49,3 +49,5 @@ A template is a copy for each person: they never get your computer, logins, memo
 - The recipient needs a gbot release that has `migrate`; the bot checks `gbot migrate --help` and points to the release otherwise.
 - A copy from a template does not start on its own; say what you want.
 - Muse and Your dot are not in this bot (they also need trinity-cli and the seat tools); use `gbot migrate` directly for those.
+- A template keeps each instruction step to 500 characters and cuts the rest (seen 2026-11-08), so keep every step in the bot's instructions shorter; `--show` marks an entry that reached 500 characters. The template that is live now is version 3.
+- Someone who added an older version keeps it; adding the template again gets the current one.

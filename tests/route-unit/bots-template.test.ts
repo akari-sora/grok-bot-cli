@@ -86,7 +86,7 @@ const CARD = {
 
 const RECIPE = {
   profile: { name: 'Move to Hermes', description: 'Moves your bots to Hermes.', avatarColor: 'violet', avatarShape: 'arch' },
-  memory: [{ kind: 'profile', content: 'Job: help move bots.' }],
+  memory: [{ kind: 'profile', content: 'Job: help move bots.' }, { kind: 'profile', content: 'Step 5: ' + 'x'.repeat(492) }],
   skills: [{ name: 'migrate', description: 'Run gbot migrate', content: '# Migrate' }],
   routines: [],
   plugins: [],
@@ -192,6 +192,9 @@ describe('gbot bots template', () => {
     expect(lines[0]).toContain('version 1 (not active');
     expect(lines).toContain('Name: Move to Hermes');
     expect(lines).toContain('Skills (1)');
+    expect(lines).toContain('Memory (2)');
+    expect(lines.find((line) => line.includes('Step 5'))).toContain('[500 characters: may be cut; keep each instruction step under 500]');
+    expect(lines.find((line) => line.includes('Job: help move bots.'))).not.toContain('may be cut');
     expect(lines).toContain('  migrate');
     expect(lines.at(-1)).toBe('https://x.ai/bot/share-abc');
     const json = await invokeCli(['bots', 'template', BOT, '--show', '--template-version', '1', '--json']);
