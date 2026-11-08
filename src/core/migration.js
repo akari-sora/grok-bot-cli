@@ -335,7 +335,7 @@ export function planMigration(archive, { to = 'openclaw', includeSkills = false 
     exitCode: snapshot.errors.length ? 3 : 0,
   };
 }
-export function applyMigration(archive, { out, to = 'openclaw', includeSkills = false, yes = false } = {}) {
+export function applyMigration(archive, { out = '', to = 'openclaw', includeSkills = false, yes = false } = {}) {
   if (!yes) fail('Apply requires --yes after reviewing the plan.');
   if (!text(out, 8192) || !out.trim()) fail('Apply requires a new output directory.');
   const sourceRoot = directory(archive);
