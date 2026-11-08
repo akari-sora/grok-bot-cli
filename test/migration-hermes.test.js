@@ -589,3 +589,37 @@ test('r2-5: no file is written under a name holding a token; UTF-16 text with a 
     assert.ok(!hasSecret(bytes.toString('latin1')) && !hasSecret(bytes.toString('utf16le')), 'content: ' + file);
   }
 });
+
+test('r3-1: a SOUL.md saved between the default check and the write is kept; the role goes to memory', async (t) => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const root = tmp(t);
+  const a = archive();
+  const fake = fakeHermes(root);
+  const dir = userProfile(fake, DEFAULT_SOUL);
+  const soul = join(dir, 'SOUL.md');
+  const custom = 'You are my own assistant. Answer in French.';
+  const original = fs.readFileSync;
+  let raced = false;
+  t.mock.method(fs, 'readFileSync', function (path, ...rest) {
+    const out = original.call(this, path, ...rest);
+    // The user saves a custom SOUL right after the migration judged the default one.
+    if (!raced && String(path) === soul) { raced = true; writeFileSync(soul + '.tmp', custom); renameSync(soul + '.tmp', soul); }
+    return out;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const applied = await applyHermes(fake.hermes, a, buildPlan(a, root), { allowExisting: true });
+  assert.ok(raced);
+  assert.equal(readFileSync(soul, 'utf8'), custom);
+  assert.equal(stepOf(applied, 'soul').status, 'conflict');
+});
+
+test('r3-2: a memory file stored as UTF-16 is checked as such, never decoded into entries blindly', (t) => {
+  const root = tmp(t);
+  const a = archive({ box: [{ boxPath: `/home/box/sand-data/agents/${BOT}/memory/profile.md`, reason: 'bot-data', bytes: Buffer.from('- Key ' + PAT + '\n', 'utf16le') }] });
+  const plan = buildPlan(a, root);
+  assert.ok(!hasSecret(planText(plan)));
+  assert.ok(!plan.user.length && !plan.memory.some((m) => m.includes('Key')));
+  assert.ok(plan.notMigrated.some((n) => /profile\.md/.test(n.item)));
+});

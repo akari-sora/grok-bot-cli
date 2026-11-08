@@ -176,7 +176,11 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   const memFiles = cap.box.filter((b) => b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath));
   const user = [], memory = [];
   for (const f of memFiles.sort((a, b) => a.boxPath.localeCompare(b.boxPath))) {
-    const r = sanitize(archive.read(f.path).toString('utf8'));
+    // Bytes first: a memory file in another encoding (UTF-16) is checked as such, not decoded blindly.
+    const bytes = archive.read(f.path);
+    const raw = sanitizeBytes(bytes);
+    if (!raw.text) { omit(f.boxPath, raw.clean ? 'not UTF-8 text' : 'holds a token-shaped value that cannot be removed in place', 'kept only in the private archive'); continue; }
+    const r = sanitize(bytes.toString('utf8'));
     redactedSecrets += r.count;
     const into = /\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/') ? user : memory;
     for (const e of memoryEntries(r.text)) { const c = clean(e, `a memory entry in ${f.boxPath}`); if (c !== null) into.push(c); }
@@ -594,8 +598,12 @@ export async function applyHermes(hermes, archive, plan, { onProgress = () => {}
   if (currentSoul === plan.soul) { put(soulPath, soulBytes); step('soul', 'present'); }
   else if (seeded || (owned && record?.files['SOUL.md'] === sha256(soulBytes))) {
     if (seeded && currentSoul.trim()) put(soulPath + '.bak.grok-bot', soulBytes, 0o600, () => false);
-    put(soulPath, Buffer.from(plan.soul), 0o600, () => true);
-    step('soul', 'written');
+    // Authorized only for the exact bytes judged above: a SOUL saved in between is a conflict.
+    const judged = sha256(soulBytes);
+    if (put(soulPath, Buffer.from(plan.soul), 0o600, (sha) => sha === judged) === 'conflict') {
+      roleInMemory = plan.roleEntry !== null;
+      step('soul', 'conflict', { note: 'SOUL.md changed while importing; it was kept and the role was added to MEMORY.md instead' });
+    } else step('soul', 'written');
   } else {
     roleInMemory = plan.roleEntry !== null;
     step('soul', 'kept-existing', { note: 'SOUL.md was customized; the role was added to MEMORY.md instead' });

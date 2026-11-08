@@ -55987,7 +55987,13 @@ else:
             const memFiles = cap.box.filter((b)=>b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath));
             const user = [], memory = [];
             for (const f of memFiles.sort((a, b)=>a.boxPath.localeCompare(b.boxPath))){
-                const r = (0, _migration_redact_js__rspack_import_5.aj)(archive.read(f.path).toString('utf8'));
+                const bytes = archive.read(f.path);
+                const raw = (0, _migration_redact_js__rspack_import_5.vT)(bytes);
+                if (!raw.text) {
+                    omit(f.boxPath, raw.clean ? 'not UTF-8 text' : 'holds a token-shaped value that cannot be removed in place', 'kept only in the private archive');
+                    continue;
+                }
+                const r = (0, _migration_redact_js__rspack_import_5.aj)(bytes.toString('utf8'));
                 redactedSecrets += r.count;
                 const into = /\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/') ? user : memory;
                 for (const e of memoryEntries(r.text)){
@@ -56603,8 +56609,13 @@ else:
                 step('soul', 'present');
             } else if (seeded || owned && record?.files['SOUL.md'] === sha256(soulBytes)) {
                 if (seeded && currentSoul.trim()) put(soulPath + '.bak.grok-bot', soulBytes, 384, ()=>false);
-                put(soulPath, Buffer.from(plan.soul), 384, ()=>true);
-                step('soul', 'written');
+                const judged = sha256(soulBytes);
+                if (put(soulPath, Buffer.from(plan.soul), 384, (sha)=>sha === judged) === 'conflict') {
+                    roleInMemory = plan.roleEntry !== null;
+                    step('soul', 'conflict', {
+                        note: 'SOUL.md changed while importing; it was kept and the role was added to MEMORY.md instead'
+                    });
+                } else step('soul', 'written');
             } else {
                 roleInMemory = plan.roleEntry !== null;
                 step('soul', 'kept-existing', {
@@ -57311,7 +57322,6 @@ else:
             dot: 20 * 1024 * 1024
         };
         const STEP_CHARS = 6000;
-        const CHAT_FILE_BYTES = 6000;
         const MAX_CHAT_STEPS = 380;
         const DEFAULT_RECENT = 30;
         const SAFE = 'Save it exactly as given. Do not run, import, compile, install or act on it.';
@@ -57454,7 +57464,30 @@ else:
             };
             const user = [], memory = [];
             for (const f of cap.box.filter((b)=>b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath))){
-                const entries = (0, _migration_hermes_js__rspack_import_4._X)(archive.read(f.path).toString('utf8'));
+                const bytes = archive.read(f.path);
+                const raw = (0, _migration_redact_js__rspack_import_6.vT)(bytes);
+                if (!raw.text) {
+                    notMigrated.push({
+                        item: f.boxPath,
+                        reason: raw.clean ? 'not UTF-8 text' : 'holds a token-shaped value that cannot be removed in place',
+                        alternative: 'kept only in the private archive'
+                    });
+                    continue;
+                }
+                const entries = [];
+                for (const e of (0, _migration_hermes_js__rspack_import_4._X)(bytes.toString('utf8'))){
+                    const c = (0, _migration_redact_js__rspack_import_6.aj)(e);
+                    if (!c.clean) {
+                        notMigrated.push({
+                            item: `a memory entry in ${f.boxPath}`,
+                            reason: 'holds a token-shaped value that cannot be removed in place',
+                            alternative: 'kept only in the private archive'
+                        });
+                        continue;
+                    }
+                    redacted += c.count;
+                    entries.push(c.text);
+                }
                 if (/\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/')) user.push(...entries);
                 else memory.push(...entries);
             }
@@ -57545,10 +57578,10 @@ else:
             }
             for (const s of fullSkills)for (const { rest, row } of s.list){
                 const bytes = archive.read(row.path);
-                if (!upload && !(0, _migration_redact_js__rspack_import_6.vT)(bytes).text) {
+                if (!upload && !/\.md$/i.test(rest)) {
                     notMigrated.push({
                         item: `skill file ${s.slug}/${rest}`,
-                        reason: 'binary; chat delivery is text only',
+                        reason: 'files other than Markdown are sent byte for byte only in a zip',
                         alternative: 'kept in the archive; --via upload sends it'
                     });
                     continue;
@@ -57683,6 +57716,11 @@ else:
                     alternative: 'see REPORT.md in the archive'
                 });
             }
+            for (const r of cap.coverage?.boxStore?.unresolvedReferences ?? [])notMigrated.push({
+                item: r,
+                reason: 'named by the bot but not in its box store',
+                alternative: 'check whether it still exists in Grok Bot'
+            });
             for (const t of cap.transcripts)if (t.unreadable) notMigrated.push({
                 item: `${t.unreadable} transcript row(s) of ${t.sessionId || 'the main conversation'}`,
                 reason: 'their content could not be read at capture',
@@ -57832,10 +57870,8 @@ else:
                 note: contextNote,
                 text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
                 expect: [
-                    folder.replace(/^~\//, ''),
-                    ...roleTokens
-                ],
-                min: 1
+                    folder.replace(/^~\//, '')
+                ]
             });
             const payload = Buffer.from(JSON.stringify({
                 root: folder,

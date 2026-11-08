@@ -423,3 +423,21 @@ test('digest answers are judged row by row: every part once, right column, a mar
   assert.deepEqual(digestVerdict(plan, `Q2: ROLE.md MISSING 1\nbox ${'b'.repeat(12)} y`).broken, ['ROLE.md']);
   assert.deepEqual(digestVerdict(plan, `ROLE.md x ${'a'.repeat(12)}\nbox ${'b'.repeat(12)} y`).broken, ['ROLE.md'], 'the exact column for a zip');
 });
+
+test('round 3: chat never retypes skill scripts; the memory question needs the folder; missing references are listed', async (t) => {
+  const a = await sampleArchive(t);
+  const md = a.capture.box.find((b) => b.kind === 'file' && b.reason === 'skill' && b.boxPath.endsWith('/SKILL.md'));
+  const slug = md.boxPath.split('/').at(-2);
+  if (!a.capture.box.some((b) => b.boxPath === `/home/box/sand-data/workflows/${slug}/run.sh`)) a.capture.box.push({ ...md, boxPath: `/home/box/sand-data/workflows/${slug}/run.sh` });
+  a.capture.coverage = { ...a.capture.coverage, boxStore: { ...(a.capture.coverage.boxStore ?? {}), status: 'partial', unresolvedReferences: ['/home/box/bin/missing-worker9'] } };
+  const chat = buildTrinityPlan(a, 'dot', { via: 'chat', skills: 'all' });
+  assert.ok(!chat.steps.some((s) => s.text.includes(`skills/${slug}/run.sh`)));
+  assert.ok(chat.notMigrated.some((n) => n.item === `skill file ${slug}/run.sh` && /Markdown/.test(n.reason)));
+  assert.ok(chat.steps.some((s) => s.text.includes(`skills/${slug}/SKILL.md`)));
+  assert.ok(chat.notMigrated.some((n) => n.item === '/home/box/bin/missing-worker9'));
+  const memory = chat.questions.find((q) => q.area === 'memory');
+  assert.deepEqual(memory.expect, [chat.delivery.folder.replace(/^~\//, '')]);
+  assert.match(memory.expect[0], /-[A-Za-z0-9]{8}$/, 'the bot-id suffix is not in the question');
+  const upload = buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) });
+  assert.ok(!upload.notMigrated.some((n) => /run\.sh/.test(n.item)), 'a zip carries the script byte for byte');
+});

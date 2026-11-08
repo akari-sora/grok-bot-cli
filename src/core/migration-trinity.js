@@ -25,7 +25,6 @@ const LABEL = { muse: 'Muse', dot: 'Your dot' };
 // One attachment: the Muse window upload (muse-web-cli) and the dot app's own 20 MB limit.
 const ATTACH_LIMIT = { muse: 256 * 1024 * 1024, dot: 20 * 1024 * 1024 };
 const STEP_CHARS = 6000;
-const CHAT_FILE_BYTES = 6000;
 const MAX_CHAT_STEPS = 380;
 const DEFAULT_RECENT = 30;
 const SAFE = 'Save it exactly as given. Do not run, import, compile, install or act on it.';
@@ -144,7 +143,18 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   // --- the folder -------------------------------------------------------------------------
   const user = [], memory = [];
   for (const f of cap.box.filter((b) => b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath))) {
-    const entries = memoryEntries(archive.read(f.path).toString('utf8'));
+    // Bytes first: a memory file in another encoding (UTF-16) is checked as such, not decoded blindly.
+    const bytes = archive.read(f.path);
+    const raw = sanitizeBytes(bytes);
+    if (!raw.text) { notMigrated.push({ item: f.boxPath, reason: raw.clean ? 'not UTF-8 text' : 'holds a token-shaped value that cannot be removed in place', alternative: 'kept only in the private archive' }); continue; }
+    // Entry by entry: one value that cannot be redacted leaves only that entry out.
+    const entries = [];
+    for (const e of memoryEntries(bytes.toString('utf8'))) {
+      const c = sanitize(e);
+      if (!c.clean) { notMigrated.push({ item: `a memory entry in ${f.boxPath}`, reason: 'holds a token-shaped value that cannot be removed in place', alternative: 'kept only in the private archive' }); continue; }
+      redacted += c.count;
+      entries.push(c.text);
+    }
     if (/\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/')) user.push(...entries); else memory.push(...entries);
   }
   const open = cap.todos.filter((t) => t.status === 'pending' || t.status === 'in_progress');
@@ -186,7 +196,9 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   for (const s of fullSkills) for (const { rest, row } of s.list) {
     const bytes = archive.read(row.path);
     // Chat delivery is text: a binary skill file stays in the archive (and is said so).
-    if (!upload && !sanitizeBytes(bytes).text) { notMigrated.push({ item: `skill file ${s.slug}/${rest}`, reason: 'binary; chat delivery is text only', alternative: 'kept in the archive; --via upload sends it' }); continue; }
+    // Chat delivery is retyped by the agent: only a skill's Markdown goes that way; its scripts and
+    // other files are sent byte for byte only in a zip (a changed space changes what a script does).
+    if (!upload && !/\.md$/i.test(rest)) { notMigrated.push({ item: `skill file ${s.slug}/${rest}`, reason: 'files other than Markdown are sent byte for byte only in a zip', alternative: 'kept in the archive; --via upload sends it' }); continue; }
     addFile(safeRel(['skills', s.slug, ...rest.split('/')]), bytes, `skill file ${s.slug}/${rest}`);
   }
   if (main.rows.length && recentN > 0) {
@@ -235,6 +247,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   for (const [area, c] of Object.entries(cap.coverage ?? {})) {
     if (['failed', 'unavailable', 'partial'].includes(c.status) && area !== 'boxStore') notMigrated.push({ item: `Grok Bot ${area}`, reason: `${c.status} at capture${c.reason ? ': ' + c.reason : ''}`, alternative: 'see REPORT.md in the archive' });
   }
+  for (const r of cap.coverage?.boxStore?.unresolvedReferences ?? []) notMigrated.push({ item: r, reason: 'named by the bot but not in its box store', alternative: 'check whether it still exists in Grok Bot' });
   for (const t of cap.transcripts) if (t.unreadable) notMigrated.push({ item: `${t.unreadable} transcript row(s) of ${t.sessionId || 'the main conversation'}`, reason: 'their content could not be read at capture', alternative: 'listed in the archive (transcript/*.raw.jsonl)' });
   for (const s2 of cap.skipped) notMigrated.push({ item: s2.boxPath, reason: s2.reason, alternative: /credential/.test(s2.reason) ? 'sign in to that service again' : 'kept out of the plan' });
   for (const g of cap.groups ?? []) notMigrated.push({ item: `group chat "${g.name}"`, reason: 'a group is shared by several bots', alternative: 'listed in the archive' });
@@ -309,7 +322,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const roleTokens = distinctiveTokens(clean(cap.bot.instructions), 4);
   // Remembered across chats: the folder it was told to keep (the question does not name it).
   ask({ area: 'memory', note: contextNote, text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
-    expect: [folder.replace(/^~\//, ''), ...roleTokens], min: 1 });
+    expect: [folder.replace(/^~\//, '')] });
   const payload = Buffer.from(JSON.stringify({ root: folder, salt })).toString('base64');
   const expected = [...units].map(([u, list]) => ({ unit: u, digest: unitDigest(salt, list, !upload), ids: [...new Set(unitIds.get(u))] }));
   ask({ area: 'files-on-computer', text: `Run this exactly on your computer (it only reads files) and paste its whole output:\n\npython3 -c '${CHECK_PY}' ${payload}`, expect: expected.map((e) => e.digest) });
