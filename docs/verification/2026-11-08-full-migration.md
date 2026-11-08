@@ -1,6 +1,6 @@
 # Full migration verification — 2026-11-08
 
-Time zone Asia/Taipei. Real source → real destinations on the maintainer's Mac. This records what was run with the final code (grok-bot-cli `4ac07c4`, trinity-cli `3c2d2dc`, muse-web-cli `2d021f7`, chatgpt-dot-cli `e60eb1f`), what passed, what failed first, and why. The earlier records from the same day (`2026-11-08-migration*.md`) describe the first design and are superseded.
+Time zone Asia/Taipei. Real source → real destinations on the maintainer's Mac. This records what was run (Deploy QA with grok-bot-cli `4ac07c4`, trinity-cli `3c2d2dc`; the demo bot with the round-2 code: grok-bot-cli `6ef691a`, trinity-cli `94092a5`, muse-web-cli `19a0c34`, chatgpt-dot-cli `5f4b383`), what passed, what failed first, and why. Later commits answer the third review and are covered by the automated tests below. The earlier records from the same day (`2026-11-08-migration*.md`) describe the first design and are superseded.
 
 ## Source: Grok Bot, read-only
 
@@ -40,13 +40,26 @@ The earlier test profile was exported (`~/.hermes/profile-exports/grok-deploy-qa
   3. the history question took its keyword from a message whose token was redacted in HISTORY.md (that also put a raw value into the local plan file); its second form ("the first message without a redacted part") had a different right answer than the one the plan picked.
 - After `d1a00bf` and `4ac07c4` (keywords only from delivered, redacted text; one message named by its minute), `gbot migrate check ARCHIVE --to muse|dot --accept` — which sends no migration message — gave **8/8 on Muse** (in a new side chat, deleted afterwards) and **8/8 on the dot**.
 
+## A second real bot, recorded for the demo
+
+"Demo · Trip Planner" was created on account A with `gbot bots create` (backend, as the app does; verified live), given four plain-language messages (preferences, a Kyoto plan, a to-do, a routine left off) one at a time at least 20 s apart, then migrated with the guided `gbot migrate` and recorded (`demo/gbot-migrate-*.gif`):
+
+- Capture: 17 messages, 1 routine (off), 3 to-dos (1 open), 103 skills, 321 box files.
+- Hermes, new profile `grok-demo`: read back 7/7 (role, 3 user facts, 4 memory entries, 103 skills, 1 paused cron job, 17 messages, 321 files), acceptance 5/5 (user facts on the second try); asked afterwards, the bot named the open hotel task and that nothing was booked.
+- Muse: 4.2 MB zip, 329 files, 2 messages; 6/6 in a new chat. Your dot: the same zip; 6/6.
+
 ## Earlier runs on the same day (first design, file by file in chat)
 
 They found the problems the current design answers: Muse replying "saved" without writing Memory.md; a dot replying "saved" although its own review blocked the write; the dot's own alerts taken as answers; a token after a JSON `\n` that escaped redaction; Muse compiling a migrated script (`__pycache__`). Chat delivery is still available (`--via chat`); with the same checks it reached 9/9 digests and 7/7 questions on both.
 
 ## Strict review
 
-Codex (gpt-6-astra, max reasoning, read-only) reviewed the toolkit: round 1 asked for changes (secrets across chunk boundaries, destination path escape, ownership, check running an import, transcript cut at a capped page, and more). The fixes are in `960fb63` and the trinity, muse-web-cli and chatgpt-dot-cli commits above. Round 2 is recorded with the merge request.
+Codex (gpt-6-astra, max reasoning, read-only) reviewed all four repos in rounds until the findings converged:
+
+- Round 1 — request changes: secrets across chunk boundaries, destination path escape, Hermes ownership, `check` running an import, a transcript cut short by a capped page, and more. Fixed in `960fb63` and the matching trinity, muse-web-cli and chatgpt-dot-cli commits.
+- Round 2 — round-1 items 1, 4 and 11 closed; new findings: UTF-16 tokens and token-shaped file names, a credential read before selection, folder collisions, the Hermes write race, Muse receipts and chat ownership, digest answers matched loosely. Fixed in `7fb2da7`, `6ef691a`, trinity `94092a5`, muse-web-cli `19a0c34`, chatgpt-dot-cli `5f4b383`.
+- Round 3 — items 1, 3, 4, 5 and 11 closed; four narrower blockers left (memory files decoded before the byte check, the SOUL write race, Muse after-Enter failures and interleaving, chat delivery of skill scripts and the memory question). Fixed in `50114e7`, `970c33e`, muse-web-cli `3db0982`, trinity `a60dda7`.
+- Round 4 — the close-out review; its verdict is recorded with the merge request.
 
 ## Incident during the fixes
 
@@ -54,6 +67,6 @@ While a sub-agent tested the new Hermes preflight, running the Hermes runtime wi
 
 ## Automated tests
 
-- grok-bot-cli: `npm run check` (validate, build, artifact validation, typecheck, 841 unit tests, 96 route tests); Hermes helper contract 3/3 against a fake runtime with the real API names; official importer (bundled export) 4/4.
-- trinity-cli: 223 tests (7 platform skips).
-- muse-web-cli: 131 passed, 2 skipped. chatgpt-dot-cli: 121 tests, all new ones pass; one redirect test (`test_cli_usage_redirect_exits_three`) fails as it did before these changes.
+- grok-bot-cli: `npm run check` (validate, build, artifact validation, typecheck, 854 unit tests, 96 route tests); Hermes helper contract 3/3 against a fake runtime with the real API names, 3/3 against the installed Hermes stores in a scratch home; official importer (bundled export) 4/4.
+- trinity-cli: 231 tests (7 platform skips).
+- muse-web-cli: 137 passed, 2 skipped. chatgpt-dot-cli: 122 tests, all new ones pass; one redirect test (`test_cli_usage_redirect_exits_three`) fails as it did before these changes.

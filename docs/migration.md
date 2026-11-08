@@ -10,6 +10,8 @@
 gbot migrate
 ```
 
+示範影片與截圖：見 README 的「Move a bot to Hermes, Muse or Your dot」（`demo/gbot-migrate-*.gif`）。
+
 在終端機直接打 `gbot migrate`，會依序問：來源帳號 → 要搬的 bot（可以選多個）→ 目的地 → 顯示差異 → 確認 → 自動匯入、讀回、驗收。每一步都是下面這些普通指令，也可以自己一步一步跑或寫進腳本：
 
 ```sh
@@ -103,6 +105,8 @@ Muse／dot 的傳送可中斷續跑：每一步都有 nonce 和 ledger；停了�
 ```sh
 gbot migrate
 ```
+
+Demo videos and screenshots: README, "Move a bot to Hermes, Muse or Your dot" (`demo/gbot-migrate-*.gif`).
 
 In a terminal, `gbot migrate` asks for the source login, the bot (or several), the destination, shows the diff, asks to confirm, then imports, reads back and runs the acceptance checks. Each step is a plain command you can also run yourself:
 
