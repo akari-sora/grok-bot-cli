@@ -629,3 +629,13 @@ test('r3-3: plain-language tasks still get a keyword: a proper noun mid-sentence
   assert.deepEqual(distinctiveTokens('Hello there. Thanks a lot.'), []);
   assert.deepEqual(distinctiveTokens('Watch !65 in Kyoto', 1), ['!65'], 'ids still come first; the fallback is only for plain text');
 });
+
+test('r4-1: a long UTF-16 memory file whose first 8 KiB has no NUL is still not text', (t) => {
+  const root = tmp(t);
+  const bytes = Buffer.from('中'.repeat(4096) + '\n- Key ' + PAT + '\n', 'utf16le');
+  const a = archive({ box: [{ boxPath: `/home/box/sand-data/agents/${BOT}/memory/profile.md`, reason: 'bot-data', bytes }] });
+  const plan = buildPlan(a, root);
+  assert.ok(!hasSecret(planText(plan)));
+  assert.ok(!hasSecret(plan.user.join('\n').replace(/\0/g, '')), 'not even with the NULs removed');
+  assert.ok(plan.notMigrated.some((n) => /profile\.md/.test(n.item)));
+});

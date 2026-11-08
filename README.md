@@ -28,9 +28,9 @@ Recorded live on 2026-11-05 against Grok Bot 0.78.4 with this fork: create a bot
 
 ![The same bot moved to Muse and to Your dot: one zip each, checked on their computer](https://gitlab.com/aa22396584/grok-bot-cli/-/raw/main/demo/gbot-migrate-muse-dot.gif)
 
-The same bot to Muse and to Your dot: one zip each (4 MB, 329 files, two messages), unzipped on the agent's own computer, checked part by part with a salted SHA-256, then asked in a chat that cannot see the migration. [MP4](https://gitlab.com/aa22396584/grok-bot-cli/-/raw/main/demo/gbot-migrate-muse-dot.mp4) · tape: [demo/gbot-migrate-muse-dot.tape](demo/gbot-migrate-muse-dot.tape). How it works and what is checked: [docs/migration.md](docs/migration.md); the real-run record: [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md).
+The same bot to Muse and to Your dot: one zip each (4 MB, 329 files, two messages), unzipped on the agent's own computer, checked part by part with a salted SHA-256, then asked questions (on Muse in a new chat that cannot see the migration; a dot has one inbox, and the report says so). [MP4](https://gitlab.com/aa22396584/grok-bot-cli/-/raw/main/demo/gbot-migrate-muse-dot.mp4) · tape: [demo/gbot-migrate-muse-dot.tape](demo/gbot-migrate-muse-dot.tape). How it works and what is checked: [docs/migration.md](docs/migration.md); the real-run record: [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md).
 
-`gbot migrate` 會依序問登入、bot、目的地，先列出目的地會多什麼，確認後匯入、從目的地讀回，再問搬過去的 bot 只有搬過去的資料才答得出來的問題。2026-11-08 用為示範建立的真實 bot（Demo · Trip Planner）實際錄製：Hermes 多一個新 profile，含角色、記憶、skill 資料夾、排程（先暫停）、完整對話和檔案，每一項都透過 Hermes 讀回；最後搬到 Hermes 的 bot 說出京都行程還有哪件事沒做。第二段是同一個 bot 搬到 Muse 和 Your dot：各一個 zip（4 MB、329 個檔、兩則訊息），在對方電腦上解壓，用加鹽 SHA-256 逐部分核對，再到看不到搬家訊息的聊天室問問題。
+`gbot migrate` 會依序問登入、bot、目的地，先列出目的地會多什麼，確認後匯入、從目的地讀回，再問搬過去的 bot 只有搬過去的資料才答得出來的問題。2026-11-08 用為示範建立的真實 bot（Demo · Trip Planner）實際錄製：Hermes 多一個新 profile，含角色、記憶、skill 資料夾、排程（先暫停）、完整對話和檔案，每一項都透過 Hermes 讀回；最後搬到 Hermes 的 bot 說出京都行程還有哪件事沒做。第二段是同一個 bot 搬到 Muse 和 Your dot：各一個 zip（4 MB、329 個檔、兩則訊息），在對方電腦上解壓，用加鹽 SHA-256 逐部分核對，再問問題（Muse 在看不到搬家訊息的新聊天室問；dot 只有一個收件匣，報告會註明）。
 
 | Preview / 預覽 | Hermes result / 結果 | Continues the work / 接手工作 |
 | --- | --- | --- |

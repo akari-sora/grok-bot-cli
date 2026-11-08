@@ -37836,7 +37836,7 @@ else:
             if (hasSecret(value)) throw new Error(`Refusing to send ${where}: it still contains a token-shaped value.`);
         }
         function isText(bytes) {
-            if (bytes.subarray(0, 8192).includes(0)) return false;
+            if (bytes.includes(0)) return false;
             try {
                 new TextDecoder('utf-8', {
                     fatal: true

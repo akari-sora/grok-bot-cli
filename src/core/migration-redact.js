@@ -91,8 +91,11 @@ export function assertNoSecrets(value, where) {
   if (hasSecret(value)) throw new Error(`Refusing to send ${where}: it still contains a token-shaped value.`);
 }
 
-/** Text-like bytes (no NUL in the first 8 KiB and valid UTF-8). */
+/**
+ * Text-like bytes: no NUL anywhere and valid UTF-8. The whole buffer is checked: UTF-16 text whose
+ * first part has no NUL (CJK characters) still has one in every ASCII character, tokens included.
+ */
 export function isText(bytes) {
-  if (bytes.subarray(0, 8192).includes(0)) return false;
+  if (bytes.includes(0)) return false;
   try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return true; } catch { return false; }
 }

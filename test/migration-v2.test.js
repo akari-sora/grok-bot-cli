@@ -441,3 +441,16 @@ test('round 3: chat never retypes skill scripts; the memory question needs the f
   const upload = buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) });
   assert.ok(!upload.notMigrated.some((n) => /run\.sh/.test(n.item)), 'a zip carries the script byte for byte');
 });
+
+test('round 4: a long UTF-16 memory file never reaches a Muse/dot message or zip', async (t) => {
+  const a = await sampleArchive(t);
+  const tok = 'ghp_' + 'Q'.repeat(36);
+  const row = a.capture.box.find((b) => b.kind === 'file' && /\/memory\/profile\.md$/.test(b.boxPath));
+  const bytes = Buffer.from('中'.repeat(4096) + '\n- Key ' + tok + '\n', 'utf16le');
+  const read = a.read.bind(a);
+  a.read = (p) => (p === row.path ? bytes : read(p));
+  const chat = buildTrinityPlan(a, 'dot', { via: 'chat' });
+  assert.ok(!chat.steps.some((s) => hasSecret(s.text.replace(/\0/g, ''))));
+  const zip = unzip(readFileSync(buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) }).steps[0].attach[0].path));
+  for (const [name, b] of zip) assert.ok(!hasSecret(b.toString('latin1').replace(/\0/g, '')), name);
+});
