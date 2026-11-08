@@ -342,7 +342,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const once = (m) => mine.filter((x) => minute(x) === minute(m)).length === 1;
   const pick = mine.find((m) => minute(m) && once(m) && !sanitize(m.text).count && distinctiveTokens(clean(m.text), 1).length);
   if (pick && recentN > 0) ask({ area: 'history', note: contextNote, text: `Open ${folder}/HISTORY.md on your computer and quote the message I sent at ${minute(pick)} UTC.`, expect: distinctiveTokens(clean(pick.text), 2), min: 1 });
-  if (roleTokens.length) ask({ area: 'role', note: contextNote, text: `Open ${folder}/ROLE.md on your computer: which projects or accounts did ${short} work on?`, expect: roleTokens, min: 1 });
+  if (roleTokens.length) ask({ area: 'role', note: contextNote, text: `Open ${folder}/ROLE.md on your computer: which projects, accounts or places does it name? Quote them.`, expect: roleTokens, min: 1 });
   // Muse keeps Memory.md short and curated: whether the pointer landed there is reported, not judged.
   const checks = seat === 'muse' ? [{ id: 'memory-pointer', kind: 'memory', contains: [short, folderName], min: 1, informational: true }] : [];
   if (activateRoutines && scheduled.some((a) => a.enabled)) checks.push({ id: 'schedules', kind: 'schedules', contains: scheduled.filter((a) => a.enabled).map((a) => a.name) });

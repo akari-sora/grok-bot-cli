@@ -37547,6 +37547,7 @@ else:
             'slack',
             'telegram'
         ]);
+        const PLAIN_PROPER = /^(User|Users|English|Chinese|Japanese|Korean|French|German|Spanish|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|June|July|August|September|October|November|December)$/;
         function distinctiveTokens(text, max = 3) {
             const cleaned = String(text ?? '').replace(/https?:\/\/\S+/g, ' ').replace(/\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?/g, ' ').replace(/\b\d{1,2}:\d{2}\b/g, ' ');
             const seen = new Map();
@@ -37559,7 +37560,9 @@ else:
             for (const m of cleaned.matchAll(/\b[A-Za-z][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\b/g))add(m[0], 3);
             for (const m of cleaned.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/g))if (/\d/.test(m[0]) || m[0].split('-').length >= 3) add(m[0], 2);
             for (const m of cleaned.matchAll(/\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\b/g))add(m[0], 1);
-            if (!seen.size) for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)]\s+)[A-Z][a-z]{3,}\b/g))add(m[0], 0.5);
+            if (!seen.size) {
+                for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)][ \t]+)[A-Z][a-z]{3,}\b/g))if (!PLAIN_PROPER.test(m[0])) add(m[0], 0.5);
+            }
             const order = [
                 ...seen
             ].map(([t, score], i)=>({
@@ -38600,7 +38603,7 @@ else:
             if (roleTokens.length) ask({
                 area: 'role',
                 note: contextNote,
-                text: `Open ${folder}/ROLE.md on your computer: which projects or accounts did ${short} work on?`,
+                text: `Open ${folder}/ROLE.md on your computer: which projects, accounts or places does it name? Quote them.`,
                 expect: roleTokens,
                 min: 1
             });

@@ -745,6 +745,9 @@ const COMMON_TOKENS = new Set(['github', 'gitlab', 'chatgpt', 'openai', 'google'
  * hyphenated names, then CamelCase words. Dates, times and URLs are ignored; well-known product
  * names are skipped because an answer could contain them without any migrated data.
  */
+// Capitalized words that say nothing about this data: languages, days, months.
+const PLAIN_PROPER = /^(User|Users|English|Chinese|Japanese|Korean|French|German|Spanish|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|June|July|August|September|October|November|December)$/;
+
 export function distinctiveTokens(text, max = 3) {
   const cleaned = String(text ?? '')
     .replace(/https?:\/\/\S+/g, ' ')
@@ -764,7 +767,9 @@ export function distinctiveTokens(text, max = 3) {
   for (const m of cleaned.matchAll(/\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\b/g)) add(m[0], 1);
   // Plain-language text (no ids, numbers or code names): a proper noun mid-sentence (Kyoto,
   // Taipei) is still something only this data says. Never a sentence's first word.
-  if (!seen.size) for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)]\s+)[A-Z][a-z]{3,}\b/g)) add(m[0], 0.5);
+  if (!seen.size) {
+    for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)][ \t]+)[A-Z][a-z]{3,}\b/g)) if (!PLAIN_PROPER.test(m[0])) add(m[0], 0.5);
+  }
   const order = [...seen].map(([t, score], i) => ({ t, score, i: cleaned.indexOf(t) + i * 0 }));
   order.sort((a, b) => b.score - a.score || a.i - b.i);
   return order.slice(0, max).map((o) => o.t);

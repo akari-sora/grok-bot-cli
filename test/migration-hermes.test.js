@@ -628,6 +628,8 @@ test('r3-3: plain-language tasks still get a keyword: a proper noun mid-sentence
   assert.deepEqual(distinctiveTokens('Book the Kyoto hotel only after the user confirms dates.'), ['Kyoto']);
   assert.deepEqual(distinctiveTokens('Hello there. Thanks a lot.'), []);
   assert.deepEqual(distinctiveTokens('Watch !65 in Kyoto', 1), ['!65'], 'ids still come first; the fallback is only for plain text');
+  assert.deepEqual(distinctiveTokens('Read the steps\nSpeak to the user first.'), [], 'a capital after a line break starts a sentence');
+  assert.deepEqual(distinctiveTokens('Plan trips from Taipei. Answer in English.'), ['Taipei'], 'languages say nothing about this data');
 });
 
 test('r4-1: a long UTF-16 memory file whose first 8 KiB has no NUL is still not text', (t) => {
