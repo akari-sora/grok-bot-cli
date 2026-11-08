@@ -33,7 +33,7 @@
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/e4a813a82563f26d219c342c6a08a04e/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -41,7 +41,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/e4a813a82563f26d219c342c6a08a04e/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```

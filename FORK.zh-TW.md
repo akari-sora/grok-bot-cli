@@ -14,12 +14,12 @@ npm 上的套件仍屬於上游。不要 `npm install -g grok-bot-cli`。GitLab�
 
 使用 Node.js 22.19+（22.x）或 24.2+，且同一個作業系統使用者已在 Grok Bot 桌面版登入一次。產生的 CLI 使用 [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain)；Node 23 與 Node 24.0–24.1 沒有此功能，啟動器會以非零結束碼與版本說明拒絕執行。GitLab（<https://gitlab.com/aa22396584/grok-bot-cli>）是主要遠端。
 
-不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.11` 附的套件檔再安裝。
+不要用 `npm install -g git+https://gitlab.com/...`。npm 會結束碼 0，但 `gbot` 是斷掉的連結。改下載 `v0.11.2-iml1s.12` 附的套件檔再安裝。
 
 macOS 或 Linux：
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/e4a813a82563f26d219c342c6a08a04e/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell：
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/e4a813a82563f26d219c342c6a08a04e/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -132,7 +132,7 @@ gbot config import gbot-accounts.json --replace
 ```sh
 scripts/install-fork.sh --config gbot-accounts.json
 # Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
-scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.11
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.12
 ```
 
 腳本把 `https://gitlab.com/aa22396584/grok-bot-cli.git` clone 到 `$XDG_CACHE_HOME/grok-bot-cli/src`（預設 `~/.cache/grok-bot-cli/src`；Windows 是 `%LOCALAPPDATA%\grok-bot-cli\src`）。`--config` 會先變成絕對路徑，再換目錄。ref 只能含 `[A-Za-z0-9._/-]`，不能以 `-` 開頭，並在 `--` 之後傳給 git。`-- v1.2` 不會改裝 `main`。腳本從遠端取出該 ref，確認解析出的 commit 符合 `^[0-9a-f]{40}([0-9a-f]{24})?$`，再用 `git checkout --detach <sha>`（不加路徑分隔的 `--`）檢出，印出它，並拒絕髒的 cache。`npm pack` 只會寫入 checkout 外由安裝程式建立的私有暫存目錄，並在結束時清除該目錄；安裝程式不會刪除未知的 cache 檔案。若 cache 含舊安裝程式留下的 `.tgz`，腳本會原樣保留並拒絕該 cache；請保留或移開舊 cache，使用乾淨的 cache 位置。它只安裝這次 `npm pack` 剛印出的檔案。需要 `npm ci` 是因為 `npm pack` 會跑 `agent-bundle prepack`，用已提交的 `artifact/` 填 `dist/`。接著執行 `gbot --version` 與 `gbot accounts`（accounts 失敗不會跳過 import）；有 `--config` 時執行 `gbot config import`；每個別名再跑 `gbot wake --check --account <別名>`。import 或 wake 失敗會以非 0 結束。import 回報尚未登入時，會跳過那些別名的 wake 檢查、仍檢查其餘別名，並以 3 結束。以 root 或 Administrator 執行會拒絕，除非加上 `--allow-root`（PowerShell 是 `-AllowRoot`）。`--dry-run` 與 PowerShell `-DryRun` 只印步驟，不跑 git 或 npm。腳本不儲存、也不印 token。`scripts/install-fork.sh` 可執行。
