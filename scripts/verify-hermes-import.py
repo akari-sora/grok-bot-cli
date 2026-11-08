@@ -137,10 +137,15 @@ FAKE_RUNTIME = {
     "hermes_state.py": '''
         import json, uuid
         from fake_home import home
+        def _default_db_path():
+            return home() / "state.json"
         class SessionDB:
             _IMPORT_MAX_MESSAGES_PER_SESSION, _IMPORT_MAX_SESSION_BYTES = 10_000, 5 * 1024 * 1024
-            def __init__(self):
-                self._file = home() / "state.json"
+            def __init__(self, db_path=None, read_only=False):
+                # Like Hermes: a read-only store must exist and refuses writes.
+                self._file, self.read_only = db_path or _default_db_path(), read_only
+                if read_only and not self._file.exists():
+                    raise RuntimeError("unable to open database file")
                 self._data = json.loads(self._file.read_text()) if self._file.exists() else {"sessions": {}}
             def find_foreign_import(self, origin):
                 for sid, s in self._data["sessions"].items():
@@ -151,6 +156,8 @@ FAKE_RUNTIME = {
                 existing = self.find_foreign_import(origin)
                 if existing:
                     return {"session_id": existing, "already_imported": True}
+                if self.read_only:
+                    raise RuntimeError("attempt to write a readonly database")
                 sid = uuid.uuid4().hex[:12]
                 self._data["sessions"][sid] = {"origin": origin, "title": title, "cwd": cwd, "profile": profile,
                                                "messages": [{"role": m["role"], "content": m["content"]} for m in messages]}
