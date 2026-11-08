@@ -1,12 +1,14 @@
 # Move to Hermes (a Grok Bot bot that runs `gbot migrate` for you)
 
+English | [繁體中文](move-to-hermes.zh-TW.md)
+
 "Move to Hermes" is a Grok Bot bot whose only job is to move your other bots to Hermes Agent, the way Move to iOS moves a phone. It does not copy anything itself: it asks before each command and runs the open-source `gbot migrate` on your own computer, which reads the Grok Bot app login there and writes into your local Hermes (see [migration.md](migration.md)).
 
 Its instructions are [templates/move-to-hermes.md](../templates/move-to-hermes.md).
 
 ## Get it
 
-- **From the template link**: open **https://x.ai/bot/y2AFnYLdbz5T66loRBHar** ("Move to Hermes by ImL1s", published 2026-11-08) and choose **Add to Grok Bot**. You get your own copy in your account.
+- **From the template link**: open <https://x.ai/bot/y2AFnYLdbz5T66loRBHar> ("Move to Hermes by ImL1s", published 2026-11-08) and choose **Add to Grok Bot**. You get your own copy in your account.
 - **Create it yourself with gbot**:
 
   ```sh
@@ -14,7 +16,7 @@ Its instructions are [templates/move-to-hermes.md](../templates/move-to-hermes.m
     --description "$(cat templates/move-to-hermes.md)"
   ```
 
-- **Without a new bot**: paste the text of templates/move-to-hermes.md into a chat with any bot you already have.
+- **Without a new bot**: paste the text of [templates/move-to-hermes.md](../templates/move-to-hermes.md) into a chat with any bot you already have.
 
 Then say "move my bots to Hermes". It checks `hermes` and `node`, checks `gbot migrate`, lists your bots, previews each move, and moves a bot only after you say yes.
 
