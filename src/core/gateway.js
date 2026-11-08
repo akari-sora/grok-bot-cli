@@ -1997,7 +1997,10 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     throw err;
   }
   const receipt = sendReceiptFrom(data);
-  const messageId = receipt.messageId;
+  // The gateway answers {accepted:true} with no messageId: read the tail once for this nonce so the
+  // receipt can name the entry. The backend path settles a send with GetGrokBotSendStatus instead.
+  const messageId = receipt.messageId
+    ?? (receipt.accepted ? await transcriptEntryIdForNonce(session, rec, body.clientNonce, extra.signal) : undefined);
   // Only a confirmed receipt counts as accepted; anything else is unknown, never a silent accept.
   // ponytail: full send/execution correlation envelope stays in #37.
   return {
@@ -2007,6 +2010,25 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
     ...(messageId ? { messageId } : {}),
     clientNonce: body.clientNonce,
   };
+}
+
+// Best effort, after the prompt left: a miss, an abort, or a failed read leaves the receipt as it was.
+// Matched like reconcileDelivery (the user entry carrying this nonce). No wake: the box just took the send.
+async function transcriptEntryIdForNonce(session, rec, clientNonce, signal) {
+  if (signal?.aborted) return undefined;
+  try {
+    const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: 20 }, { signal, allowWake: false });
+    const entries = transcriptRows(data);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (!entry || typeof entry !== "object" || entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
+      const id = typeof entry.id === "string" && entry.id ? entry.id : entry.entryId;
+      return typeof id === "string" && id ? id : undefined;
+    }
+  } catch (error) {
+    debug("send receipt: transcript tail unread (" + (error instanceof Error ? error.message : String(error)) + ")");
+  }
+  return undefined;
 }
 
 // A transcript row body or store blob: the box transcript entry as JSON. Anything else is unreadable.

@@ -333,6 +333,8 @@ for (const delivery of ["ACCEPTED_BOX", "ACCEPTED_TEMPORAL", "DUPLICATE"]) {
     const zone = sent.headers["x-cursor-timezone"];
     assert.ok(zone === undefined || /\w/.test(zone));
     assert.equal(boxCalls(calls, "sendPrompt").length, 0, "never the box gateway");
+    assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0, "the box tail is not read for a backend receipt");
+    assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
     assert.equal(rpcCalls(calls, "GetGrokBotSendStatus").length, 0);
   });
 }
@@ -653,7 +655,8 @@ test("a GROK_BOT_GATEWAY_URL override stays on the box gateway even with CURSOR_
     return sendPrompt(session, "General", "hi", { clientNonce: "nonce-override" });
   });
   assert.equal(out.delivery, "accepted");
-  assert.deepEqual(calls.map((call) => call.method ?? call.rpc), ["listAgents", "sendPrompt"]);
+  // A gateway send reads the box tail once for its nonce; no backend RPC.
+  assert.deepEqual(calls.map((call) => call.method ?? call.rpc), ["listAgents", "sendPrompt", "getAgentTranscriptTail"]);
   assert.equal(calls[1].body.clientNonce, "nonce-override");
 });
 
@@ -894,6 +897,9 @@ for (const [label, caps] of [
       assert.equal(group.id, "grp-1");
     });
     assert.deepEqual(boxCalls(calls, "sendPrompt").map((call) => call.body.clientNonce), ["nonce-box"]);
+    // A box send's {accepted:true} is looked up in the box tail, not the backend's.
+    assert.deepEqual(boxCalls(calls, "getAgentTranscriptTail").map((call) => call.body), [{ id: "bot-1", limit: 20 }]);
+    assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
     assert.deepEqual(boxCalls(calls, "createGroup").map((call) => call.body.memberAgentIds), [["bot-1", "bot-2"]]);
     for (const rpc of ["SendGrokBotUserMessage", "CreateGrokBotRoom"]) assert.equal(rpcCalls(calls, rpc).length, 0, rpc);
     // One capability call for the session, and one stderr notice.

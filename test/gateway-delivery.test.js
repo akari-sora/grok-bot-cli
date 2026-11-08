@@ -63,6 +63,82 @@ test("sendPrompt treats the live {accepted:true} answer as accepted", async (t) 
   assert.equal(out.clientNonce, "nonce-live");
 });
 
+// After upstream 92bdd62: an {accepted:true} answer has no messageId, so the tail is read once for the nonce.
+function ackGateway(t, tail) {
+  return mockGateway(t, (url, body) => {
+    if (url === "/api/listAgents") return roster;
+    if (url === "/api/sendPrompt") return { accepted: true };
+    if (url === "/api/getAgentTranscriptTail") return tail(body);
+    return new Response("{}", { status: 404 });
+  });
+}
+
+test("an {accepted:true} send names the tail entry that carries its clientNonce", async (t) => {
+  const { session, seen } = await ackGateway(t, () => ({
+    entries: [
+      { id: "t6u", role: "user", clientNonce: "someone-else" },
+      { id: "t7a", role: "assistant", clientNonce: "nonce-ack" },
+      { id: "t8u", role: "user", clientNonce: "nonce-ack" },
+      { id: "t9a", role: "assistant", text: "hello" },
+    ],
+  }));
+  const out = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-ack" });
+  assert.equal(out.delivery, "accepted");
+  assert.equal(out.messageId, "t8u");
+  assert.equal(out.clientNonce, "nonce-ack");
+  assert.deepEqual(seen.map((call) => call.url), ["/api/listAgents", "/api/sendPrompt", "/api/getAgentTranscriptTail"]);
+  assert.deepEqual(seen[2].body, { id: "bot-1", limit: 20 });
+});
+
+test("an {accepted:true} send takes entryId when the tail entry has no id", async (t) => {
+  const { session } = await ackGateway(t, () => [{ entryId: "e-5", role: "user", clientNonce: "nonce-entry" }]);
+  const out = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-entry" });
+  assert.equal(out.delivery, "accepted");
+  assert.equal(out.messageId, "e-5");
+});
+
+for (const [label, tail] of [
+  ["the nonce is not in the tail", () => ({ entries: [{ id: "t7u", role: "user", clientNonce: "someone-else" }] })],
+  ["only an assistant entry carries the nonce", () => ({ entries: [{ id: "t7a", role: "assistant", clientNonce: "nonce-miss" }] })],
+  ["the matching entry has no id", () => ({ entries: [{ role: "user", clientNonce: "nonce-miss" }] })],
+  ["the tail read fails", () => new Response("boom", { status: 500 })],
+  ["the tail answer is not an entry list", () => ({ entries: "nope" })],
+]) {
+  test(`an {accepted:true} send stays accepted with no messageId when ${label}`, async (t) => {
+    const { session, seen } = await ackGateway(t, tail);
+    const out = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-miss" });
+    assert.equal(out.delivery, "accepted");
+    assert.equal(out.messageId, undefined);
+    assert.equal(out.clientNonce, "nonce-miss");
+    assert.equal(seen.filter((call) => call.url === "/api/sendPrompt").length, 1, "never resent");
+    assert.equal(seen.filter((call) => call.url === "/api/getAgentTranscriptTail").length, 1, "one tail read");
+  });
+}
+
+test("a send with its own messageId, or with no receipt, does not read the tail", async (t) => {
+  for (const answer of [{ messageId: "m-1" }, { ok: true }]) {
+    const { session, seen } = await mockGateway(t, (url) => (url === "/api/listAgents" ? roster : answer));
+    await sendPrompt(session, "General", "hi", { clientNonce: "nonce-own" });
+    assert.deepEqual(seen.map((call) => call.url), ["/api/listAgents", "/api/sendPrompt"], JSON.stringify(answer));
+  }
+});
+
+test("an {accepted:true} send aborted after it was transmitted keeps the receipt and skips the tail read", async (t) => {
+  const controller = new AbortController();
+  const { session, seen } = await mockGateway(t, (url) => {
+    if (url === "/api/listAgents") return roster;
+    if (url === "/api/sendPrompt") {
+      controller.abort();
+      return { accepted: true };
+    }
+    return { entries: [{ id: "t8u", role: "user", clientNonce: "nonce-abort" }] };
+  });
+  const out = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-abort", signal: controller.signal });
+  assert.equal(out.delivery, "accepted");
+  assert.equal(out.messageId, undefined);
+  assert.deepEqual(seen.map((call) => call.url), ["/api/listAgents", "/api/sendPrompt"]);
+});
+
 test("sendPrompt returns the client nonce it sent", async (t) => {
   const { session, seen } = await mockGateway(t, (url) => (url === "/api/listAgents" ? roster : { messageId: "m-1" }));
   const out = await sendPrompt(session, "General", "hi", { clientNonce: "nonce-1" });

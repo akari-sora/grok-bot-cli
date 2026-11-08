@@ -32,6 +32,12 @@ unit:
     - chown -R node:node "$CI_PROJECT_DIR"
     - su node -s /bin/sh -c "npm run test:unit"
 
+# Upstream CI runs on Node 26 (upstream 8dbe1d1). `unit` keeps the 22.x floor;
+# this job runs the same steps on the newest line the engines range allows.
+unit:node26:
+  extends: unit
+  image: node:26-slim
+
 # Self-hosted Windows. Tags, manual web runs, and main pushes that change
 # shipped code, tests, or packaging. A CI-only push still runs Linux only.
 # Merge requests are manual: that runner accepts protected refs only.

@@ -949,8 +949,12 @@ test("sendPrompt with pod_hibernated wakes and resends once", async (t) => {
   });
   const awake = await listen(async (req, res) => {
     const body = await readBody(req);
-    prompts.push(body);
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/getAgentTranscriptTail") {
+      res.end(JSON.stringify({ entries: [{ id: "entry-pod", role: "user", clientNonce: "nonce-pod" }] }));
+      return;
+    }
+    prompts.push(body);
     res.end(JSON.stringify({ accepted: true }));
   });
   const backend = await listen(async (req, res) => {
@@ -965,6 +969,8 @@ test("sendPrompt with pod_hibernated wakes and resends once", async (t) => {
   }));
   assert.equal(sent.delivery, "accepted");
   assert.equal(sent.clientNonce, "nonce-pod");
+  // The receipt's tail read goes to the gateway the wake returned.
+  assert.equal(sent.messageId, "entry-pod");
   assert.equal(ensures, 1);
   assert.equal(prompts.length, 2);
   assert.equal(prompts[0].clientNonce, "nonce-pod");

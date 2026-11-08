@@ -18586,6 +18586,30 @@ var __webpack_modules__ = {
                 return payload;
             };
         });
+        function capSize(inst, size) {
+            const caps = _util_js__rspack_import_2.hi(inst._zod.def.checks);
+            if (!caps.length) return;
+            const cap = Math.min(...caps.map((c)=>c[0]));
+            const parse1 = inst._zod.parse;
+            inst._zod.parse = (payload, ctx)=>{
+                const n = size(payload.value);
+                if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
+                    for (const [max, ch] of _util_js__rspack_import_2.hi(inst._zod.def.checks)){
+                        if (n > max && ch._zod.def.when(payload)) {
+                            const start = payload.issues.length;
+                            ch._zod.check(payload);
+                            payload.issues[start].continue = false;
+                            _util_js__rspack_import_2.d3(payload.issues, start, inst);
+                            return payload;
+                        }
+                    }
+                }
+                return parse1(payload, ctx);
+            };
+        }
+        const arraySize = (input)=>Array.isArray(input) ? input.length : -1;
+        const mapSize = (input)=>input instanceof Map ? input.size : -1;
+        const setSize = (input)=>input instanceof Set ? input.size : -1;
         function handleArrayResult(result, final, index) {
             if (result.issues.length) {
                 final.issues.push(..._util_js__rspack_import_2.lQ(index, result.issues));
@@ -18628,6 +18652,7 @@ var __webpack_modules__ = {
                 }
                 return payload;
             };
+            capSize(inst, arraySize);
         });
         function handlePropertyResult(result, final, key, input, optin, optout) {
             const isPresent = key in input;
@@ -19645,6 +19670,7 @@ var __webpack_modules__ = {
                 if (proms.length) return Promise.all(proms).then(()=>payload);
                 return payload;
             };
+            capSize(inst, mapSize);
         });
         function handleMapResult(keyResult, valueResult, final, key, input, inst, ctx) {
             if (keyResult.issues.length) {
@@ -19711,6 +19737,7 @@ var __webpack_modules__ = {
                 if (proms.length) return Promise.all(proms).then(()=>payload);
                 return payload;
             };
+            capSize(inst, setSize);
         });
         function handleSetResult(result, final) {
             if (result.issues.length) {
@@ -20960,6 +20987,7 @@ var __webpack_modules__ = {
             gx: ()=>captureStackTrace,
             h1: ()=>merge,
             hI: ()=>allowsEval,
+            hi: ()=>sizeCaps,
             iR: ()=>finalizeIssue,
             jD: ()=>hide,
             jw: ()=>joinValues,
@@ -21513,6 +21541,19 @@ var __webpack_modules__ = {
         function unwrapMessage(message) {
             return typeof message === "string" ? message : message?.message;
         }
+        function sizeCaps(defChecks) {
+            const caps = [];
+            for (const ch of defChecks ?? []){
+                const d = ch._zod.def;
+                if (!/_(length|size)$|_equals$/.test(d.check)) break;
+                const max = d.maximum ?? d.length ?? d.size;
+                if (max >= 0) caps.push([
+                    max,
+                    ch
+                ]);
+            }
+            return caps;
+        }
         function attachSchema(issues, start, inst) {
             var _a;
             for(let i = start; i < issues.length; i++){
@@ -21784,7 +21825,7 @@ var __webpack_modules__ = {
         const version = {
             major: 4,
             minor: 6,
-            patch: 5
+            patch: 7
         };
         __webpack_require__.d(__webpack_exports__, {}, {
             r: version
@@ -22564,6 +22605,7 @@ var __webpack_modules__ = {
         __webpack_require__.d(__webpack_exports__, {
             If: ()=>listGrokBotGatewayAccountSources,
             KK: ()=>decryptGrokBotSafeStorage,
+            VE: ()=>grokBotAppDataPath,
             Z2: ()=>loadGrokBotGatewaySession,
             ZN: ()=>hasGrokBotGatewaySession1,
             bI: ()=>maskLoginSecrets,
@@ -22575,6 +22617,7 @@ var __webpack_modules__ = {
         var node_fs__rspack_import_1 = __webpack_require__("node:fs");
         var node_os__rspack_import_2 = __webpack_require__("node:os");
         var node_path__rspack_import_3 = __webpack_require__("node:path");
+        var _app_session_js__rspack_import_4 = __webpack_require__("./src/core/app-session.js");
         const DEFAULT_SAND_CLIENT_VERSION = "0.72.1";
         const VERSION = /^\d+\.\d+\.\d+$/;
         const PLIST_VERSION = /<key>\s*CFBundleShortVersionString\s*<\/key>\s*<string>([^<]*)<\/string>/;
@@ -22706,7 +22749,24 @@ var __webpack_modules__ = {
             }
             return null;
         }
+        const APP_DATA_PLATFORMS = new Set([
+            "darwin",
+            "linux",
+            "win32"
+        ]);
+        function desktopStatusVersion(platform, home, env, readFile1) {
+            if (!APP_DATA_PLATFORMS.has(platform)) return null;
+            let status;
+            try {
+                status = JSON.parse(String(readFile1(node_path__rspack_import_3["default"].join((0, _app_session_js__rspack_import_4.VE)(home, platform, env), "desktop-status.json"), "utf8")));
+            } catch  {
+                return null;
+            }
+            return status && typeof status.appVersion === "string" ? normalizeClientVersion(status.appVersion) : null;
+        }
         function installedVersion({ platform, home, readFile: readFile1, execFile, env, now }) {
+            const running = desktopStatusVersion(platform, home, env, readFile1);
+            if (running) return running;
             if (platform === "darwin") return macVersion(home, readFile1);
             if (platform === "win32") return windowsVersion(execFile, env, now);
             return null;
@@ -27760,7 +27820,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 throw err;
             }
             const receipt = sendReceiptFrom(data);
-            const messageId = receipt.messageId;
+            const messageId = receipt.messageId ?? (receipt.accepted ? await transcriptEntryIdForNonce(session, rec, body.clientNonce, extra.signal) : undefined);
             return {
                 target: rec,
                 result: data && typeof data === "object" ? data : {},
@@ -27770,6 +27830,28 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {},
                 clientNonce: body.clientNonce
             };
+        }
+        async function transcriptEntryIdForNonce(session, rec, clientNonce, signal) {
+            if (signal?.aborted) return undefined;
+            try {
+                const data = await gatewayCall(session, "getAgentTranscriptTail", {
+                    id: rec.id,
+                    limit: 20
+                }, {
+                    signal,
+                    allowWake: false
+                });
+                const entries = transcriptRows(data);
+                for(let index = entries.length - 1; index >= 0; index -= 1){
+                    const entry = entries[index];
+                    if (!entry || typeof entry !== "object" || entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
+                    const id = typeof entry.id === "string" && entry.id ? entry.id : entry.entryId;
+                    return typeof id === "string" && id ? id : undefined;
+                }
+            } catch (error) {
+                debug("send receipt: transcript tail unread (" + (error instanceof Error ? error.message : String(error)) + ")");
+            }
+            return undefined;
         }
         function entryObject(text) {
             try {

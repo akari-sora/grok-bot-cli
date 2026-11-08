@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import test from "node:test";
 
-import { clientVersionRuntime, cursorClientVersion, DEFAULT_SAND_CLIENT_VERSION, resetClientVersionCache } from "../src/core/client-version.js";
+import { clientVersionRuntime, cursorClientVersion, DEFAULT_SAND_CLIENT_VERSION, forgetCachedAppVersion, resetClientVersionCache } from "../src/core/client-version.js";
 import { connectGateway } from "../src/core/gateway.js";
 import { ensureSandboxHeaders } from "../src/core/headers.js";
 
@@ -40,6 +40,18 @@ const PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <string>0.70.2</string>
 </dict></plist>`;
 
+function enoent() {
+  const error = new Error("ENOENT");
+  error.code = "ENOENT";
+  return error;
+}
+
+// The fixtures below read the installed app (plist or registry): the app's desktop-status.json is absent.
+const isDesktopStatus = (file) => String(file).endsWith("desktop-status.json");
+const noDesktopStatus = () => {
+  throw enoent();
+};
+
 test("SAND_CLIENT_VERSION wins over the installed app", () => {
   let reads = 0;
   const version = cursorClientVersion({
@@ -64,16 +76,13 @@ test("macOS plist: /Applications then ~/Applications", () => {
     home: "/Users/fixture",
     readFile: (path) => {
       seen.push(path);
-      if (path === "/Applications/Grok Bot.app/Contents/Info.plist") {
-        const error = new Error("ENOENT");
-        error.code = "ENOENT";
-        throw error;
-      }
+      if (isDesktopStatus(path) || path === "/Applications/Grok Bot.app/Contents/Info.plist") throw enoent();
       return PLIST;
     },
   });
   assert.equal(version, "0.70.2");
   assert.deepEqual(seen, [
+    join("/Users/fixture", "Library/Application Support/Grok Bot", "desktop-status.json"),
     "/Applications/Grok Bot.app/Contents/Info.plist",
     join("/Users/fixture", "Applications/Grok Bot.app/Contents/Info.plist"),
   ]);
@@ -93,6 +102,7 @@ test("Windows registry lookup uses an absolute reg.exe and the live install key"
   const version = cursorClientVersion({
     env: { SystemRoot: "D:\\Windows" },
     platform: "win32",
+    readFile: noDesktopStatus,
     execFile: (cmd, args, options) => {
       calls.push({ cmd, args, timeout: options.timeout, maxBuffer: options.maxBuffer });
       return LIVE_REG;
@@ -134,6 +144,7 @@ function windowsLookup(execFile) {
   const version = cursorClientVersion({
     env: {},
     platform: "win32",
+    readFile: noDesktopStatus,
     now: () => clock,
     execFile: (cmd, args, options) => {
       calls.push({ cmd, args, timeout: options.timeout });
@@ -192,6 +203,7 @@ test("Windows registry queries share one 3s budget", () => {
   cursorClientVersion({
     env: {},
     platform: "win32",
+    readFile: noDesktopStatus,
     now: () => clock,
     execFile: (_cmd, _args, options) => {
       timeouts.push(options.timeout);
@@ -213,6 +225,7 @@ test("Windows /f search keeps a key path that contains spaces when DisplayName h
   const version = cursorClientVersion({
     env: {},
     platform: "win32",
+    readFile: noDesktopStatus,
     execFile: (_cmd, args) => {
       if (args.includes("/f")) return search;
       if (args.includes("/v")) {
@@ -237,6 +250,7 @@ test("a DisplayName that does not start with Grok Bot is ignored", () => {
   const version = cursorClientVersion({
     env: {},
     platform: "win32",
+    readFile: noDesktopStatus,
     execFile: () => output,
   });
   assert.equal(version, "0.72.1");
@@ -260,13 +274,18 @@ test("invalid client versions fall back to the built-in default", () => {
     home: "/Users/fixture",
     readFile: () => "<key>CFBundleShortVersionString</key><string>beta</string>",
   }), "0.72.1");
+  const linuxReads = [];
   assert.equal(cursorClientVersion({
     env: {},
     platform: "linux",
-    readFile: () => {
-      throw new Error("plist is not consulted on linux");
+    home: "/home/fixture",
+    readFile: (file) => {
+      linuxReads.push(file);
+      throw enoent();
     },
   }), "0.72.1");
+  // Linux has no plist or registry: only the app's desktop-status.json.
+  assert.deepEqual(linuxReads, [join("/home/fixture", ".config", "Grok Bot", "desktop-status.json")]);
   assert.equal(withEnv({ SAND_CLIENT_VERSION: "nope" }, () => ensureSandboxHeaders("t")["x-cursor-client-version"]), "0.72.1");
 });
 
@@ -318,7 +337,7 @@ test("EnsureSandBox 401 no longer supported names the version gbot sent", async 
   }
 });
 
-function stubInstalledApp(readFile, now = () => 5_000_000) {
+function stubInstalledApp(readFile, now = () => 5_000_000, { handlesDesktopStatus = false } = {}) {
   const saved = {
     now: clientVersionRuntime.now,
     platform: clientVersionRuntime.platform,
@@ -330,7 +349,10 @@ function stubInstalledApp(readFile, now = () => 5_000_000) {
   clientVersionRuntime.now = now;
   clientVersionRuntime.platform = () => "darwin";
   clientVersionRuntime.home = () => "/Users/fixture";
-  clientVersionRuntime.readFile = readFile;
+  clientVersionRuntime.readFile = (file, encoding) => {
+    if (isDesktopStatus(file) && !handlesDesktopStatus) throw enoent();
+    return readFile(file, encoding);
+  };
   clientVersionRuntime.execFile = () => {
     throw new Error("registry is not consulted for this fixture");
   };
@@ -444,5 +466,106 @@ test("a 401 does not re-read when the cached version is the built-in default", a
   } finally {
     restore();
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// desktop-status.json as the running app wrote it on macOS, 2026-11-08.
+const DESKTOP_STATUS = JSON.stringify({ version: 1, pid: 45359, appVersion: "0.77.0", startedAtMs: 1793071044901, signedIn: true });
+
+for (const [platform, home, env, statusPath] of [
+  ["darwin", "/Users/fixture", {}, join("/Users/fixture", "Library/Application Support/Grok Bot", "desktop-status.json")],
+  ["linux", "/home/fixture", {}, join("/home/fixture", ".config", "Grok Bot", "desktop-status.json")],
+  ["linux", "/home/fixture", { XDG_CONFIG_HOME: "/xdg" }, join("/xdg", "Grok Bot", "desktop-status.json")],
+  ["win32", "C:\\Users\\fixture", { APPDATA: "D:\\Roaming" }, join("D:\\Roaming", "Grok Bot", "desktop-status.json")],
+]) {
+  test(`${platform}${env.XDG_CONFIG_HOME ? " (XDG_CONFIG_HOME)" : ""}: the app's desktop-status.json comes before the plist and the registry`, () => {
+    const reads = [];
+    let registry = 0;
+    const version = cursorClientVersion({
+      env,
+      platform,
+      home,
+      readFile: (file) => {
+        reads.push(file);
+        if (file === statusPath) return DESKTOP_STATUS;
+        throw enoent();
+      },
+      execFile: () => {
+        registry += 1;
+        throw new Error("the registry is not consulted when desktop-status.json has the version");
+      },
+    });
+    assert.equal(version, "0.77.0");
+    assert.deepEqual(reads, [statusPath]);
+    assert.equal(registry, 0);
+  });
+}
+
+test("an unusable desktop-status.json falls through to the plist, the registry, or the default", () => {
+  const statusPath = join("/Users/fixture", "Library/Application Support/Grok Bot", "desktop-status.json");
+  for (const status of [
+    "not json",
+    "null",
+    "[]",
+    JSON.stringify({ version: 1 }),
+    JSON.stringify({ appVersion: 77 }),
+    JSON.stringify({ appVersion: "0.78.0-beta.1" }),
+    JSON.stringify({ appVersion: "" }),
+  ]) {
+    const reads = [];
+    const version = cursorClientVersion({
+      env: {},
+      platform: "darwin",
+      home: "/Users/fixture",
+      readFile: (file) => {
+        reads.push(file);
+        return file === statusPath ? status : PLIST;
+      },
+    });
+    assert.equal(version, "0.70.2", status);
+    assert.deepEqual(reads, [statusPath, "/Applications/Grok Bot.app/Contents/Info.plist"], status);
+  }
+  const win = cursorClientVersion({
+    env: { APPDATA: "D:\\Roaming" },
+    platform: "win32",
+    readFile: () => "{",
+    execFile: () => LIVE_REG,
+  });
+  assert.equal(win, "0.72.1");
+  assert.equal(cursorClientVersion({
+    env: {},
+    platform: "linux",
+    home: "/home/fixture",
+    readFile: () => JSON.stringify({ appVersion: "latest" }),
+  }), DEFAULT_SAND_CLIENT_VERSION);
+  // A fourth numeric part is dropped, as for every other source.
+  assert.equal(cursorClientVersion({
+    env: {},
+    platform: "linux",
+    home: "/home/fixture",
+    readFile: () => JSON.stringify({ appVersion: "0.77.0.12" }),
+  }), "0.77.0");
+});
+
+test("a version from desktop-status.json is an installed-app value: cached, and dropped on a 401", () => {
+  let reads = 0;
+  const restore = stubInstalledApp((file) => {
+    if (isDesktopStatus(file)) {
+      reads += 1;
+      return DESKTOP_STATUS;
+    }
+    throw new Error("the plist is not read when desktop-status.json has the version");
+  }, () => 5_000_000, { handlesDesktopStatus: true });
+  try {
+    withEnv({ SAND_CLIENT_VERSION: null }, () => {
+      assert.equal(cursorClientVersion(), "0.77.0");
+      assert.equal(cursorClientVersion(), "0.77.0");
+      assert.equal(reads, 1);
+      assert.equal(forgetCachedAppVersion(), true);
+      assert.equal(cursorClientVersion(), "0.77.0");
+      assert.equal(reads, 2);
+    });
+  } finally {
+    restore();
   }
 });
