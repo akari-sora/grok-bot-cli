@@ -140,7 +140,7 @@ The same bot to Muse and to Your dot: one zip each (4.2 MB, 329 files, two messa
 
 **What is checked.** Hermes is read back through Hermes' own code, then asked questions with `hermes -p`. Muse and dot run one read-only command on their computer that prints a salted SHA-256 for each part; then they get questions whose answers need words only the migrated data has. That is a behavioural test, not a proof. Known credential paths are not read, and known token formats are replaced with `[redacted]` before anything leaves the private local archive (a match on known formats, not every secret). Routines start paused in Hermes; after turning the Grok Bot copy off, run `hermes -p grok-<bot> cron resume <id>`. Exit codes: 0 migrated and verified, 3 imported but something did not verify, 2 usage or missing `--yes`, 1 other errors.
 
-**Without a terminal.** The **Move to Hermes** bot asks before each command and runs `gbot migrate` on your computer. Create it with `gbot bots create --name "Move to Hermes" --description "$(cat templates/move-to-hermes.md)"`, or share it as a Grok Bot template ([docs/move-to-hermes.md](docs/move-to-hermes.md)). It moves bots to Hermes only.
+**Without a terminal.** The **Move to Hermes** bot asks before each command and runs `gbot migrate` on your computer. Create it with `gbot bots create --name "Move to Hermes" --description "$(cat templates/move-to-hermes.md)"`, or share it as a Grok Bot template: `gbot bots template "Move to Hermes"` prints the x.ai link ([docs/move-to-hermes.md](docs/move-to-hermes.md)). It moves bots to Hermes only.
 
 Guide, destination differences and limits: [docs/migration.md](docs/migration.md). The real-run record (a 903-row bot and the demo bot, all three destinations): [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md).
 
@@ -156,7 +156,7 @@ Guide, destination differences and limits: [docs/migration.md](docs/migration.md
 
 **怎麼驗。** Hermes 用 Hermes 自己的程式讀回，再用 `hermes -p` 問問題。Muse 和 dot 在它們的電腦上跑一行只讀指令，印出每一部分的加鹽 SHA-256；接著問只有搬過去的資料才答得出來的問題。這是行為測試，不是證明。已知的憑證路徑不讀；已知格式的 token 在離開本機私人存檔前換成 `[redacted]`（只比對已知格式，不是所有秘密都認得出來）。排程在 Hermes 一律先暫停；在 Grok Bot 關掉原本那份後，用 `hermes -p grok-<bot> cron resume <id>` 打開。結束碼：0 搬完並驗證；3 搬了但有項目沒驗過；2 參數錯誤或沒有 `--yes`；1 其他錯誤。
 
-**不開終端機。** **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。用上面的 `gbot bots create` 命令建立，或用 Grok Bot 範本分享（見 [docs/move-to-hermes.md](docs/move-to-hermes.md)）。它只搬到 Hermes。
+**不開終端機。** **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。用上面的 `gbot bots create` 命令建立，或用 Grok Bot 範本分享：`gbot bots template "Move to Hermes"` 會印出 x.ai 連結（見 [docs/move-to-hermes.md](docs/move-to-hermes.md)）。它只搬到 Hermes。
 
 使用說明、三個目的地的差異與限制見 [docs/migration.md](docs/migration.md)；實際執行紀錄（一個 903 列對話的 bot 和示範 bot，三個目的地）見 [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md)。
 
@@ -230,6 +230,8 @@ gbot bots create --name Researcher
 gbot bots create --name Writer
 gbot bots get Researcher
 gbot bots update Researcher --description "Research the launch" --notify on
+gbot bots template Researcher
+gbot bots template Researcher --status
 gbot groups create --name Launch --member Researcher --description "Ship together"
 gbot groups add Launch Writer
 gbot groups members Launch
@@ -436,6 +438,7 @@ Sends have a 15-second deadline and reads 30 seconds, both including the respons
 | --- | --- |
 | most commands / 大部分命令 | 0 done (a send can be `delivery: "unknown"` and still exit 0); 1 usage error or gateway failure (with `--json`, `send`, `wake` and the `codex` commands print the failure as a JSON document with `exitCode` on stdout); 2 unknown option, including `--account` before the subcommand |
 | `gbot wake` | 0 running, or `--check` succeeded; 2 usage; 3 could not wake; 4 timed out before the box was ready |
+| `gbot bots template` | 0 the template was seen, or `--status` read it; 3 the message went out (or its delivery is unknown) but no template appeared within `--wait`: run `--status` later, do not send again; 1 rejected, or nothing sent |
 | `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify; 2 usage or missing `--yes`; 1 other errors |
 | `gbot config import` | 0 imported; 2 invalid file (nothing written); 3 imported, but some aliased logins are not signed in on this machine |
 | `gbot wear pair` | 0 paired; 1–6 and 129/130/143 as listed in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair) |

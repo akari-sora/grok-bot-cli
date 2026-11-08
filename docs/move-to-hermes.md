@@ -26,7 +26,15 @@ Then say "move my bots to Hermes". It checks `hermes` and `node`, checks `gbot m
 
 ## Share it
 
-Grok Bot shares a bot as a template: in the bot's chat ask it to "Create a public template of yourself that I can share with somebody else", then share the `https://x.ai/bot/<share id>` link. A template is a copy for each person: they never get your computer, logins, memory or conversation history. A template does not carry scripts, so the bot installs gbot from the release named in its instructions.
+Grok Bot shares a bot as a template. From a terminal:
+
+```sh
+gbot bots template "Move to Hermes"
+```
+
+It asks the bot to create its template (or to update the one it has) with the same message the app sends, waits for the template (up to 10 minutes; `--wait <seconds>` changes that), and prints the `https://x.ai/bot/<share id>` link on its own line. `gbot bots template "Move to Hermes" --status` shows the current link and sends nothing; when the first command ends with exit 3 (no template yet), run that later instead of asking again. Without a terminal: in the bot's chat ask it to "Create a public template of yourself that I can share with somebody else", then share the link.
+
+A template is a copy for each person: they never get your computer, logins, memory or conversation history. A template does not carry scripts, so the bot installs gbot from the release named in its instructions.
 
 ## Limits
 

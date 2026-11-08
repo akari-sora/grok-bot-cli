@@ -196,6 +196,7 @@ When the session has an access token, gbot uses these backend RPCs:
 | `bots update`, `groups update` | `UpdateGrokBotAgent` (numeric server id, only the changed fields); `--notify` and `--hidden` with `SetGrokBotAgentClientState` |
 | `bots delete`, `groups delete` | `DeleteGrokBotAgent` (not found counts as deleted) |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested) |
+| `bots template` | `GetGrokBotTemplateForSourceAgent`; to create or update, `SendGrokBotUserMessage` with the `TEMPLATE_SHARE` initiator |
 
 Since 0.11.2-iml1s.7, `bots create` calls `CreateGrokBotTemporalAgent` as the app does (the box gateway answered 404 on 0.78). `thread`, the tail that `reconcile` falls back to, the relay, `approvals list` and `approvals respond`, and the MCP thread tool read the transcript tail with `ListGrokBotTranscriptEntries` (`limit` N+1, newest page, oldest first; bodies left out of the page are read from the store, 8 at a time, and checked against their hash). A row whose body cannot be read is shown as `unreadable`, and a `--after` cursor stops before it so the next read gets it. `thread --root` and `skills` stay on the box gateway; the app has no backend call for a root thread.
 
@@ -250,6 +251,15 @@ gbot thread Researcher --after "<cursor>" --json
 `--after` has no default. `--limit` defaults to 40 (1–200). Entries are strictly after the cursor. `entryCount: 0` and `gapReset: false` means nothing new. An unknown cursor returns one bounded snapshot with `gapReset: true`.
 
 Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. The normalized `role` is `unknown` unless the entry says `user` or `assistant`. That is still a reply. Do not treat `unknown` as a failed send.
+
+`bots template` shares a server-hosted bot as a Grok Bot template, the way the 0.78 app does:
+
+```sh
+gbot bots template "Move to Hermes"            # create or update, then wait up to 600 s
+gbot bots template "Move to Hermes" --status   # read only: the current template and link
+```
+
+gbot reads `GetGrokBotTemplateForSourceAgent` for the bot. With no template it sends the bot the app's message `Create a public template of yourself that I can share with somebody else`; with one, `Update the shared template of yourself.` The message goes through `SendGrokBotUserMessage` with `initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"` and the send delivery rules in Grok Bot 0.78.x above, and the bot builds the template on the server. gbot then reads the template every 10 seconds until one appears (or, for an update, one with a newer `updatedAtMs`), for at most `--wait` seconds (default 600; `0` does not wait). The link `https://x.ai/bot/<shareId>` is printed on its own line. `--json` gives `action` (`created` or `updated`), `delivery`, `clientNonce`, and `template` (`shareId`, `link`, `name`, `published`, `visibility`, `activeVersion`, `updatedAtMs`). Exit 0: the template was seen. Exit 3: the message was accepted or its delivery is unknown, but no template appeared within `--wait` (`template: null` and a `hint`); check later with `gbot bots template <bot> --status`. gbot never sends the message again; running the command again asks the bot again. Exit 1: the message was rejected, or nothing was sent. `--status` sends nothing; it returns `template` (or `null`, "no template yet"), `hasTeam`, and `exportPolicy` when the server gives one. Templates are for server-hosted bots (the app has no box path for them): a box-only bot, a login whose server roster is off, a group, and a session without an access token are refused before anything is sent.
 
 ### Move a bot to Hermes, Muse or Your dot (`gbot migrate`)
 
@@ -309,6 +319,8 @@ For tests only, `--code <code>` and `GBOT_TEST_KEYCHAIN_PASSWORD` are honoured w
 | 0 | Command finished. A send can be `delivery: "unknown"` and still exit 0. | If delivery is unknown, read the thread. Do not resend. |
 | 1 | Usage error or gateway failure. Send failures are JSON on stdout with `exitCode: 1`. | Read `error` / `code`. Fix the flag or the login. |
 | 2 | Unknown option, including `--account` before the subcommand. | Put `--account` after the subcommand. |
+
+`bots template` also uses 3: the message went out (or its delivery is unknown) but no template appeared within `--wait`. Run `gbot bots template <bot> --status` later instead of sending again.
 
 `--normalized` without `--json` throws `--normalized requires --json.` Other commands print the error on stderr.
 
@@ -574,6 +586,7 @@ Session 有 access token 時，gbot 改用這些後端 RPC：
 | `bots update`、`groups update` | `UpdateGrokBotAgent`（數字的伺服器 id，只送有改的欄位）；`--notify` 與 `--hidden` 用 `SetGrokBotAgentClientState` |
 | `bots delete`、`groups delete` | `DeleteGrokBotAgent`（找不到視為已刪除） |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` 或 `ResolveGrokBotLocalToolPermission`（照 App 對應，沒有實測） |
+| `bots template` | `GetGrokBotTemplateForSourceAgent`；建立或更新時用 `SendGrokBotUserMessage`，initiator 是 `TEMPLATE_SHARE` |
 
 從 0.11.2-iml1s.7 起，`bots create` 跟 App 一樣呼叫 `CreateGrokBotTemporalAgent`（0.78 的雲端電腦 gateway 回 404）。`thread`、`reconcile` 退回去讀的 transcript 尾端、relay、`approvals list` 與 `approvals respond`，以及 MCP 的 thread 工具，都用 `ListGrokBotTranscriptEntries` 讀尾端（`limit` N+1，最新一頁，舊的在前；頁面裡省略的內文從 store 讀，一次 8 個，並核對雜湊）。讀不到內文的列顯示成 `unreadable`，`--after` 游標停在它前面，下次讀會再拿到它。`thread --root` 與 `skills` 仍走雲端電腦 gateway；App 沒有對應 root thread 的後端呼叫。
 
@@ -628,6 +641,15 @@ gbot thread Researcher --after "<cursor>" --json
 `--after` 沒有預設。`--limit` 預設 40（1–200）。結果是游標之後的項目。`entryCount: 0` 且 `gapReset: false` 表示沒有新項目。不認識的游標會回一份有界快照，且 `gapReset: true`。
 
 機器人回覆常常是 `kind: "send-message"`、`message.type: "text"`。除非項目寫明 `user` 或 `assistant`，正規化後的 `role` 會是 `unknown`。那仍然是回覆。不要把 `unknown` 當成送出失敗。
+
+`bots template` 把伺服器上的 bot 分享成 Grok Bot 範本，做法和 0.78 App 一樣：
+
+```sh
+gbot bots template "Move to Hermes"            # 建立或更新，最多等 600 秒
+gbot bots template "Move to Hermes" --status   # 只讀：目前的範本與連結
+```
+
+gbot 先讀這個 bot 的 `GetGrokBotTemplateForSourceAgent`。還沒有範本時，送給 bot 的是 App 的訊息 `Create a public template of yourself that I can share with somebody else`；已經有範本時是 `Update the shared template of yourself.`。訊息走 `SendGrokBotUserMessage`，`initiator: "GROK_BOT_USER_MESSAGE_INITIATOR_TEMPLATE_SHARE"`，送達規則同上面 Grok Bot 0.78.x 的送訊；範本由 bot 在伺服器上建立。之後 gbot 每 10 秒讀一次範本，直到範本出現（更新時則是 `updatedAtMs` 比原本新的範本），最多等 `--wait` 秒（預設 600；`0` 不等）。連結 `https://x.ai/bot/<shareId>` 單獨印在一行。`--json` 有 `action`（`created` 或 `updated`）、`delivery`、`clientNonce` 與 `template`（`shareId`、`link`、`name`、`published`、`visibility`、`activeVersion`、`updatedAtMs`）。結束碼 0：看到範本了。結束碼 3：訊息已被接受或送達未知，但 `--wait` 內沒有出現範本（`template: null`，附 `hint`）；稍後用 `gbot bots template <bot> --status` 查。gbot 不會再送一次訊息；再跑一次命令就是再請 bot 一次。結束碼 1：訊息被拒絕，或什麼都沒送出。`--status` 不送任何東西，回傳 `template`（沒有時是 `null`，「no template yet」）、`hasTeam`，伺服器有給時還有 `exportPolicy`。範本只給伺服器上的 bot（App 沒有走雲端電腦的做法）：只在雲端電腦名單上的 bot、伺服器名單關閉的登入、群組，以及沒有 access token 的 session，都會在送出任何東西之前被拒絕。
 
 ### 把 bot 搬到 Hermes、Muse 或 Your dot（`gbot migrate`）
 
@@ -687,6 +709,8 @@ gbot wear pair 192.168.1.23:40123 --account "<標籤>" --json
 | 0 | 命令完成。送出即使是 `delivery: "unknown"` 也可能是 0。 | delivery 是 unknown 時先讀 thread，不要重送。 |
 | 1 | 用法錯誤或 gateway 失敗。送出失敗時 stdout 是含 `exitCode: 1` 的 JSON。 | 看 `error` / `code`。修正旗標或登入。 |
 | 2 | 不認識的選項，包含子命令前的 `--account`。 | 把 `--account` 放到子命令後面。 |
+
+`bots template` 另外會用 3：訊息已送出（或送達未知），但 `--wait` 內沒有出現範本。稍後跑 `gbot bots template <bot> --status`，不要再送一次。
 
 沒有 `--json` 就用 `--normalized` 會丟出 `--normalized requires --json.` 其他命令的錯誤在 stderr。
 
