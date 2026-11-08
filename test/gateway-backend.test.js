@@ -16,6 +16,7 @@ import { transcriptDelta } from "../src/core/transcript.js";
 import {
   addGroupMember,
   addSkill,
+  backendOnlySession,
   connectGateway,
   createGroup,
   deleteAgent,
@@ -37,6 +38,7 @@ import {
   setGroupMembers,
   shareBotTemplate,
   updateAgent,
+  usageStatus,
 } from "../src/core/gateway.js";
 
 const ACCESS = "synthetic-backend-access-do-not-leak";
@@ -1971,4 +1973,48 @@ test("skills list keeps the box gateway answer when there is one, and a non-404 
   await broken.run(async (session) => {
     await assert.rejects(listSkills(session), (error) => error.status === 500);
   });
+});
+
+test("usageStatus reads DashboardService/GetSandUsageStatus with {} and returns no dashboard URL", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "gbot-usage-"));
+  const calls = [];
+  let answer = () => json({
+    currentPeriodStart: "2026-11-07T16:02:55.972Z",
+    nextResetTimestampUtc: "2026-11-14T16:02:55.972Z",
+    usagePercent: 16.57550320426031,
+    hasAvailableUsage: true,
+    onDemandSettings: { visible: true, eligible: true, dashboardUrl: "https://cursor.com/dashboard/spending?for=grok%7Cuser_SYNTHETIC" },
+    grokPlanLabel: "Grok Bot Plan",
+    cursorPlanName: "Ultra",
+    isUnified: true,
+  });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    calls.push({ target: String(url), body: JSON.parse(init.body), headers: init.headers });
+    return answer();
+  });
+  await withEnv(envFor(home), async () => {
+    const session = backendOnlySession();
+    assert.deepEqual(await usageStatus(session), {
+      usagePercent: 16.57550320426031,
+      periodStart: "2026-11-07T16:02:55.972Z",
+      resetsAt: "2026-11-14T16:02:55.972Z",
+      hasAvailableUsage: true,
+      plan: "Ultra",
+      planLabel: "Grok Bot Plan",
+      unified: true,
+      onDemandEligible: true,
+    });
+    // Connect JSON leaves out false and 0.
+    answer = () => json({ grokPlanLabel: "Grok Bot Plan" });
+    assert.deepEqual(await usageStatus(session), {
+      usagePercent: 0, periodStart: null, resetsAt: null, hasAvailableUsage: false, plan: null, planLabel: "Grok Bot Plan", unified: false, onDemandEligible: false,
+    });
+    answer = () => json({ code: "unauthenticated", message: "bad token " + ACCESS }, 401);
+    const error = await usageStatus(session).then(() => assert.fail("expected a failure"), (err) => err);
+    assert.equal(error.kind, "auth");
+    assert.equal(error.method, "GetSandUsageStatus");
+    assert.doesNotMatch(error.message, new RegExp(ACCESS));
+  });
+  assert.deepEqual(calls.map((call) => call.target), Array(3).fill(BACKEND + "/aiserver.v1.DashboardService/GetSandUsageStatus"), "one read each, no EnsureSandBox");
+  assert.ok(calls.every((call) => JSON.stringify(call.body) === "{}" && call.headers.authorization === "Bearer " + ACCESS));
 });

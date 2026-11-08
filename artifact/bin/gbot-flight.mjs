@@ -13177,6 +13177,139 @@ var __webpack_modules__ = {
             resultSchema: resultSchema
         });
     },
+    "./src/cli/usage.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
+        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_4 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_gateway_js__rspack_import_1 = __webpack_require__("./src/core/gateway.js");
+        var _core_logins_js__rspack_import_2 = __webpack_require__("./src/core/logins.js");
+        var _core_secret_store_js__rspack_import_5 = __webpack_require__("./src/core/secret-store.js");
+        var _gbot_js__rspack_import_3 = __webpack_require__("./src/gbot.ts");
+        const config = {
+            description: 'Show this week\'s Grok Bot usage, when it resets and the plan (DashboardService GetSandUsageStatus). Read-only: it does not wake the box.',
+            exitCode: 'result',
+            inputJsonSchema: {
+                additionalProperties: false,
+                properties: {
+                    account: {
+                        description: "Saved Grok Bot login. Uses --account, then GBOT_ACCOUNT, then the config default, then the descriptor single or active entry",
+                        type: 'string'
+                    }
+                },
+                type: 'object'
+            }
+        };
+        const inputSchema = zod__rspack_import_4.Ikc({
+            account: zod__rspack_import_4.YjP().min(1).optional()
+        }).strict();
+        const okSchema = zod__rspack_import_4.Ikc({
+            account: zod__rspack_import_4.YjP().nullable(),
+            usagePercent: zod__rspack_import_4.aig(),
+            periodStart: zod__rspack_import_4.YjP().nullable(),
+            resetsAt: zod__rspack_import_4.YjP().nullable(),
+            hasAvailableUsage: zod__rspack_import_4.zMY(),
+            plan: zod__rspack_import_4.YjP().nullable(),
+            planLabel: zod__rspack_import_4.YjP().nullable(),
+            unified: zod__rspack_import_4.zMY(),
+            onDemandEligible: zod__rspack_import_4.zMY(),
+            exitCode: zod__rspack_import_4.euz(0)
+        }).strict();
+        const failSchema = zod__rspack_import_4.Ikc({
+            code: zod__rspack_import_4.YjP().optional(),
+            error: zod__rspack_import_4.YjP(),
+            exitCode: zod__rspack_import_4.KCZ([
+                zod__rspack_import_4.euz(1),
+                zod__rspack_import_4.euz(2)
+            ])
+        }).strict();
+        const resultSchema = zod__rspack_import_4.KCZ([
+            okSchema,
+            failSchema
+        ]);
+        const SELECTION_CODES = new Set([
+            'AMBIGUOUS_ENTRIES',
+            'UNKNOWN_ACCOUNT',
+            'INVALID',
+            'INVALID_ACCOUNT_SCOPE'
+        ]);
+        const MIGRATE_HINT = 'Moving bots elsewhere: gbot migrate (docs/migration.md).';
+        const pad = (n)=>String(n).padStart(2, '0');
+        const localTime = (date)=>`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const fromNow = (ms)=>{
+            const minutes = Math.round(ms / 60000);
+            if (minutes < 60) return minutes <= 1 ? 'in about a minute' : `in ${minutes} minutes`;
+            const hours = Math.round(ms / 3600000);
+            if (hours < 48) return hours === 1 ? 'in 1 hour' : `in ${hours} hours`;
+            return `in ${Math.round(ms / 86400000)} days`;
+        };
+        const resetText = (resetsAt)=>{
+            const at = Date.parse(resetsAt);
+            if (!Number.isFinite(at)) return `Resets ${resetsAt}.`;
+            const left = at - Date.now();
+            return `Resets ${localTime(new Date(at))} (local time)${left > 0 ? `, ${fromNow(left)}` : ''}.`;
+        };
+        const textOf = (value)=>{
+            const plan = value.plan ?? value.planLabel;
+            const line = [
+                `Grok Bot usage${value.account ? ` (${value.account})` : ''}: ${value.usagePercent.toFixed(1)}% of this week's included usage.`,
+                value.resetsAt ? resetText(value.resetsAt) : '',
+                plan ? `Plan: ${plan}${value.unified ? ' (unified)' : ''}.` : '',
+                `On-demand: ${value.onDemandEligible ? 'eligible' : 'not eligible'}.`
+            ].filter(Boolean).join(' ');
+            return value.usagePercent >= 80 || !value.hasAvailableUsage ? `${line}\n${MIGRATE_HINT}` : line;
+        };
+        const run = async (input, signal)=>{
+            const choice = (0, _core_logins_js__rspack_import_2.cq)({
+                account: input.account ?? ((0, _core_logins_js__rspack_import_2.SH)() || undefined),
+                ...(0, _core_secret_store_js__rspack_import_5.Ih)()
+            });
+            const session = (0, _core_gateway_js__rspack_import_1.JX)({
+                account: input.account
+            });
+            const usage = await (0, _core_gateway_js__rspack_import_1.kw)(session, {
+                signal
+            });
+            return {
+                account: choice ? choice.alias || choice.label : null,
+                ...usage,
+                exitCode: 0
+            };
+        };
+        const failure = (error)=>{
+            const fields = error && typeof error === 'object' ? error : {};
+            const code = typeof fields.code === 'string' && fields.code ? fields.code : undefined;
+            const selection = fields.exitCode === 2 || code !== undefined && SELECTION_CODES.has(code);
+            return {
+                error: error instanceof Error ? error.message : 'Could not read Grok Bot usage.',
+                ...code ? {
+                    code
+                } : {},
+                exitCode: selection ? 2 : 1
+            };
+        };
+        async function usage({ input, signal }) {
+            let value;
+            try {
+                value = await (0, _gbot_js__rspack_import_3.yF)(()=>run(input, signal));
+            } catch (error) {
+                value = failure(error);
+            }
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
+                value: value,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
+                    children: value.exitCode === 0 ? textOf(value) : value.error
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>usage
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/cli/wake.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
@@ -33403,6 +33536,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         const SCOPE_RE = /^[0-9a-f]{64}$/;
         const GROK_BOT_SERVICE = "/aiserver.v1.GrokBotService/";
+        const DASHBOARD_SERVICE = "/aiserver.v1.DashboardService/";
         const ROOM_TIMEOUT_MS = 45000;
         const ROOM_MEMBERS_TIMEOUT_MS = 20000;
         const backendAuths = new WeakMap();
@@ -33540,7 +33674,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             });
         }
-        async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false } = {}) {
+        async function backendCall(session, rpc, body = {}, { signal, timeoutMs = GATEWAY_TIMEOUT_MS, headers = {}, send = false, service = GROK_BOT_SERVICE } = {}) {
             assertGatewayActive(signal);
             let token, url;
             try {
@@ -33549,7 +33683,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 url = (0, _url_policy_js__rspack_import_8.Re)(backendBase(), {
                     kind: "backend",
                     ignoreAllowAny: credential.appLogin
-                }) + GROK_BOT_SERVICE + rpc;
+                }) + service + rpc;
             } catch (error) {
                 const failed = scrubOutbound(error, token ? [
                     token
@@ -33630,6 +33764,24 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     timeoutMs
                 } : {}
             });
+        }
+        async function usageStatus(session, { signal } = {}) {
+            const data = await backendCall(session, "GetSandUsageStatus", {}, {
+                signal,
+                service: DASHBOARD_SERVICE
+            });
+            const text = (value)=>typeof value === "string" && value ? value : null;
+            const percent = Number(data?.usagePercent ?? 0);
+            return {
+                usagePercent: Number.isFinite(percent) ? percent : 0,
+                periodStart: text(data?.currentPeriodStart),
+                resetsAt: text(data?.nextResetTimestampUtc),
+                hasAvailableUsage: data?.hasAvailableUsage === true,
+                plan: text(data?.cursorPlanName),
+                planLabel: text(data?.grokPlanLabel),
+                unified: data?.isUnified === true,
+                onDemandEligible: data?.onDemandSettings?.eligible === true
+            };
         }
         async function setAutomationEnabled(session, { agentId, automationId, isEnabled, timeZone = deviceTimeZone() }) {
             return backendCall(session, "SetGrokBotAgentAutomationEnabled", {
@@ -35167,6 +35319,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             bG: ()=>listSkills,
             fG: ()=>getThread,
             hT: ()=>describeSandbox,
+            kw: ()=>usageStatus,
             nF: ()=>hasGatewayAuth,
             qE: ()=>resolveRef,
             uX: ()=>removeSkill,
@@ -43572,9 +43725,9 @@ function __webpack_require__(moduleId) {
 var __webpack_exports__ = {};
 var node_worker_threads__rspack_import_0 = __webpack_require__("node:worker_threads");
 var react__rspack_import_1 = __webpack_require__("./node_modules/react/react.react-server.js");
-var _agent_bundle_runtime_flight_server__rspack_import_62 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
-var _agent_bundle_runtime__rspack_import_60 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-var _agent_bundle_runtime__rspack_import_61 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+var _agent_bundle_runtime_flight_server__rspack_import_63 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
+var _agent_bundle_runtime__rspack_import_61 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+var _agent_bundle_runtime__rspack_import_62 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
 var node_url__rspack_import_2 = __webpack_require__("node:url");
 var _src_cli_accounts_tsx__rspack_import_3 = __webpack_require__("./src/cli/accounts.tsx");
 var _src_cli_approvals_list_tsx__rspack_import_4 = __webpack_require__("./src/cli/approvals/list.tsx");
@@ -43631,8 +43784,9 @@ var _src_cli_skills_add_tsx__rspack_import_54 = __webpack_require__("./src/cli/s
 var _src_cli_skills_list_tsx__rspack_import_55 = __webpack_require__("./src/cli/skills/list.tsx");
 var _src_cli_skills_remove_tsx__rspack_import_56 = __webpack_require__("./src/cli/skills/remove.tsx");
 var _src_cli_thread_tsx__rspack_import_57 = __webpack_require__("./src/cli/thread.tsx");
-var _src_cli_wake_tsx__rspack_import_58 = __webpack_require__("./src/cli/wake.tsx");
-var _src_cli_wear_pair_tsx__rspack_import_59 = __webpack_require__("./src/cli/wear/pair.tsx");
+var _src_cli_usage_tsx__rspack_import_58 = __webpack_require__("./src/cli/usage.tsx");
+var _src_cli_wake_tsx__rspack_import_59 = __webpack_require__("./src/cli/wake.tsx");
+var _src_cli_wear_pair_tsx__rspack_import_60 = __webpack_require__("./src/cli/wear/pair.tsx");
 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_3, 'default'), _src_cli_accounts_tsx__rspack_import_3);
 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_4, 'default'), _src_cli_approvals_list_tsx__rspack_import_4);
 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_5, 'default'), _src_cli_approvals_respond_tsx__rspack_import_5);
@@ -43688,9 +43842,10 @@ const route51 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_im
 const route52 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_55, 'default'), _src_cli_skills_list_tsx__rspack_import_55);
 const route53 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_56, 'default'), _src_cli_skills_remove_tsx__rspack_import_56);
 const route54 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_57, 'default'), _src_cli_thread_tsx__rspack_import_57);
-const route55 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_58, 'default'), _src_cli_wake_tsx__rspack_import_58);
-const route56 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_59, 'default'), _src_cli_wear_pair_tsx__rspack_import_59);
-const pluginRoot = (0, _agent_bundle_runtime__rspack_import_60.E7)({
+const route55 = Object.assign({}, Reflect.get(_src_cli_usage_tsx__rspack_import_58, 'default'), _src_cli_usage_tsx__rspack_import_58);
+const route56 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_59, 'default'), _src_cli_wake_tsx__rspack_import_59);
+const route57 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_60, 'default'), _src_cli_wear_pair_tsx__rspack_import_60);
+const pluginRoot = (0, _agent_bundle_runtime__rspack_import_61.E7)({
     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
     stateAnchor: 'user-data'
 });
@@ -44036,17 +44191,23 @@ const routes = Object.freeze({
         name: "thread",
         module: route54
     }),
+    "cli:usage": Object.freeze({
+        id: "cli:usage",
+        kind: "cli",
+        name: "usage",
+        module: route55
+    }),
     "cli:wake": Object.freeze({
         id: "cli:wake",
         kind: "cli",
         name: "wake",
-        module: route55
+        module: route56
     }),
     "cli:wear/pair": Object.freeze({
         id: "cli:wear/pair",
         kind: "cli",
         name: "wear pair",
-        module: route56
+        module: route57
     })
 });
 const requests = new Map();
@@ -44081,18 +44242,18 @@ const render = async (message)=>{
     };
     try {
         const cwd = process.cwd();
-        await (0, _agent_bundle_runtime__rspack_import_61.iC)({
+        await (0, _agent_bundle_runtime__rspack_import_62.iC)({
             capabilities: {
-                command: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                filesystem: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                network: (0, _agent_bundle_runtime__rspack_import_61.hU)(),
-                projectRoot: (0, _agent_bundle_runtime__rspack_import_61.qC)({
+                command: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                filesystem: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                network: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
+                projectRoot: (0, _agent_bundle_runtime__rspack_import_62.qC)({
                     root: cwd
                 }, 'derived')
             },
-            host: (0, _agent_bundle_runtime__rspack_import_61.hU)('unsupported-surface'),
+            host: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
             invocation: message.request,
-            lineage: (0, _agent_bundle_runtime__rspack_import_61.hU)('unsupported-surface'),
+            lineage: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
             plugin: pluginRoot.identity,
             progress: {
                 report: async (update)=>{
@@ -44105,8 +44266,8 @@ const render = async (message)=>{
             },
             process: processHit,
             signal: controller.signal,
-            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_61.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_61.qC)(message.terminal, 'native'),
-            workspace: (0, _agent_bundle_runtime__rspack_import_61.qC)({
+            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_62.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_62.qC)(message.terminal, 'native'),
+            workspace: (0, _agent_bundle_runtime__rspack_import_62.qC)({
                 root: cwd
             }, 'derived')
         }, async ()=>{
@@ -44115,7 +44276,7 @@ const render = async (message)=>{
                 type: 'observed-render-start'
             });
             const renderStartedAt = performance.now();
-            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_62.y)(composeLayouts(observedRoute, {
+            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_63.y)(composeLayouts(observedRoute, {
                 ...message.props,
                 signal: controller.signal
             }, controller.signal), {

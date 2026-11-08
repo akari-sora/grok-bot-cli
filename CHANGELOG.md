@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.15
+
+- `gbot usage` shows this week's Grok Bot usage, reset time and plan (read-only; DashboardService GetSandUsageStatus). `--account` picks the login and `--json` gives `{ account, usagePercent, periodStart, resetsAt, hasAvailableUsage, plan, planLabel, unified, onDemandEligible }`. It reads with the saved access token only and does not wake the box; the answer's dashboard URL (it carries the user id) is never printed. At 80% or more, or with no included usage left, it adds `Moving bots elsewhere: gbot migrate (docs/migration.md).` Exit 0 read, 2 the login could not be chosen, 1 other errors.
+- Tests: 954 unit, 110 route (local macOS).
+
 ### 0.11.2-iml1s.14
 
 - One-line install on macOS, Linux and Windows: `npm install -g https://gitlab.com/aa22396584/grok-bot-cli/-/releases/permalink/latest/downloads/grok-bot-cli-0.11.2.tgz` always gets the latest release (run it again to upgrade). README, FORK, the `migrate-grok-bot` agent skill and the Move to Hermes instructions use it; agents need two commands (that line, then `gbot-install install claude|codex|cursor`).

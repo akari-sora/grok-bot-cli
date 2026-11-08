@@ -30,6 +30,8 @@ gbot config import gbot-accounts.json --replace
 gbot doctor
 gbot wake
 gbot wake --check --json
+gbot usage
+gbot usage --account work --json
 
 # Bots, groups and skills
 gbot bots list
@@ -85,6 +87,8 @@ gbot wear pair 192.168.1.23:40123
 
 `update` fields: `--name`, `--description` (the app's Instructions field), `--title`, `--avatar-shape`, `--avatar-color`, `--notify on|off`, `--hidden on|off`. `gbot skills` manages the one skill library every bot of the login shares; `remove` takes an id or exact name and refuses team, plugin and routine entries. `--normalized` needs `--json` and returns `{ target, messages: [{ id, role, text }] }`; a bot reply often has `role: "unknown"`, which is still a reply. `send --stdin`, `thread --after` and `bots template` in full: [FORK.md](../FORK.md#fork-commands).
 
+`gbot usage` reads a login's Grok Bot usage for this week as the app does (`aiserver.v1.DashboardService/GetSandUsageStatus`, a read; it does not wake the box): the percent of the included usage used, when it resets (local time), the plan, and whether on-demand usage is available to the login. `--json` gives `{ account, usagePercent, periodStart, resetsAt, hasAvailableUsage, plan, planLabel, unified, onDemandEligible }`. At 80% or more, or with no included usage left, it adds `Moving bots elsewhere: gbot migrate (docs/migration.md).`
+
 ## Several logins
 
 ```sh
@@ -130,6 +134,7 @@ Sends have a 15-second deadline and reads 30 seconds, both including the respons
 | --- | --- |
 | most commands | 0 done (a send can be `delivery: "unknown"` and still exit 0); 1 usage error or gateway failure (with `--json`, `send`, `wake` and the `codex` commands print the failure as a JSON document with `exitCode` on stdout); 2 unknown option, including `--account` before the subcommand |
 | `gbot wake` | 0 running, or `--check` succeeded; 2 usage; 3 could not wake; 4 timed out before the box was ready |
+| `gbot usage` | 0 read; 2 the login could not be chosen (an unknown or ambiguous `--account`); 1 other errors, such as a backend failure or no saved access token |
 | `gbot bots template` | 0 the template was seen, or `--status`, `--show` or `--publish` succeeded; 3 the message went out (or its delivery is unknown) but no template appeared within `--wait`: run `--status` later, do not send again; 1 rejected, or nothing sent |
 | `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify (or with `--move-routines` a routine was not paused); 2 an invalid option (nothing ran); 1 other errors, including a missing `--yes` (nothing was imported) |
 | `gbot config import` | 0 imported; 2 invalid file (nothing written); 3 imported, but some aliased logins are not signed in on this machine |
