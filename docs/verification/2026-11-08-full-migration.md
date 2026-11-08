@@ -96,3 +96,10 @@ Each run used a release package installed into a scratch prefix, a fresh capture
 - v0.11.2-iml1s.12, recorded for `demo/gbot-migrate-phone.mp4`: routines question answered with the default (nothing in Grok Bot changes; report `atDestination: off, inGrokBot: unchanged`), read back 7/7, questions 6/6.
 - Continuing the work, not a quiz: after each migration the agent was told the dates were confirmed and asked to do the next item on its to-do list without booking. Hermes, Muse (a new chat, no folder named) and Your dot each wrote the booking request from the migrated data alone. They named the hotel from the old comparison (Urbain Kyoto Kiyomizu Gojo), Dec 12–14 and two nights, the TWD 30,000 budget and the TWD 8,000 hotel cap, and the vegetarian meals: 5 of 5 facts each.
 - Move to Hermes: template version 3 published with `gbot bots template … --publish` after `--show` showed every instruction step under the 500-character entry limit (version 2 was cut at 500 and was not published).
+
+## Last runs with v0.11.2-iml1s.13 (2026-11-08, night)
+
+- Deploy QA, read-only capture with the released package: memory coverage `complete` and counted per file (3 of the bot's own memory files, 3 shared user-memory files, no project memory); the box store `partial` (large files skipped, 5 credential files not read), each listed.
+- Demo bot to Muse, guided `run`: migrated and verified, 7/7 questions in a new chat, digest `exact bytes`.
+- Demo bot to Your dot: the first acceptance scored 3/7. The dot answered four questions with a marked placeholder ("Q3: reading the file, one moment") and the answer in a later message, and only the first marked message was judged. trinity-cli v0.5.2 reads the question's later marked messages until the expected words appear or the agent is quiet for 3 minutes (nothing sent again). `gbot migrate check --accept` with v0.5.2: 7/7.
+- Move to Hermes: `--status` showed version 1 active again some time after version 3 had been published (cause not found; an older review card in the app can publish its version). Version 3 was published again and stayed active (checked after 5, 30 and 90 s).

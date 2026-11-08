@@ -19,9 +19,9 @@ Reply in the user's language. Full guide: `docs/migration.md` in this fork; real
   that is upstream, without `migrate`).
 - The Grok Bot desktop app is signed in on this computer (gbot reads its login; `gbot accounts`
   lists the logins). With several, pass `--account <alias|email|label>` after the subcommand.
-- Destination tools on the same computer: Hermes → `hermes --version`. Muse → `trinity-cli` 0.5+,
+- Destination tools on the same computer: Hermes → `hermes --version`. Muse → `trinity-cli` 0.5.2+,
   `muse-web-cli` 0.1.6+ (signed in to Muse once; side chats need `trinity-cli login muse`). Your dot
-  → `trinity-cli` 0.5+ and `chatgpt-dot-cli` 0.2.6+.
+  → `trinity-cli` 0.5.2+ and `chatgpt-dot-cli` 0.2.6+.
 
 ## Steps (non-interactive; add `--json` before the subcommand for machine output)
 
