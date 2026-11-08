@@ -14,12 +14,12 @@ Unofficial. This fork is not affiliated with, endorsed by, or supported by xAI, 
 
 Use Node.js 22.19+ (22.x) or 24.2+, with the Grok Bot desktop app signed in once on the same OS user. The generated CLI uses [`import.meta.main`](https://nodejs.org/api/esm.html#importmetamain), which is absent in Node 23 and Node 24.0–24.1; the launcher rejects those versions with a nonzero exit and a version diagnostic.
 
-Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.12` release and install that file.
+Do not `npm install -g` a `git+https://gitlab.com/...` spec. npm exits 0 and leaves a dangling `gbot` link. Download the package file from the `v0.11.2-iml1s.13` release and install that file.
 
 macOS or Linux:
 
 ```sh
-curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz"
+curl -fsSL -o grok-bot-cli-0.11.2.tgz "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz"
 npm install -g ./grok-bot-cli-0.11.2.tgz
 rm -f grok-bot-cli-0.11.2.tgz
 ```
@@ -27,7 +27,7 @@ rm -f grok-bot-cli-0.11.2.tgz
 Windows PowerShell:
 
 ```powershell
-irm "https://gitlab.com/-/project/86401528/uploads/983d4ae0d9209c68cc3eac5b80dd66f2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
+irm "https://gitlab.com/-/project/86401528/uploads/cf28e8d97e324accf5d333263765eba2/grok-bot-cli-0.11.2.tgz" -OutFile grok-bot-cli-0.11.2.tgz
 npm install -g .\grok-bot-cli-0.11.2.tgz
 Remove-Item grok-bot-cli-0.11.2.tgz
 ```
@@ -132,7 +132,7 @@ On a new machine, install the fork and then import. Do not install with `npm ins
 ```sh
 scripts/install-fork.sh --config gbot-accounts.json
 # Windows: scripts/install-fork.ps1 -Config gbot-accounts.json
-scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.12
+scripts/install-fork.sh --dry-run --config gbot-accounts.json v0.11.2-iml1s.13
 ```
 
 The script clones `https://gitlab.com/aa22396584/grok-bot-cli.git` into `$XDG_CACHE_HOME/grok-bot-cli/src` (default `~/.cache/grok-bot-cli/src`; on Windows, `%LOCALAPPDATA%\grok-bot-cli\src`). `--config` is made absolute before any directory change. The ref may contain only `[A-Za-z0-9._/-]`, must not start with `-`, and is passed to git after `--`. A ref after `--` is that ref (`-- v1.2` does not install `main`). The script fetches the ref, checks that the resolved commit matches `^[0-9a-f]{40}([0-9a-f]{24})?$`, checks it out with `git checkout --detach <sha>` (no path separator), prints it, and refuses a dirty cache. `npm pack` writes to an installer-owned temporary directory outside the checkout; that directory is removed after the run. The installer never deletes unknown cache files. A cache containing a `.tgz` left by an older installer is refused unchanged; preserve or move that cache and use a clean cache location rather than asking this installer to migrate it. It then runs `gbot --version` and `gbot accounts` (an accounts failure does not skip import), `gbot config import` when `--config` was given, and `gbot wake --check --account <alias>` for each alias. A failed import or wake exits non-zero. When import reports logins missing, wake checks for those aliases are skipped, the other aliases are still checked, and the script exits 3. It refuses to run as root or Administrator unless `--allow-root` (PowerShell `-AllowRoot`) is given. `--dry-run` and PowerShell `-DryRun` print the steps and do not run git or npm. The script does not store or print tokens. `scripts/install-fork.sh` is executable.
