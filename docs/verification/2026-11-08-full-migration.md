@@ -40,7 +40,7 @@ The earlier test profile was exported (`~/.hermes/profile-exports/grok-deploy-qa
   3. the history question took its keyword from a message whose token was redacted in HISTORY.md (that also put a raw value into the local plan file); its second form ("the first message without a redacted part") had a different right answer than the one the plan picked.
 - After `d1a00bf` and `4ac07c4` (keywords only from delivered, redacted text; one message named by its minute), `gbot migrate check ARCHIVE --to muse|dot --accept` — which sends no migration message — gave **8/8 on Muse** (in a new side chat, deleted afterwards) and **8/8 on the dot**.
 
-Note: Deploy QA reached Muse and the dot before the folder name gained the bot-id suffix, so it lives in `~/grok-bot/Deploy-QA` there and its long-term pointer names that folder. With the final code its folder would be `~/grok-bot/Deploy-QA-bbb15179`; `gbot migrate check` with the final code reports it as not delivered until it is migrated again (2 messages and the questions per destination).
+Re-migrated with the final code (folder `~/grok-bot/Deploy-QA-bbb15179`, the earlier `~/grok-bot/Deploy-QA` copy is left on their computers): **Muse through your Google Drive** (`--via drive --drive-remote trinity-gdrive:`; the zip went to Drive with rclone, MD5-checked, Muse fetched it with its Google Drive connector, the Drive copy was removed after verification) — 7/7; **Your dot** with the attachment — 7/7. Before building the Drive channel, both agents were probed: each read a text file and fetched, unzipped and counted a 4 MB zip from Drive correctly.
 
 ## A second real bot, recorded for the demo
 
