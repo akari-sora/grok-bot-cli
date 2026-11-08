@@ -1,6 +1,6 @@
 # Grok Bot migration toolkit
 
-This branch implements a **limited snapshot and offline OpenClaw workspace staging**, not a lossless account transfer. Nothing deletes or changes the source bots. No destination agent or scheduled task is activated.
+This branch implements **limited snapshots and destination-aware conversion** for OpenClaw, Hermes, Muse, dot and portable archives, not a lossless account transfer. See [multi-target usage and Trinity integration](migration-targets.md). The OpenClaw workflow is described below. Nothing deletes or changes the source bots, sends context automatically, or activates destination agents/tasks.
 
 ## Build this branch
 

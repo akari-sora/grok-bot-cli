@@ -169,3 +169,6 @@ migration:validation:
         - src/cli/migrate/**/*
         - test/migration*
         - docs/migration*
+
+include:
+  - local: .gitlab/migration-contract.yml
