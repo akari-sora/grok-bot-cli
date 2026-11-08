@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { grokBotAppDataPath } from "./app-session.js";
+
 // Live on 2026-10-21: EnsureSandBox rejects x-cursor-client-version 0.20.0 with 401
 // "no longer supported" and accepts the installed app's 0.72.1.
 export const DEFAULT_SAND_CLIENT_VERSION = "0.72.1";
@@ -141,7 +143,24 @@ function windowsVersion(execFile, env = process.env, now = Date.now) {
   return null;
 }
 
+const APP_DATA_PLATFORMS = new Set(["darwin", "linux", "win32"]);
+
+// The running app writes its own version to desktop-status.json in its data folder on every OS
+// (after upstream 0f29266). Live on macOS, 2026-11-08: {"version":1,"pid":…,"appVersion":"0.77.0",…}.
+function desktopStatusVersion(platform, home, env, readFile) {
+  if (!APP_DATA_PLATFORMS.has(platform)) return null;
+  let status;
+  try {
+    status = JSON.parse(String(readFile(path.join(grokBotAppDataPath(home, platform, env), "desktop-status.json"), "utf8")));
+  } catch {
+    return null;
+  }
+  return status && typeof status.appVersion === "string" ? normalizeClientVersion(status.appVersion) : null;
+}
+
 function installedVersion({ platform, home, readFile, execFile, env, now }) {
+  const running = desktopStatusVersion(platform, home, env, readFile);
+  if (running) return running;
   if (platform === "darwin") return macVersion(home, readFile);
   if (platform === "win32") return windowsVersion(execFile, env, now);
   return null;
@@ -192,8 +211,9 @@ function envClientVersion(env) {
 
 /**
  * `SAND_CLIENT_VERSION` when it is a `major.minor.patch` (a fourth numeric
- * segment is dropped). Otherwise the installed Grok Bot app, cached for the
- * process, otherwise {@link DEFAULT_SAND_CLIENT_VERSION}. An invalid env value
+ * segment is dropped). Otherwise the installed Grok Bot app (its
+ * desktop-status.json, then the macOS Info.plist or the Windows registry), cached
+ * for the process, otherwise {@link DEFAULT_SAND_CLIENT_VERSION}. An invalid env value
  * does not fall through to the app. A 401 "no longer supported" drops the
  * cache only when this call's value came from the installed app, and at most
  * once per 10 minutes, so a long-running relay or MCP does not re-run the

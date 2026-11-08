@@ -192,7 +192,7 @@ export function decryptWindowsSafeStorageString(encryptedBase64, key) {
   ]).toString("utf8");
 }
 
-function grokBotAppDataPath(home, platform, env = {}) {
+export function grokBotAppDataPath(home, platform, env = {}) {
   if (platform === "win32") {
     const appData = env.APPDATA || join(home, "AppData/Roaming");
     return join(appData, "Grok Bot");
