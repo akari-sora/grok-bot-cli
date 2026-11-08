@@ -284,6 +284,8 @@ export function readArchive(path) {
   if (manifest.format !== 'gbot-migration' || manifest.version !== MIGRATION_VERSION) fail('Unsupported archive format or version.');
   checkIndex(root, manifest.files, new Map([['snapshot.json', null], ['REPORT.md', null]]));
   const bytes = regularBytes(join(root, 'snapshot.json'));
+  const snapshotIndex = manifest.files.find((row) => row.path === 'snapshot.json');
+  if (bytes.length !== snapshotIndex.bytes || hash(bytes) !== snapshotIndex.sha256) fail('Archive changed during verification.');
   const snapshot = validateSnapshot(parseBytes(bytes));
   // The report cannot contradict the validated source even when someone recomputes a hash.
   if (!regularBytes(join(root, 'REPORT.md')).equals(Buffer.from(report(snapshot)))) fail('Archive report differs from source.');

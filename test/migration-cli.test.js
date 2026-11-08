@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { readArchive } from '../src/core/migration.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bin = join(root, 'artifact', 'bin', 'gbot.mjs');
+const bin = join(root, 'bin', 'gbot.mjs');
 function run(args, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [bin, ...args], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
