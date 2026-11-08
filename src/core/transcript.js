@@ -64,9 +64,17 @@ function lastSourceId(entries, fallback = "") {
   return fallback;
 }
 
+// Entries up to the first row whose body could not be read yet (its store blob was unavailable):
+// a cursor never passes such a row, so the next poll reads it again instead of skipping it, and
+// nothing after it is returned twice.
+function untilUnreadable(entries) {
+  const held = entries.findIndex((entry) => entry && typeof entry === "object" && entry.unreadable === true);
+  return held === -1 ? entries : entries.slice(0, held);
+}
+
 export function transcriptDelta(payload, { after, limit = 40 } = /** @type {{ after?: string, limit?: number }} */ ({})) {
   const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
-  const page = transcriptEntries(payload).slice(-bounded);
+  const page = untilUnreadable(transcriptEntries(payload).slice(-bounded));
   if (after === undefined) {
     const gapReset = page.length > 0 && !sourceEntryId(page[page.length - 1]);
     return { cursor: lastSourceId(page), entries: page, entryCount: page.length, gapReset };

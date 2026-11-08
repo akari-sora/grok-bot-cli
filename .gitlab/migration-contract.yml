@@ -1,0 +1,30 @@
+# Hermes contracts (scripts/verify-hermes-import.py), run as the image's unprivileged user.
+# 1. helper (offline): gbot's own import path. applyHermes/verifyHermes run the real helper ops
+#    through `hermes --print-runtime-command` against a fake Hermes CLI and runtime exposing the
+#    store APIs the helper calls. It checks gbot's calls and JSON contract, not real store behaviour.
+# 2. official (network, test only): the official Hermes grok-bot importer, pinned by commit AND Git
+#    blob IDs, accepts the grok-bot-export.json gbot bundles. gbot does not import through it.
+# The third mode, `real` (the installed Hermes' own stores), needs a Hermes install and runs locally only.
+# A failed download/check/import fails the job; nothing is skipped.
+migration:hermes-contract:
+  tags: [$LINUX_RUNNER_TAG]
+  image: node:22-slim
+  script:
+    - apt-get update -qq && apt-get install -y -qq python3 ca-certificates
+    - node --version
+    - python3 --version
+    - bash -o pipefail -c 'su node -s /bin/sh -c "python3 scripts/verify-hermes-import.py helper && python3 scripts/verify-hermes-import.py official" 2>&1 | tee migration-hermes-contract.log'
+  artifacts:
+    when: always
+    paths:
+      - migration-hermes-contract.log
+    expire_in: 7 days
+  rules:
+    - changes:
+        - .gitlab-ci.yml
+        - .gitlab/migration-contract.yml
+        - src/core/migration*
+        - scripts/verify-hermes-import.py
+        - scripts/migration-hermes-fixture.mjs
+        - test/migration-v2*
+        - test/migration-hermes*

@@ -12,7 +12,9 @@ import {
   createRecordFactory,
 } from "./records.js";
 import { createIntake } from "./intake.js";
+import { withCodexSender } from "../sender-prefix.js";
 import { createCompletion } from "./completion.js";
+import { errorDetail } from "./detail.js";
 import {
   connectGateway,
   resolveRef,
@@ -40,7 +42,14 @@ function createGateway(accountScope) {
     },
   };
 }
-/** Core owns policy and durable intents; its caller must hold the single-worker lock. */
+/**
+ * Core owns policy and durable intents; its caller must hold the single-worker lock.
+ * Explicit options preserve the existing JS injection contract for TypeScript callers.
+ * @param {{stateDir?: string, profile?: string, env?: NodeJS.ProcessEnv,
+ * gateway?: {resolve: Function, tail: Function, send: Function}, accountScope?: string,
+ * clock?: () => number, openSession?: Function, openConversation?: Function,
+ * limits?: Record<string, number>}} [options]
+ */
 export async function openRelayEngine({
   stateDir,
   profile,
@@ -105,8 +114,12 @@ export async function openRelayEngine({
     return binding?.state === "running";
   };
   const change = async (section, value) => state.commit([op(section, value)]);
-  const update = async (id, patch) =>
-    change("records", { ...state.read().records[id], ...patch });
+  // State payloads must be JSON-safe: a patch value of undefined clears the key instead of storing it.
+  const update = async (id, patch) => {
+    const next = { ...state.read().records[id], ...patch };
+    for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+    return change("records", next);
+  };
   const { envelope, newRecord } = createRecordFactory({ env, clock });
   const { baseline, poll } = createIntake({
     state,
@@ -116,6 +129,7 @@ export async function openRelayEngine({
     stoppedBindings,
   });
   const completions = createCompletion({
+    env,
     state,
     codex,
     update,
@@ -196,6 +210,7 @@ export async function openRelayEngine({
       }
     } catch (error) {
       result = {
+        detail: errorDetail(error),
         delivery: error.delivery === "rejected" ? "rejected" : "unknown",
         reason:
           error.delivery === "rejected"
@@ -221,6 +236,11 @@ export async function openRelayEngine({
           : delivery === "rejected"
             ? (result.reason ?? "rejected").slice(0, 1024)
             : null,
+      // Why it was not delivered (daemon error text), so a bare reason code is never all the caller sees.
+      detail:
+        delivery === "accepted"
+          ? undefined
+          : errorDetail(result.detail ?? result.error ?? result.message),
     });
     return state.read().records[id];
   }
@@ -264,9 +284,16 @@ export async function openRelayEngine({
         throw new Error("Idempotency conflict");
       return receipt(old);
     }
-    const text = messageText(input.message);
+    const raw = messageText(input.message);
     envelope(input);
     const r = await route(input);
+    // Codex -> Grok: say which thread/machine/cwd is asking and how to answer it.
+    const text =
+      kind === "grok-request"
+        ? messageText(
+            withCodexSender(raw, { threadId: r.threadId, cwd: r.expectedCwd, env }),
+          )
+        : raw;
     await baseline(r.targetId);
     if (state.read().targets[r.targetId].state !== "running")
       throw new Error("Target coverage is paused");

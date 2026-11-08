@@ -1,6 +1,6 @@
 # Fork guide
 
-ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2. The package version string stays `0.11.2`. The fork revision is the git tag.
+ImL1s's fork of [ScriptedAlchemy/grok-bot-cli](https://github.com/ScriptedAlchemy/grok-bot-cli), synced to upstream 0.11.2, with five later upstream fixes cherry-picked in 0.11.2-iml1s.7 (the codex-dot skill, the Codex sender prefix and thread search, Codex delivery detail, `codex new` on newer daemons, the desktop shim passthrough; see CHANGELOG.md). The package version string stays `0.11.2`. The fork revision is the git tag.
 
 Upstream still owns the npm package. Do not `npm install -g grok-bot-cli`. GitLab (https://gitlab.com/aa22396584/grok-bot-cli) is the primary remote. The GitHub mirror is not a public install source.
 
@@ -197,7 +197,7 @@ When the session has an access token, gbot uses these backend RPCs:
 | `bots delete`, `groups delete` | `DeleteGrokBotAgent` (not found counts as deleted) |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested) |
 
-`bots create`, `thread`, `skills`, and `approvals list` stay on the box gateway (`approvals list` and `approvals respond` read the pending cards from the transcript tail). `bots create` stays there because the box registered the new bot on the server with its title and avatar (checked live).
+Since 0.11.2-iml1s.7, `bots create` calls `CreateGrokBotTemporalAgent` as the app does (the box gateway answered 404 on 0.78). `thread`, the tail that `reconcile` falls back to, the relay, `approvals list` and `approvals respond`, and the MCP thread tool read the transcript tail with `ListGrokBotTranscriptEntries` (`limit` N+1, newest page, oldest first; bodies left out of the page are read from the store, 8 at a time, and checked against their hash). A row whose body cannot be read is shown as `unreadable`, and a `--after` cursor stops before it so the next read gets it. `thread --root` and `skills` stay on the box gateway; the app has no backend call for a root thread.
 
 A session has an access token when it comes from a saved app login (gbot already reads that token for EnsureSandBox), from a descriptor login whose account also has a saved access token, or from `CURSOR_ACCESS_TOKEN` when there is no app login. The token is sent only to `CURSOR_API_BASE_URL` (default `https://api2.cursor.sh`), with the same headers as EnsureSandBox (`SAND_CLIENT_VERSION` and `SAND_BOX_NAMESPACE` still apply). An app login token goes only to an https Cursor API host, and `GROK_BOT_ALLOW_ANY_GATEWAY` does not apply to it. `GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`, and a descriptor login without a saved access token, have no access token and keep the gateway calls. On a 0.78.x host their sends get the 502 above.
 
@@ -250,6 +250,10 @@ gbot thread Researcher --after "<cursor>" --json
 `--after` has no default. `--limit` defaults to 40 (1–200). Entries are strictly after the cursor. `entryCount: 0` and `gapReset: false` means nothing new. An unknown cursor returns one bounded snapshot with `gapReset: true`.
 
 Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. The normalized `role` is `unknown` unless the entry says `user` or `assistant`. That is still a reply. Do not treat `unknown` as a failed send.
+
+### Move a bot to Hermes, Muse or Your dot (`gbot migrate`)
+
+Run `gbot migrate` in a terminal and follow the prompts, or use `gbot migrate bots|capture|preview|import|check|run`. It captures the whole bot read-only (every transcript page, all memory tiers, the skill library, routines, open tasks, needed files), imports it, reads the destination back and asks the migrated agent acceptance questions. Details, destination differences and limits: [docs/migration.md](docs/migration.md).
 
 ### Pair a Wear OS watch (`gbot wear pair`)
 
@@ -571,7 +575,7 @@ Session 有 access token 時，gbot 改用這些後端 RPC：
 | `bots delete`、`groups delete` | `DeleteGrokBotAgent`（找不到視為已刪除） |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` 或 `ResolveGrokBotLocalToolPermission`（照 App 對應，沒有實測） |
 
-`bots create`、`thread`、`skills` 與 `approvals list` 仍走雲端電腦 gateway（`approvals list` 與 `approvals respond` 都從 transcript 尾端讀待處理的卡片）。`bots create` 留在 gateway，是因為實測雲端電腦會把新 bot 連同 title 與頭像登記到伺服器上。
+從 0.11.2-iml1s.7 起，`bots create` 跟 App 一樣呼叫 `CreateGrokBotTemporalAgent`（0.78 的雲端電腦 gateway 回 404）。`thread`、`reconcile` 退回去讀的 transcript 尾端、relay、`approvals list` 與 `approvals respond`，以及 MCP 的 thread 工具，都用 `ListGrokBotTranscriptEntries` 讀尾端（`limit` N+1，最新一頁，舊的在前；頁面裡省略的內文從 store 讀，一次 8 個，並核對雜湊）。讀不到內文的列顯示成 `unreadable`，`--after` 游標停在它前面，下次讀會再拿到它。`thread --root` 與 `skills` 仍走雲端電腦 gateway；App 沒有對應 root thread 的後端呼叫。
 
 以下 session 有 access token：已存的 App 登入（gbot 本來就為 EnsureSandBox 讀這個 token）、該帳號另外存有 access token 的 descriptor 登入，以及沒有 App 登入時的 `CURSOR_ACCESS_TOKEN`。Token 只送到 `CURSOR_API_BASE_URL`（預設 `https://api2.cursor.sh`），header 與 EnsureSandBox 相同（`SAND_CLIENT_VERSION` 與 `SAND_BOX_NAMESPACE` 照樣適用）。App 登入的 token 只送到 https 的 Cursor API 主機，`GROK_BOT_ALLOW_ANY_GATEWAY` 對它無效。`GROK_BOT_GATEWAY_URL` 加 `GROK_BOT_GATEWAY_TOKEN`，以及沒有存 access token 的 descriptor 登入，都沒有 access token，照舊走 gateway。在 0.78.x 上它們的送訊會得到上面的 502。
 
@@ -624,6 +628,10 @@ gbot thread Researcher --after "<cursor>" --json
 `--after` 沒有預設。`--limit` 預設 40（1–200）。結果是游標之後的項目。`entryCount: 0` 且 `gapReset: false` 表示沒有新項目。不認識的游標會回一份有界快照，且 `gapReset: true`。
 
 機器人回覆常常是 `kind: "send-message"`、`message.type: "text"`。除非項目寫明 `user` 或 `assistant`，正規化後的 `role` 會是 `unknown`。那仍然是回覆。不要把 `unknown` 當成送出失敗。
+
+### 把 bot 搬到 Hermes、Muse 或 Your dot（`gbot migrate`）
+
+在終端機跑 `gbot migrate` 照提示做，或用 `gbot migrate bots|capture|preview|import|check|run`。它只讀地完整擷取一個 bot（每一頁對話、三層記憶、Skills 庫、排程、未完成任務、必要檔案），匯入目的地、讀回比對，再問搬過去的 agent 驗收題。細節、三個目的地的差異與限制見 [docs/migration.md](docs/migration.md)。
 
 ### 配對 Wear OS 手錶（`gbot wear pair`）
 

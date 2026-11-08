@@ -93,7 +93,10 @@ describe('explicit relay directory CLI and MCP results', () => {
   it('validates explicit-dir stop and status on the CLI and MCP', async () => {
     if (process.platform === 'win32') return;
     const home = await mkdtemp(join(tmpdir(), 'relay-cli-explicit-'));
-    const descriptor = grokBotGatewayDescriptorPath(home, process.platform, {});
+    // Use the same platform paths as pushEnv below. On Linux, {} writes under
+    // ~/.config while XDG_CONFIG_HOME=home makes the CLI read home/Grok Bot.
+    const descriptorEnv = { APPDATA: home, XDG_CONFIG_HOME: home };
+    const descriptor = grokBotGatewayDescriptorPath(home, process.platform, descriptorEnv);
     await mkdir(dirname(descriptor), { recursive: true });
     await writeFile(descriptor, JSON.stringify({ version: 99, encrypted: 'not-used' }));
     const dirA = join(home, '.grok-bot-cli', 'relay', 'worker-a');
@@ -128,8 +131,7 @@ describe('explicit relay directory CLI and MCP results', () => {
     });
     const restore = pushEnv({
       ...env,
-      APPDATA: home,
-      XDG_CONFIG_HOME: home,
+      ...descriptorEnv,
       GROK_BOT_RELAY_DIR: dirA,
       GBOT_ACCOUNT: undefined,
       GBOT_ACCOUNT_SCOPE: undefined,
@@ -138,6 +140,7 @@ describe('explicit relay directory CLI and MCP results', () => {
       GROK_BOT_GATEWAY_TOKEN: undefined,
     });
     try {
+      expect(grokBotGatewayDescriptorPath(home, process.platform, process.env)).toBe(descriptor);
       const cliStatus = await invokeCli(['codex', 'bridge', 'status', '--json']);
       expect(cliStatus.exitCode).toBe(0);
       expect(cliStatus.value).toMatchObject({

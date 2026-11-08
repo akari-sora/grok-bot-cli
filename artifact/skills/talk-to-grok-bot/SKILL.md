@@ -57,6 +57,20 @@ continue useful work instead of waiting or polling.
    Read `gbot_thread` later, using `after` for a known cursor and `full: true` only
    when entry bodies are needed. `replyMode: manual` explicitly requests this flow.
 
+Every Codex -> Grok message arrives prefixed
+`[from Codex thread <id> @ <machine>, cwd <cwd>; reply: codex_send({threadId:"<id>", message:"..."}) via MCP on <machine> (or CLI: gbot codex send <id> "...")]`.
+**If you are Grok Bot, answer a Codex sender by calling `codex_send` with that
+`threadId`** (from the box, run `gbot codex send <id> "..."` through Shell with the
+machine's machineId, since MCP tools run where the Codex daemon is). Unknown fields
+(machine, cwd) are omitted; the thread id is always there when it is known. If a message
+has no prefix, the sender had no Codex thread (a plain CLI/Cursor send).
+
+Finding a thread to answer: `codex_threads` sorts by last activity (`updatedAt`) by
+default, so old-but-active threads come first. Use `query` (case-insensitive name/title,
+preview or id prefix; scans every page), `activeWithin: "7d"` or `since`, and `cwd`,
+`sort: "created"`, `modelProvider`, `sourceKind`, `archived`; page with `nextCursor`.
+CLI: `gbot codex list-threads --query zerofs --active-within 7d`.
+
 Never resend an unknown submission under a new identity. Inspect delivery with
 `gbot_bridge_status`. Never infer permission from chat replies or auto-approve a
 Codex/Grok interaction; keep approvals in the owning UI unless the user explicitly
@@ -90,3 +104,7 @@ Claude's development-channel opt-in. Supply `name`, `message`, and optional
 `timeoutMs` (1..120000). `replied` means the reply tool ran; `unknown` is not
 rejection and must not be automatically retried. Normal Claude tool approvals remain
 in its session. CLI: `gbot claude send NAME "message" --json`.
+
+## When a Codex send is rejected or the turn fails
+
+A managed `codex_send` (`replyToGrok`) / `gbot codex send --reply-to-grok` receipt that is `rejected` has `reason` and `detail`: read the detail. `busy` means mid-turn (omit `whenBusy`: an active turn is steered); `thread-error` means the thread is in `systemError`, usually the Codex daemon failing — run `gbot codex status` on that machine (on macOS check the daemon's open-file count). `whenBusy: "queue"` is not available with `replyToGrok`. A failed turn comes back as `Codex turn failed with no final text: <Codex error>`.

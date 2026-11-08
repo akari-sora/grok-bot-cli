@@ -162,6 +162,28 @@ describe('grok-bot MCP server', () => {
     }
   });
 
+  it('codex_threads input defaults to recent-activity order and rejects a malformed activeWithin', async () => {
+    const { threadsSchema } = await import('../../src/core/codex/routes.js');
+    expect(threadsSchema.parse({})).toEqual({ limit: 20, sort: 'updated', order: 'desc' });
+    expect(threadsSchema.parse({ query: ' zerofs ', activeWithin: '7d', sourceKind: 'whatever-new' })).toMatchObject({ query: 'zerofs', activeWithin: '7d', sourceKind: 'whatever-new' });
+    expect(() => threadsSchema.parse({ activeWithin: 'lately' })).toThrow();
+    expect(() => threadsSchema.parse({ sort: 'name' })).toThrow();
+    const surface = await invokeMcpTool('codex_threads', { input: { activeWithin: 'lately' }, server: 'grok-bot' });
+    expect(surface.isError).toBe(true);
+  });
+
+  it('gbot_send from a known Codex thread (manual replies) prefixes the prompt with thread, machine, cwd and reply forms', async () => {
+    const result = await invokeMcpTool('gbot_send', {
+      input: { message: 'ZeroFS recovery notes', target: 'general', replyMode: 'manual', codexThreadId: '01a03c14-5bb0-7850-a2c7-15f6f4a1ab74', expectedCwd: '/repo/zerofs' },
+      server: 'grok-bot',
+    });
+    expect(result.isError).toBe(false);
+    const prompt = String(calls.at(-1)?.body.prompt);
+    expect(prompt).toContain('[from Codex thread 01a03c14-5bb0-7850-a2c7-15f6f4a1ab74 @ ');
+    expect(prompt).toContain(', cwd /repo/zerofs; reply: codex_send({threadId:"01a03c14-5bb0-7850-a2c7-15f6f4a1ab74", message:"..."}) via MCP on ');
+    expect(prompt).toContain('(or CLI: gbot codex send 01a03c14-5bb0-7850-a2c7-15f6f4a1ab74 "...")]\nZeroFS recovery notes');
+  });
+
   it('gbot_send resolves the target by name and posts the prompt with the gateway token', async () => {
     const result = await invokeMcpTool('gbot_send', {
       input: { message: 'automated smoke', target: 'general' },
@@ -470,5 +492,16 @@ describe('grok-bot MCP server', () => {
     expect(result.isError).toBe(true);
     expect(contentText(result.content)).toContain('No bot or group named "Nobody"');
     expect(calls.map((call) => call.method)).toEqual(['listAgents']);
+  });
+  it('codex_send with replyToGrok explains that --when-busy queue is unavailable and what to use', async () => {
+    const result = await invokeMcpTool('codex_send', {
+      input: { message: 'x', replyToGrok: 'bot-1', threadId: '01a03c14-5bb0-7850-a2c7-15f6f4a1ab74', whenBusy: 'queue' },
+      server: 'grok-bot',
+    });
+    expect(result.isError).toBe(true);
+    const text = contentText(result.content);
+    expect(text).toContain('--when-busy queue is not available');
+    expect(text).toContain('Omit --when-busy');
+    expect(text).toContain('steer');
   });
 });

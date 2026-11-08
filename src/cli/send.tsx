@@ -9,6 +9,7 @@ import {
   relayResultSchema,
 } from '../core/relay/routes.js';
 import { buildEnvelope, withEnvelopeHeader } from '../core/codex-bridge.js';
+import { envCodexThreadId, withCodexSender } from '../core/sender-prefix.js';
 import { outcomeFromError } from '../core/codex/contract.js';
 import { saveHistory } from '../core/history.js';
 import { readCommandStdin } from '../core/stdin-message.js';
@@ -142,9 +143,13 @@ const deliver = async (
     replyTo: input.replyTo,
   });
   const backend = await openBackendFromInput(input);
+  // Inside a Codex terminal ($CODEX_THREAD_ID is set) say which thread is asking and how to answer.
   const out = await backend.send(
     input.target,
-    withEnvelopeHeader(message, envelope),
+    withCodexSender(withEnvelopeHeader(message, envelope), {
+      threadId: envCodexThreadId(),
+      cwd: input.expectedCwd ?? process.cwd(),
+    }),
   );
   saveHistory(out, {
     dir: input.historyDir,

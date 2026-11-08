@@ -717,7 +717,7 @@ export async function startCodexThread({ cwd, expectedCwd, model, effort, messag
     if (typeof threadId !== "string" || !ID_PATTERN.test(threadId)) throw new CodexProtocolError("thread/start", "missing `thread.id`");
   } finally { client.close(); }
   if (message === undefined) return { threadId, cwd: resolvedCwd, model: started.model ?? model, exitCode: 0 };
-  return await sendToCodexThread(threadId, message, { env, expectedCwd: resolvedCwd, model, effort, signal });
+  return await sendToCodexThread(threadId, message, { env, expectedCwd: resolvedCwd, model, effort, signal, freshThreadCwd: resolvedCwd });
 }
 
 const CODEX_VERSION_PROBE_TIMEOUT_MS = 3000;
@@ -882,14 +882,68 @@ function summarizeThread(t) {
 }
 
 const THREAD_LIST_MAX_LIMIT = 200;
+// Daemon sort keys (ThreadSortKey in `codex app-server generate-json-schema`). The daemon's own
+// default is created_at, which buries old-but-active threads, so gbot defaults to updated_at.
+const THREAD_SORT_KEYS = { updated: "updated_at", created: "created_at", recency: "recency_at" };
+const GBOT_CURSOR = "gbot1:";
+const DURATION_MS = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+
+const toSeconds = (value) => (value > 1e11 ? value / 1000 : value);
+
+/** `7d`, `12h`, `30m`, `2w`, `90s` -> milliseconds. */
+export function parseActiveWithin(text) {
+  const m = /^(\d+(?:\.\d+)?)\s*([smhdw])$/i.exec(String(text).trim());
+  if (!m) throw new RangeError("--active-within must look like 30m, 12h, 7d or 2w");
+  return Number(m[1]) * DURATION_MS[m[2].toLowerCase()];
+}
+
+/** ISO date/time or epoch (seconds or ms) -> epoch seconds. */
+export function parseSince(value) {
+  const text = String(value).trim();
+  const n = /^\d+(?:\.\d+)?$/.test(text) ? toSeconds(Number(text)) : Date.parse(text) / 1000;
+  if (!Number.isFinite(n)) throw new RangeError("--since must be an ISO date/time or epoch seconds");
+  return n;
+}
+
+function encodeThreadCursor(state) {
+  return GBOT_CURSOR + Buffer.from(JSON.stringify(state)).toString("base64url");
+}
+function decodeThreadCursor(cursor) {
+  if (cursor === undefined) return { skip: 0 };
+  if (!cursor.startsWith(GBOT_CURSOR)) return { c: cursor, skip: 0 };
+  try {
+    const v = JSON.parse(Buffer.from(cursor.slice(GBOT_CURSOR.length), "base64url").toString("utf8"));
+    if (isObject(v) && Number.isInteger(v.skip) && v.skip >= 0 && (v.c === undefined || typeof v.c === "string")) return { c: v.c, skip: v.skip };
+  } catch { /* fall through */ }
+  throw new RangeError("--cursor is not a valid thread cursor");
+}
 
 /**
- * @param {{ limit?: number, cursor?: string, modelProviders?: string[], env?: NodeJS.ProcessEnv }} [opts]
+ * List daemon threads.
+ *
+ * Server-side (dynamic, pass-through): sort key/direction, cwd, archived, source kinds, providers.
+ * Client-side, scanning page after page until `limit` matches or the daemon runs out (nothing is
+ * capped at the first page): `query` (case-insensitive substring of name/title, preview, or the
+ * id - so an id prefix works) and the recent-activity cutoff (`since` / `activeWithin`, compared
+ * with `updatedAt`). When a page holds more matches than are needed, `nextCursor` is a gbot cursor
+ * that resumes inside that page; otherwise it is the daemon's own cursor, verbatim.
+ *
+ * @param {{ limit?: number, cursor?: string, modelProviders?: string[], modelProvider?: string, sort?: "updated"|"created"|"recency", order?: "asc"|"desc", query?: string, since?: string|number, activeWithin?: string, cwd?: string, archived?: boolean, sourceKinds?: string[], now?: number, env?: NodeJS.ProcessEnv }} [opts]
  */
 export async function listCodexThreads({
   limit = 20,
   cursor,
   modelProviders = [],
+  modelProvider,
+  sort = "updated",
+  order = "desc",
+  query,
+  since,
+  activeWithin,
+  cwd,
+  archived,
+  sourceKinds,
+  now = Date.now(),
   env = process.env,
 } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > THREAD_LIST_MAX_LIMIT) {
@@ -899,6 +953,30 @@ export async function listCodexThreads({
   if (!Array.isArray(modelProviders) || modelProviders.some((p) => typeof p !== "string")) {
     throw new RangeError("modelProviders must be an array of strings (empty = all providers)");
   }
+  if (!Object.hasOwn(THREAD_SORT_KEYS, sort)) throw new RangeError("--sort must be one of: " + Object.keys(THREAD_SORT_KEYS).join(", "));
+  if (order !== "asc" && order !== "desc") throw new RangeError("--order must be asc or desc");
+  if (query !== undefined && (typeof query !== "string" || !query.trim())) throw new RangeError("--query must be a non-empty string");
+  if (sourceKinds !== undefined && (!Array.isArray(sourceKinds) || sourceKinds.some((k) => typeof k !== "string" || !k))) {
+    throw new RangeError("--source-kind must be a non-empty string");
+  }
+  const providers = modelProvider ? [...modelProviders, modelProvider] : modelProviders;
+  const needle = query?.trim().toLowerCase();
+  const cutoffs = [];
+  if (since !== undefined) cutoffs.push(parseSince(since));
+  if (activeWithin !== undefined) cutoffs.push((now - parseActiveWithin(activeWithin)) / 1000);
+  const cutoff = cutoffs.length ? Math.max(...cutoffs) : undefined;
+  const clientSide = needle !== undefined || cutoff !== undefined;
+  const activityOf = (t) => (typeof t.updatedAt === "number" ? toSeconds(t.updatedAt) : typeof t.createdAt === "number" ? toSeconds(t.createdAt) : null);
+  const keep = (t) => {
+    if (cutoff !== undefined) {
+      const at = activityOf(t);
+      if (at === null || at < cutoff) return false;
+    }
+    if (needle !== undefined && ![t.name, t.preview, t.id].some((f) => typeof f === "string" && f.toLowerCase().includes(needle))) return false;
+    return true;
+  };
+  const pageSize = clientSide ? THREAD_LIST_MAX_LIMIT : limit;
+  const start = decodeThreadCursor(cursor);
   const { client } = await openSession(env);
   try {
     // Default daemon filter is the current provider only. Pass modelProviders: [] for
@@ -906,38 +984,67 @@ export async function listCodexThreads({
     // rollout rescan (tens of seconds); fall back to a full scan when the state DB
     // returns nothing on the first page.
     const baseParams = {
-      limit,
-      modelProviders,
-      ...(cursor !== undefined ? { cursor } : {}),
+      limit: pageSize,
+      modelProviders: providers,
+      sortKey: THREAD_SORT_KEYS[sort],
+      ...(order === "asc" ? { sortDirection: "asc" } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(archived === true ? { archived: true } : {}),
+      ...(sourceKinds?.length ? { sourceKinds } : {}),
     };
-    let out;
-    let usedStateDbOnly = true;
-    try {
-      out = await client.request("thread/list", { ...baseParams, useStateDbOnly: true });
-    } catch (err) {
-      throw transportError(err);
-    }
-    if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
-    if (
-      out.data.length === 0
-      && cursor === undefined
-      && (out.nextCursor == null || out.nextCursor === "")
-    ) {
+    const fetchPage = async (pageCursor, useStateDbOnly) => {
       try {
-        out = await client.request("thread/list", { ...baseParams, useStateDbOnly: false });
-        usedStateDbOnly = false;
+        return await client.request("thread/list", { ...baseParams, ...(pageCursor !== undefined ? { cursor: pageCursor } : {}), useStateDbOnly });
       } catch (err) {
         throw transportError(err);
       }
+    };
+    const checkPage = (out) => {
       if (!isObject(out) || !Array.isArray(out.data)) throw new CodexProtocolError("thread/list", "missing `data` array");
+      if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
+    };
+    const threads = [];
+    let usedStateDbOnly = true;
+    let scanned = 0;
+    let nextCursor = null;
+    let pageCursor = start.c;
+    let skip = start.skip;
+    for (;;) {
+      let out = await fetchPage(pageCursor, true);
+      checkPage(out);
+      if (out.data.length === 0 && pageCursor === undefined && (out.nextCursor == null || out.nextCursor === "")) {
+        out = await fetchPage(pageCursor, false);
+        usedStateDbOnly = false;
+        checkPage(out);
+      }
+      const rows = out.data.map(summarizeThread);
+      scanned += rows.length;
+      let matches = rows.filter(keep);
+      const pageSkip = skip;
+      if (skip) { matches = matches.slice(skip); skip = 0; }
+      const need = limit - threads.length;
+      if (matches.length > need) {
+        threads.push(...matches.slice(0, need));
+        nextCursor = encodeThreadCursor({ ...(pageCursor !== undefined ? { c: pageCursor } : {}), skip: pageSkip + need });
+        break;
+      }
+      threads.push(...matches);
+      const more = out.nextCursor || null;
+      // Newest-first by activity: once a page ends before the cutoff nothing later can qualify.
+      const last = rows[rows.length - 1];
+      const pastCutoff = cutoff !== undefined && sort === "updated" && order === "desc" && last !== undefined && (activityOf(last) ?? -Infinity) < cutoff;
+      if (!more || pastCutoff) break;
+      if (threads.length >= limit) { nextCursor = more; break; }
+      pageCursor = more;
     }
-    if (out.nextCursor != null && typeof out.nextCursor !== "string") throw new CodexProtocolError("thread/list", "`nextCursor` is not a string");
-    const threads = out.data.map(summarizeThread);
     return {
       threads,
-      nextCursor: out.nextCursor ?? null,
+      nextCursor,
       limit,
       useStateDbOnly: usedStateDbOnly,
+      sort,
+      order,
+      scanned,
     };
   } finally {
     client.close();
@@ -1182,11 +1289,11 @@ export async function readCodexThread(threadId, { limit = 100, env = process.env
 /**
  * @param {string} threadId
  * @param {string} text
- * @param {{ env?: NodeJS.ProcessEnv, envelope?: object, whenBusy?: "reject"|"queue"|"steer", session?: object, expectedTurnId?: string, expectedCwd?: string, model?: string, effort?: string, signal?: AbortSignal }} [opts]
+ * @param {{ env?: NodeJS.ProcessEnv, envelope?: object, whenBusy?: "reject"|"queue"|"steer", session?: object, expectedTurnId?: string, expectedCwd?: string, model?: string, effort?: string, signal?: AbortSignal, freshThreadCwd?: string }} [opts]
  */
-export async function sendToCodexThread(threadId, text, { env = process.env, envelope = buildEnvelope({ env }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal } = {}) {
+export async function sendToCodexThread(threadId, text, { env = process.env, envelope = buildEnvelope({ env }), whenBusy = "reject", session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd } = {}) {
   try {
-    const receipt = await sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal });
+    const receipt = await sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd });
     return outcomeFromReceipt(receipt);
   } catch (err) {
     // Every receipt names the message, including refusals that never reached the daemon.
@@ -1203,7 +1310,7 @@ function validateModelEffort(model, effort) {
   if (effort !== undefined && !["none", "minimal", "low", "medium", "high", "xhigh"].includes(effort)) throw new RangeError("--effort must be none, minimal, low, medium, high, or xhigh");
 }
 
-async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal }) {
+async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy, session, expectedTurnId, expectedCwd, model, effort, signal, freshThreadCwd }) {
   validateModelEffort(model, effort);
   if (!["reject", "queue", ...(session ? ["steer"] : [])].includes(whenBusy)) throw new RangeError("--when-busy must be reject, queue, or persistent steer");
   if (whenBusy === "steer" && (typeof expectedTurnId !== "string" || !ID_PATTERN.test(expectedTurnId))) throw new RangeError("steer requires expectedTurnId");
@@ -1230,6 +1337,11 @@ async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy,
         ...(model ? { model } : {}), ...(effort ? { config: { model_reasoning_effort: effort } } : {}) });
     } catch (err) {
       assertNotCancelled();
+      // A thread this call just created via thread/start has no rollout until its first turn exists
+      // (Codex 0.160: thread/resume answers "no rollout found"), but turn/start on it works. Treat it as idle.
+      if (freshThreadCwd !== undefined && err instanceof CodexRpcError && /no rollout found/i.test(String(err.rpc && err.rpc.message))) {
+        resumed = { thread: { id: threadId, status: { type: "idle" } }, cwd: freshThreadCwd, ...(model ? { model } : {}) };
+      } else {
       if (err instanceof CodexSendError || err instanceof RemoteThreadNotLoadedError) throw err;
       const explained = explainSendError(err, threadId, env);
       if (explained instanceof RemoteThreadNotLoadedError) throw explained;
@@ -1240,6 +1352,7 @@ async function sendToCodexThreadInner(threadId, text, { env, envelope, whenBusy,
         threadId,
         ...envelope,
       });
+      }
     }
     // A shared session stays connected when this conversation is cancelled.
     // Recheck after the last awaited preflight, before any submission request.
