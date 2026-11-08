@@ -956,6 +956,41 @@ function attachBackend(session, auth) {
   return session;
 }
 
+/**
+ * A backend-only session for read-only tools (migration capture). The login and its saved access
+ * token are resolved from local files only: unlike connectGateway it never describes, wakes or
+ * otherwise touches the box, so reading a bot does not change the source account.
+ * @param {{ account?: string }} [options]
+ */
+export function backendOnlySession({ account } = {}) {
+  if (gatewayOverride()) {
+    throw new GatewayError("Remove GROK_BOT_GATEWAY_URL and GROK_BOT_GATEWAY_TOKEN: reading the backend needs a Grok Bot app login.", { code: "NO_ACCESS_TOKEN" });
+  }
+  const pinned = workerAccountScope();
+  const selected = typeof account === "string" && account.trim() ? account.trim() : (pinned || undefined);
+  let choice;
+  try {
+    choice = resolveGrokBotLogin({ account: selected, ...secretStoreOptions() });
+  } catch (error) {
+    throw scrubOutbound(toGatewayError(error), []);
+  }
+  let scope = choice?.scope;
+  if (!scope && (choice?.hasDescriptorEntry || !choice)) {
+    try { scope = descriptorSession(choice ? choice.id : selected)?.accountScope; } catch { /* no readable descriptor */ }
+  }
+  if (typeof scope === "string" && SCOPE_RE.test(scope)) {
+    let loaded;
+    try {
+      loaded = loadAppAccessToken({ scope, home: homedir(), env: process.env, ...secretStoreOptions() });
+    } catch (error) {
+      throw scrubOutbound(toGatewayError(error), []);
+    }
+    return attachBackend({ accountScope: scope }, { scope, token: loaded.token, expiresAt: loaded.expiresAt });
+  }
+  if (!choice && !selected && accessTokenFromEnv()) return attachBackend({}, { env: true });
+  throw new GatewayError("This login has no saved Grok Bot access token. Sign in to the Grok Bot app (0.78+) on this computer, then try again.", { code: "NO_ACCESS_TOKEN" });
+}
+
 /** True when connectGateway gave this session an access token for the backend RPCs. */
 export function hasBackend(session) {
   return Boolean(session) && typeof session === "object" && backendAuths.has(session);

@@ -237,8 +237,8 @@ export function unknownOutcomeOutput(sent, visible) {
 
 export const MIGRATE_TARGETS = [
   { key: "hermes", label: "Hermes (a new Hermes profile per bot: role, memory, skills, paused schedules, full history, files)" },
-  { key: "muse", label: "Muse (one Muse with a side chat per bot; memory, open tasks, routines as notes, recent history, files)" },
-  { key: "dot", label: "Your dot (one dot: memory, open tasks, routines as notes, recent history, files)" },
+  { key: "muse", label: "Muse (one Muse with a side chat per bot; a handoff folder on its computer: role, memory, tasks, routines, skills, history, files)" },
+  { key: "dot", label: "Your dot (one dot, one inbox; the same handoff folder on its computer)" },
 ];
 
 /** "aa22306546@hotmail.com" → "aa2…@hotmail.com": enough to tell logins apart on a shared screen. */
@@ -249,8 +249,9 @@ export function maskEmail(email) {
 
 /** True when argv asks for the guided flow: `migrate` alone or `migrate wizard`. */
 export function migrateWizardRequested(argv) {
-  const words = argv.filter((a) => a !== "--json");
-  return words[0] === "migrate" && (words.length === 1 || (words.length === 2 && words[1] === "wizard"));
+  // --json and --ndjson ask for machine output; the guided flow is only for a person at a terminal.
+  if (argv.includes("--json") || argv.includes("--ndjson")) return false;
+  return argv[0] === "migrate" && (argv.length === 1 || (argv.length === 2 && argv[1] === "wizard"));
 }
 
 /** Parse "1", "1,3", "1-3" or "all" against n choices. Returns zero-based indexes or null. */
@@ -280,7 +281,8 @@ function runChild(real, args, { capture = false } = {}) {
     const out = [];
     if (capture) child.stdout.on("data", (d) => out.push(d));
     child.on("error", () => resolve({ code: 1, stdout: "" }));
-    child.on("exit", (code) => resolve({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8") }));
+    // "close" fires after the pipes are drained; "exit" can come before the last output.
+    child.on("close", (code) => resolve({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8") }));
   });
 }
 
@@ -325,19 +327,27 @@ async function migrateWizard(real) {
     say("\n3) Destination:");
     MIGRATE_TARGETS.forEach((t, i) => say(`   ${i + 1}. ${t.label}`));
     const target = MIGRATE_TARGETS[(await ask("   Destination number: ", MIGRATE_TARGETS.length))[0]].key;
+    let via = [];
+    if (target !== "hermes") {
+      say("\n   How to deliver it:");
+      say("   1. One zip file the agent unzips (recommended: everything, fewest messages)");
+      say("   2. File by file in chat messages (recent history and the skill list only)");
+      via = (await ask("   Delivery number: ", 2))[0] === 0 ? ["--via", "auto"] : ["--via", "chat"];
+    }
     const results = [];
     for (const bot of chosen) {
       say(`\n4) Capturing "${bot.name}" from Grok Bot (read-only; all history pages, memory, skills, routines, tasks, files)…`);
       const cap = await runChild(real, ["migrate", "capture", "--account", selector, "--bot", bot.id, "--json"], { capture: true });
       let archive;
       try { archive = JSON.parse(cap.stdout).archive; } catch { /* reported below */ }
-      if (!archive) { say("   Capture failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
+      if (cap.code !== 0 || !archive) { say("   Capture failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
       say(`   Archive: ${archive}\n\n5) What will change at the destination:`);
-      await runChild(real, ["migrate", "preview", archive, "--to", target]);
+      const preview = await runChild(real, ["migrate", "preview", archive, "--to", target, ...via]);
+      if (preview.code !== 0) { say("   The preview failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
       const go = (await rl.question(`\n6) Import "${bot.name}" into ${target} now? [y/N] `)).trim().toLowerCase();
       if (go !== "y" && go !== "yes") { say("   Skipped. Nothing was imported."); results.push({ bot: bot.name, ok: false, skipped: true }); continue; }
       say("\n7) Importing, reading back and checking that it can continue the work…");
-      const imp = await runChild(real, ["migrate", "import", archive, "--to", target, "--yes"]);
+      const imp = await runChild(real, ["migrate", "import", archive, "--to", target, ...via, "--yes"]);
       results.push({ bot: bot.name, ok: imp.code === 0 });
     }
     say("\nSummary:");

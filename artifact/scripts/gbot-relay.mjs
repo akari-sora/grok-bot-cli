@@ -22004,7 +22004,7 @@ var __webpack_modules__ = {
             if (!payload || typeof payload !== "object" || payload.iss !== ISSUER || typeof payload.sub !== "string" || !payload.sub || typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw fail("NOT_JWT");
             return payload;
         }
-        function loadAppAccessToken({ scope, platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env, getKeychainPassword, unprotectData, now = ()=>Date.now(), readFile: readFile1 = secretFiles.readFileSync } = {}) {
+        function loadAppAccessToken1({ scope, platform = process.platform, home = (0, node_os__rspack_import_2.homedir)(), env = process.env, getKeychainPassword, unprotectData, now = ()=>Date.now(), readFile: readFile1 = secretFiles.readFileSync } = {}) {
             const path = (0, node_path__rspack_import_3.join)((0, node_path__rspack_import_3.dirname)((0, _app_session_js__rspack_import_4.dQ)(home, platform, env)), "sand-secrets.json");
             let text;
             try {
@@ -22049,7 +22049,7 @@ var __webpack_modules__ = {
         }
         __webpack_require__.d(__webpack_exports__, {
             yc: ()=>AppAuthError,
-            zM: ()=>loadAppAccessToken
+            zM: ()=>loadAppAccessToken1
         }, {
             sd: secretFiles
         });
@@ -26505,6 +26505,56 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             });
             return session;
         }
+        function backendOnlySession({ account } = {}) {
+            if (gatewayOverride()) {
+                throw new GatewayError("Remove GROK_BOT_GATEWAY_URL and GROK_BOT_GATEWAY_TOKEN: reading the backend needs a Grok Bot app login.", {
+                    code: "NO_ACCESS_TOKEN"
+                });
+            }
+            const pinned = workerAccountScope();
+            const selected = typeof account === "string" && account.trim() ? account.trim() : pinned || undefined;
+            let choice;
+            try {
+                choice = resolveGrokBotLogin({
+                    account: selected,
+                    ...secretStoreOptions()
+                });
+            } catch (error) {
+                throw scrubOutbound(toGatewayError(error), []);
+            }
+            let scope = choice?.scope;
+            if (!scope && (choice?.hasDescriptorEntry || !choice)) {
+                try {
+                    scope = descriptorSession(choice ? choice.id : selected)?.accountScope;
+                } catch  {}
+            }
+            if (typeof scope === "string" && SCOPE_RE.test(scope)) {
+                let loaded;
+                try {
+                    loaded = loadAppAccessToken({
+                        scope,
+                        home: homedir(),
+                        env: process.env,
+                        ...secretStoreOptions()
+                    });
+                } catch (error) {
+                    throw scrubOutbound(toGatewayError(error), []);
+                }
+                return attachBackend({
+                    accountScope: scope
+                }, {
+                    scope,
+                    token: loaded.token,
+                    expiresAt: loaded.expiresAt
+                });
+            }
+            if (!choice && !selected && accessTokenFromEnv()) return attachBackend({}, {
+                env: true
+            });
+            throw new GatewayError("This login has no saved Grok Bot access token. Sign in to the Grok Bot app (0.78+) on this computer, then try again.", {
+                code: "NO_ACCESS_TOKEN"
+            });
+        }
         function hasBackend(session) {
             return Boolean(session) && typeof session === "object" && backendAuths.has(session);
         }
@@ -28276,7 +28326,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (email && login?.scope && login.email && login.email.toLowerCase() === email.toLowerCase()) return login.scope;
             return null;
         }
-        function workerAccountScope(env = process.env) {
+        function workerAccountScope1(env = process.env) {
             const raw = env?.GBOT_ACCOUNT_SCOPE;
             if (raw == null || raw === "") return "";
             const value = String(raw);
@@ -28432,7 +28482,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 loginLines(rows)
             ].join("\n"));
         }
-        function resolveGrokBotLogin(options = {}) {
+        function resolveGrokBotLogin1(options = {}) {
             const opts = baseOptions(options);
             let config;
             let configError = null;
@@ -28478,7 +28528,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (typeof selector !== "string" || !selector.trim()) {
                 throw new GbotConfigError("alias needs a login selector.");
             }
-            const chosen = resolveGrokBotLogin({
+            const chosen = resolveGrokBotLogin1({
                 ...options,
                 account: selector.trim()
             });
@@ -28534,8 +28584,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }, options);
         }
         __webpack_require__.d(__webpack_exports__, {
-            SH: ()=>workerAccountScope,
-            cq: ()=>resolveGrokBotLogin
+            SH: ()=>workerAccountScope1,
+            cq: ()=>resolveGrokBotLogin1
         });
     },
     "./src/core/relay/codex.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -30619,7 +30669,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             const raw = String(env.GROK_BOT_TEST ?? "").trim().toLowerCase();
             return raw === "1" || raw === "true" || raw === "yes" ? " GROK_BOT_TEST is set, so gbot does not read the Keychain or secret store (test mode)." : " NODE_ENV=test is set, so gbot does not read the Keychain or secret store (test mode); unset NODE_ENV to pair.";
         }
-        function secretStoreOptions(env = process.env) {
+        function secretStoreOptions1(env = process.env) {
             if (!isTestMode(env)) return {};
             const fixture = env.GROK_BOT_TEST === "1" ? env.GBOT_TEST_KEYCHAIN_PASSWORD : undefined;
             const password = typeof fixture === "string" && fixture ? fixture : "";
@@ -30634,7 +30684,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             };
         }
         __webpack_require__.d(__webpack_exports__, {
-            Ih: ()=>secretStoreOptions
+            Ih: ()=>secretStoreOptions1
         });
     },
     "./src/core/store.js" (__unused_rspack___webpack_module__, __unused_rspack___webpack_exports__, __webpack_require__) {

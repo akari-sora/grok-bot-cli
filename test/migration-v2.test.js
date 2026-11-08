@@ -3,14 +3,16 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   assertStoreUrl, captureBot, fetchStoreBytes, isSecretPath, normalizeAutomation, normalizeEntry, readFullTranscript,
   referencedBoxPaths, selectBoxFiles,
 } from '../src/core/migration-capture.js';
 import { archivePathFor, openArchive, writeArchive } from '../src/core/migration-archive.js';
 import { acceptanceQuestions, buildHermesPlan, distinctiveTokens, groupNotMigrated, memoryEntries, profileNameFor, skillDescription } from '../src/core/migration-hermes.js';
-import { brokenFiles, buildTrinityPlan, fingerprint } from '../src/core/migration-trinity.js';
+import { brokenUnits, buildTrinityPlan, trinityOptions } from '../src/core/migration-trinity.js';
+import { inflateRawSync } from 'node:zlib';
+import { hasSecret } from '../src/core/migration-redact.js';
 import { redactSecrets } from '../src/core/migration-redact.js';
 import { resolveBot } from '../src/core/migration-flow.js';
 import { BACKEND_READ_RPCS, backendRead } from '../src/core/gateway.js';
@@ -70,7 +72,7 @@ function world({ rows = 1203, omitEvery = 0, changeGenerationAt = 0 } = {}) {
         return { entries: page, generation };
       }
       case 'ListGrokBotAgentAutomations': return { automations: [
-        { recordJson: JSON.stringify({ id: 'a1', name: 'Hourly scan', prompt: 'Run /home/box/bin/scan-tool --merge', trigger: { type: 'cron', schedule: 'CRON_TZ=Asia/Taipei 52 9-21 * * 1-5' }, isEnabled: false, triggerDescription: 'hourly' }) },
+        { recordJson: JSON.stringify({ id: 'a1', name: 'Hourly scan', prompt: 'Run /home/box/bin/scan-tool --merge (login in ~/.secrets/gitlab.env)', trigger: { type: 'cron', schedule: 'CRON_TZ=Asia/Taipei 52 9-21 * * 1-5' }, isEnabled: false, triggerDescription: 'hourly' }) },
         { recordJson: JSON.stringify({ id: 'a2', name: 'On PR', prompt: 'Review the PR', trigger: { type: 'group', listeners: [{ type: 'github', repo: 'x/y', events: ['pr-opened'] }] }, isEnabled: true }) },
       ] };
       case 'ListGrokBotAgentRoutines': throw new Error('ListGrokBotAgentRoutines failed: 404 not_found');
@@ -181,7 +183,7 @@ test('captureBot reads everything, records gaps and writes a verifiable archive'
   assert.ok(paths.includes('/home/box/sand-data/user-memory/by-agent/other-bot/profile.md'), 'shared user memory of other bots');
   assert.ok(paths.includes('/home/box/sand-data/workflows/ci-fixer/run.sh'), 'whole skill folder');
   assert.ok(!paths.some((p) => /secrets/.test(p)));
-  assert.ok(cap.skipped.some((s) => s.boxPath === '/home/box/.secrets' || /credential/.test(s.reason)) || true);
+  assert.ok(cap.skipped.some((s) => s.boxPath === '/home/box/.secrets/gitlab.env' && /credential/.test(s.reason)), 'a credential path a routine names is reported');
   assert.ok(!w.calls.some((c) => /Send|Update|Delete|Create/.test(c)));
 
   const { root, manifest } = writeArchive(cap, join(dir, 'archive'));
@@ -226,32 +228,6 @@ test('Hermes plan: role, user facts incl. shared shards, open tasks, paused cron
   assert.ok(qs.find((q) => q.area === 'skills').expect[0].includes('pipeline7'));
 });
 
-test('trinity plan differs per seat: Muse gets its own side chat and memory read-back; dot does not', async (t) => {
-  const a = await sampleArchive(t);
-  const muse = buildTrinityPlan(a, 'muse');
-  const dot = buildTrinityPlan(a, 'dot');
-  assert.deepEqual(muse.chat, { title: 'Grok Bot · Deploy QA' });
-  assert.deepEqual(muse.checkChat, { title: 'Grok Bot · Deploy QA · check' });
-  assert.equal(dot.chat, undefined);
-  assert.equal(dot.checkChat, undefined);
-  assert.ok(muse.checks.every((c) => c.informational), 'Memory.md is reported, not judged');
-  assert.ok(!dot.checks.some((c) => c.kind === 'memory'));
-  // Durable copy: files on the agent's computer, never executed, plus one long-term pointer.
-  const ids = muse.steps.map((s) => s.id);
-  for (const want of ['role', 'memory', 'tasks', 'routines', 'skills', 'history', 'remember']) assert.ok(ids.some((i) => i === want || i.startsWith(want + '-')), want);
-  assert.ok(muse.steps.filter((s) => /Create \(or overwrite\) the file|Append to the end/.test(s.text)).every((s) => /Do not run/.test(s.text)));
-  assert.match(muse.steps.find((s) => s.id === 'remember').text, /long-term/);
-  assert.ok(muse.questions.filter((q) => !['memory', 'files-on-computer'].includes(q.area)).every((q) => /Open ~\/grok-bot\/Deploy-QA\//.test(q.text)));
-  assert.match(dot.questions[0].note, /one inbox/);
-  for (const plan of [muse, dot]) {
-    assert.doesNotMatch(JSON.stringify(plan.steps), /ghp_/);
-    assert.ok(plan.steps.every((s) => s.text.length <= 16000));
-    assert.equal(new Set(plan.steps.map((s) => s.id)).size, plan.steps.length);
-    assert.match(plan.steps[0].text, new RegExp(`next ${plan.steps.length - 1} messages`));
-  }
-  assert.notEqual(muse.id, dot.id);
-});
-
 test('keywords skip dates, URLs and common product names; YAML folded descriptions parse', () => {
   assert.deepEqual(distinctiveTokens('Watch GitLab repo aa22396584/telltale; see https://x.example/zz9 on 2026-10-16T21:54:00+08:00'), ['aa22396584']);
   assert.deepEqual(distinctiveTokens('After user undrafts !65: squash-merge and use the built-in connector for deploy-qa-scan'), ['!65', 'deploy-qa-scan']);
@@ -292,6 +268,7 @@ test('wizard: only `gbot migrate` or `gbot migrate wizard` starts it; choices pa
   assert.ok(migrateWizardRequested(['migrate', 'wizard']));
   assert.ok(!migrateWizardRequested(['migrate', 'bots']));
   assert.ok(!migrateWizardRequested(['send', 'migrate']));
+  assert.ok(!migrateWizardRequested(['migrate', '--json']), 'machine output never starts the guided flow');
   assert.deepEqual(parseChoice('2', 3), [1]);
   assert.deepEqual(parseChoice('1,3', 3, { multiple: true }), [0, 2]);
   assert.deepEqual(parseChoice('2-3', 3, { multiple: true }), [1, 2]);
@@ -310,26 +287,101 @@ test('not-migrated lines are grouped for the terminal', () => {
   assert.match(grouped.find((g) => /large/.test(g.item)).item, /2 large file\(s\), up to 40 MiB/);
 });
 
-test('digest answers: only files reported missing or different are repaired', async (t) => {
+
+/** The entries of a zip written by migration-zip.js (stored or deflated, no data descriptors). */
+function unzip(buf) {
+  const out = new Map();
+  for (let at = 0; buf.readUInt32LE(at) === 0x04034b50;) {
+    const method = buf.readUInt16LE(at + 8), size = buf.readUInt32LE(at + 18), nameLen = buf.readUInt16LE(at + 26), extra = buf.readUInt16LE(at + 28);
+    const name = buf.subarray(at + 30, at + 30 + nameLen).toString('utf8');
+    const data = buf.subarray(at + 30 + nameLen + extra, at + 30 + nameLen + extra + size);
+    out.set(name, method === 8 ? inflateRawSync(data) : Buffer.from(data));
+    at += 30 + nameLen + extra + size;
+  }
+  return out;
+}
+
+const bundleIn = (t, a) => join(dirname(a.root), 'bundle-' + Math.random().toString(36).slice(2) + '.zip');
+
+test('Muse and dot get one handoff folder: a zip by default, the same folder file by file with --via chat', async (t) => {
   const a = await sampleArchive(t);
-  const plan = buildTrinityPlan(a, 'dot');
-  const q = plan.questions.find((x) => x.area === 'files-on-computer');
-  assert.deepEqual(q.expect, plan.files.map((f) => f.fingerprint));
-  assert.equal(fingerprint('a b\n c'), fingerprint('abc'));
-  // Agents drop escape backslashes when they write chat text to a file (seen on Muse).
-  assert.equal(fingerprint('say \\"odb\\" now'), fingerprint('say "odb" now'));
-  assert.notEqual(fingerprint('say "odb" now'), fingerprint('say "obd" now'));
-  const [first, second] = plan.files;
-  const answer = `Q2:\n${first.rel} ${first.fingerprint}\n${second.rel} MISSING`;
-  assert.deepEqual(brokenFiles(plan, answer).map((f) => f.rel), [second.rel]);
-  assert.deepEqual(brokenFiles(plan, 'I could not run commands.'), []);
-  assert.ok(plan.questions.every((x) => x.text.includes('Start your reply with ' + x.marker)));
+  const muse = buildTrinityPlan(a, 'muse', { bundlePath: bundleIn(t, a) });
+  const dot = buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) });
+  assert.deepEqual(muse.chat, { title: 'Grok Bot · Deploy QA' });
+  assert.deepEqual(muse.checkChat, { title: 'Grok Bot · Deploy QA · check' });
+  assert.equal(dot.chat, undefined);
+  assert.ok(muse.checks.every((c) => c.informational), 'Memory.md is reported, not judged');
+  assert.ok(!dot.checks.some((c) => c.kind === 'memory'));
+  for (const plan of [muse, dot]) {
+    assert.equal(plan.delivery.via, 'upload');
+    assert.deepEqual(plan.steps.map((s) => s.id), ['bundle', 'remember']);
+    assert.match(plan.steps[0].text, /Do not run, import, compile, install/);
+    assert.match(plan.steps[1].text, /long-term/);
+    const files = unzip(readFileSync(plan.steps[0].attach[0]));
+    for (const want of ['README.md', 'ROLE.md', 'MEMORY.md', 'TASKS.md', 'ROUTINES.md', 'SKILLS.md', 'HISTORY.md', 'MANIFEST.txt']) assert.ok(files.has(want), want);
+    assert.ok([...files.keys()].some((k) => k.startsWith('skills/')), 'whole skill folders');
+    assert.ok([...files.keys()].some((k) => k.startsWith('box/')), 'the files it used');
+    assert.deepEqual(files.get('MANIFEST.txt').toString('utf8').trim().split('\n'), [...files.keys()].filter((k) => k !== 'MANIFEST.txt').sort());
+    assert.match(files.get('HISTORY.md').toString('utf8'), /all of them/);
+    for (const [name, bytes] of files) assert.ok(!hasSecret(bytes.toString('latin1')), 'token in ' + name);
+    assert.equal(plan.delivery.files, files.size);
+  }
+  assert.match(dot.questions[0].note, /one inbox/);
+  assert.notEqual(muse.id, dot.id);
+  // Same archive and options: the same bundle bytes and plan id (a resumed run recognises it).
+  assert.equal(buildTrinityPlan(a, 'dot', { bundlePath: bundleIn(t, a) }).id, dot.id);
+
+  const chat = buildTrinityPlan(a, 'dot', { via: 'chat' });
+  assert.equal(chat.delivery.via, 'chat');
+  assert.equal(chat.steps[0].id, 'intro');
+  assert.equal(chat.steps.at(-1).id, 'remember');
+  assert.ok(chat.steps.every((s) => !s.attach));
+  const fileSteps = chat.steps.filter((s) => /Create \(or overwrite\) the file|Append to the end/.test(s.text));
+  assert.ok(fileSteps.length >= 6 && fileSteps.every((s) => /Do not run/.test(s.text)));
+  assert.ok(chat.steps.every((s) => s.text.length <= 16000 && !/…\[cut\]/.test(s.text)), 'long lines are split, never cut');
+  assert.ok(chat.notMigrated.some((n) => /older messages/.test(n.item)), 'recent history only, and said so');
+  assert.ok(chat.notMigrated.some((n) => /skill bodies/.test(n.item)));
 });
 
-test('the plan written for trinity has only trinity-migration-plan v1 fields', async (t) => {
+test('acceptance: every answer starts with its marker and needs a keyword the question does not contain', async (t) => {
   const a = await sampleArchive(t);
-  const { files, ...wire } = buildTrinityPlan(a, 'muse');
-  assert.ok(files.length > 0);
+  const n = (x) => String(x).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  for (const plan of [buildTrinityPlan(a, 'muse', { bundlePath: bundleIn(t, a) }), buildTrinityPlan(a, 'dot', { via: 'chat' })]) {
+    assert.ok(plan.questions.length >= 5);
+    plan.questions.forEach((q, i) => {
+      assert.equal(q.marker, `Q${i + 1}:`);
+      assert.ok(q.text.endsWith('Start your reply with ' + q.marker));
+      for (const e of q.expect) assert.ok(!n(q.text).includes(n(e)), `${q.area}: "${e}" is already in the question`);
+    });
+  }
+});
+
+test('the digest check: shell-safe, and only parts reported missing or different are repaired', async (t) => {
+  const a = await sampleArchive(t);
+  for (const via of ['upload', 'chat']) {
+    const plan = buildTrinityPlan(a, 'dot', { via, bundlePath: bundleIn(t, a), folder: '~/grok-bot/x' });
+    const q = plan.questions.find((x) => x.area === 'files-on-computer');
+    const command = q.text.split('\n\n')[1].split('\nStart your reply')[0];
+    const [, code, arg] = /^python3 -c '([^']*)' ([A-Za-z0-9+/=]+)$/s.exec(command) ?? [];
+    assert.ok(code && arg, 'one single-quoted program and one base64 argument');
+    assert.deepEqual(JSON.parse(Buffer.from(arg, 'base64').toString('utf8')).root, '~/grok-bot/x');
+    assert.deepEqual(q.expect, plan.delivery.units.map((u) => u.digest));
+    const col = via === 'upload' ? 1 : 2;
+    const line = (u, digest) => (col === 1 ? `${u.unit} ${digest} zzzzzzzzzzzz` : `${u.unit} zzzzzzzzzzzz ${digest}`);
+    const [first, second, third] = plan.delivery.units;
+    const answer = ['Q2:', line(first, first.digest), `${second.unit} MISSING 1`, line(third, 'ffffffffffff')].join('\n');
+    assert.deepEqual(brokenUnits(plan, answer).map((u) => u.unit), [second.unit, third.unit]);
+    assert.deepEqual(brokenUnits(plan, 'I could not run commands.'), []);
+    if (via === 'upload') assert.deepEqual(second.ids, ['bundle']);
+  }
+});
+
+test('the plan written for trinity has only trinity-migration-plan v1 fields; options are checked', async (t) => {
+  const a = await sampleArchive(t);
+  const { delivery, ...wire } = buildTrinityPlan(a, 'muse', { bundlePath: bundleIn(t, a) });
+  assert.ok(delivery.units.length > 0);
   const allowed = ['format', 'version', 'id', 'seat', 'title', 'chat', 'checkChat', 'source', 'steps', 'checks', 'questions', 'notMigrated'];
   assert.deepEqual(Object.keys(wire).filter((k) => !allowed.includes(k)), []);
+  for (const bad of [{ via: 'fax' }, { history: 'recent:x' }, { skills: 'a;b' }, { folder: '~/../etc' }, { folder: "~/it's" }]) assert.throws(() => trinityOptions(bad), /--/);
+  assert.throws(() => buildTrinityPlan(a, 'dot', { skills: 'no-such-skill', bundlePath: bundleIn(t, a) }), /No skill named/);
 });

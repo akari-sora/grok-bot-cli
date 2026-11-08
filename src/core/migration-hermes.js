@@ -2,23 +2,25 @@
  * Hermes destination for an archive v2 bot: one bot → one new Hermes profile.
  *
  * Mapping (each item is planned, applied idempotently, read back and reported):
- *   instructions            → SOUL.md (the fresh profile still holds Hermes' seeded default)
+ *   instructions            → SOUL.md (only over Hermes' exact seeded default)
  *   memory/profile.md       → USER.md entries   (Hermes MemoryStore: format, threat scan, limits)
- *   memory/log/*.md         → MEMORY.md entries, plus migration notes and open tasks
+ *   memory/log/*.md         → MEMORY.md entries, plus server memories, migration notes and open tasks
  *   skill library           → skills/grok-bot-imports/<slug>/ (every file of the skill)
  *   scheduled automations   → `hermes cron create --paused` jobs (Grok keeps its own copy)
  *   event automations       → workspace notes (no Hermes event trigger for GitHub/Slack listeners)
- *   full transcript         → Hermes sessions via SessionDB.import_foreign_history (searchable)
+ *   main + side transcripts → Hermes sessions via SessionDB.import_foreign_history (searchable)
  *   box files               → <profile>/workspace/grok-bot/grok-box/<box path>
+ * Everything else that was captured is listed in notMigrated with the reason. Token-shaped secrets
+ * are redacted; an item that still holds one (an encoded token, a binary file) is left out.
  * Commands run without a shell. Nothing is sent to a model until `accept`.
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { MigrationError } from './migration.js';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { MigrationError, parseBytes, regularBytes } from './migration.js';
 import { HERMES_HELPER } from './migration-hermes-helper.js';
-import { isText, redactor } from './migration-redact.js';
+import { assertNoSecrets, isText, sanitize, sanitizeBytes } from './migration-redact.js';
 
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -28,6 +30,12 @@ const ENTRY_DELIMITER = '\n§\n';
 const HISTORY_SESSION_BYTES = 4 * 1024 * 1024;
 const HISTORY_SESSION_MESSAGES = 9000;
 const SKILL_CATEGORY = 'grok-bot-imports';
+const MARKER = '.gbot-migration.json';
+const RUNTIME_MARKER = "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)";
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+const SECRET_REASON = 'holds an encoded token-shaped value that cannot be redacted in place';
+const SECRET_ALT = 'remove the secret in Grok Bot, or copy the item by hand from the private archive';
+const UNSAFE_REASON = 'unsafe destination path (empty, ".", ".." segment, NUL or backslash, or outside its folder)';
 
 /** Run a command without a shell. Resolves {code, stdout, stderr}. */
 export function defaultExec(cmd, args, { input, env, timeoutMs = 600_000, cwd } = {}) {
@@ -67,9 +75,14 @@ const limitFor = (entries, base) => {
   return need <= base ? base : Math.ceil(need * 1.25 / 100) * 100;
 };
 
-function historySessions(capture, transcriptRows, title) {
-  const messages = transcriptRows.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
-    .map((m) => ({ role: m.role, content: m.text, ...(m.timestampMs ? { timestamp: m.timestampMs / 1000 } : {}) }));
+/** sha256 over role, byte length and text of each message: the helper computes the same from Hermes. */
+function historyDigest(messages) {
+  const h = createHash('sha256');
+  for (const m of messages) h.update(`${m.role}\n${Buffer.byteLength(m.content)}\n${m.content}\n`);
+  return h.digest('hex');
+}
+
+function historySessions(messages, title, foreignId) {
   const parts = [];
   let current = [], bytes = 0;
   for (const m of messages) {
@@ -80,10 +93,22 @@ function historySessions(capture, transcriptRows, title) {
   if (current.length) parts.push(current);
   return parts.map((msgs, i) => ({
     title: parts.length > 1 ? `${title} (part ${i + 1}/${parts.length})` : title,
-    foreign_id: `${capture.bot.id}:main:${i + 1}`,
+    foreign_id: `${foreignId}:${i + 1}`,
     messages: msgs,
+    digest: historyDigest(msgs),
   }));
 }
+
+/** `root`/`rel` for a relative posix path without empty, `.` or `..` segments, NUL or backslash; null when it would leave `root`. */
+function within(root, rel) {
+  const parts = String(rel).split('/');
+  if (/[\0\\]/.test(rel) || parts.some((p) => !p || p === '.' || p === '..')) return null;
+  const base = resolve(root);
+  const path = resolve(base, ...parts);
+  return path.startsWith(base.endsWith(sep) ? base : base + sep) ? path : null;
+}
+
+const skillName = (s) => /^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(s.files.find((f) => f.rel === 'SKILL.md')?.bytes.toString('utf8') ?? '')?.[1]?.trim() ?? s.slug;
 
 /**
  * Pure plan from an opened archive. `profileDir` is where the profile lives (or will live).
@@ -92,116 +117,223 @@ function historySessions(capture, transcriptRows, title) {
 export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, now = () => new Date() }) {
   const cap = archive.capture;
   if (cap.bot.kind !== 'bot') throw new MigrationError('Only a bot (not a group) can become a Hermes profile.');
-  // Token-shaped secrets stay in the private archive only.
-  const redact = redactor();
-  const cleanBytes = (path) => {
-    const bytes = archive.read(path);
-    if (!isText(bytes)) return { bytes, redacted: 0 };
-    const before = redact.tally.count;
-    const text = redact(bytes.toString('utf8'));
-    const n = redact.tally.count - before;
-    return n ? { bytes: Buffer.from(text, 'utf8'), redacted: n } : { bytes, redacted: 0 };
+  const notMigrated = [];
+  const omit = (item, reason, alternative) => notMigrated.push({ item, reason, alternative });
+  // Token-shaped secrets stay in the private archive only. A value that still holds one after
+  // redaction (an encoded token) is left out and reported under `item`.
+  let redactedSecrets = 0;
+  const clean = (value, item) => {
+    const r = sanitize(value);
+    redactedSecrets += r.count;
+    if (r.clean) return r.text;
+    if (item) omit(item, SECRET_REASON, SECRET_ALT);
+    return null;
   };
-  const name = profile ?? profileNameFor(cap.bot);
+  // A destination path must hold no token and stay inside its root.
+  const destFor = (root, rel, item) => {
+    const r = sanitize(rel);
+    if (!r.clean || r.count) { omit(item, 'its path holds a token-shaped value', SECRET_ALT); return null; }
+    const dest = within(root, rel);
+    if (!dest) omit(item, UNSAFE_REASON, 'nothing was written; check the box path in the archive');
+    return dest;
+  };
+  const cleanFile = (row, item) => {
+    const r = sanitizeBytes(archive.read(row.path));
+    redactedSecrets += r.count;
+    if (r.clean) return r;
+    omit(item, r.text ? SECRET_REASON : 'binary file with a token-shaped value inside; binary bytes cannot be redacted', SECRET_ALT);
+    return null;
+  };
+
+  const botName = clean(cap.bot.name, 'bot name') ?? `Grok bot ${cap.bot.id.slice(0, 8)}`;
+  const title = clean(cap.bot.title, 'bot title') ?? '';
+  const instructions = clean(cap.bot.instructions, 'bot instructions (role)') ?? '';
+  const name = profile ?? profileNameFor({ ...cap.bot, name: botName });
   if (!PROFILE_ID_RE.test(name) || name === 'default') throw new MigrationError('Invalid Hermes profile name.');
   const base = join(profileDir, 'workspace', 'grok-bot');
   const boxRoot = join(base, 'grok-box');
   const date = now().toISOString().slice(0, 10);
-  const botName = cap.bot.name;
+  const archivePath = sanitize(archive.root);
+  const historyPath = archivePath.clean && !archivePath.count ? archive.root : 'grok-bot-archive';
 
+  // Memory files are redacted whole, then split into entries.
   const memFiles = cap.box.filter((b) => b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath));
   const user = [], memory = [];
   for (const f of memFiles.sort((a, b) => a.boxPath.localeCompare(b.boxPath))) {
-    const entries = memoryEntries(redact(archive.read(f.path).toString('utf8')));
-    if (/\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/')) user.push(...entries);
-    else memory.push(...entries);
+    const r = sanitize(archive.read(f.path).toString('utf8'));
+    redactedSecrets += r.count;
+    const into = /\/memory\/profile\.md$/.test(f.boxPath) || f.boxPath.includes('/user-memory/') ? user : memory;
+    for (const e of memoryEntries(r.text)) { const c = clean(e, `a memory entry in ${f.boxPath}`); if (c !== null) into.push(c); }
   }
-  const mainRows = cap.transcripts.find((t) => t.sessionId === '');
-  const rows = (mainRows ? archive.transcript(mainRows) : []).map((m) => ({ ...m, text: redact(m.text) }));
-  const historyTitle = `Grok Bot · ${botName} · history`;
-  const history = historySessions(cap, rows, historyTitle);
-  const msgCount = history.reduce((n, s) => n + s.messages.length, 0);
-  const firstTs = rows.find((r) => r.timestampMs)?.timestampMs;
-  const lastTs = [...rows].reverse().find((r) => r.timestampMs)?.timestampMs;
-  const span = firstTs && lastTs ? `${new Date(firstTs).toISOString().slice(0, 10)} to ${new Date(lastTs).toISOString().slice(0, 10)}` : 'unknown dates';
+  for (const m of cap.serverMemories ?? []) {
+    const c = clean(m.text, `server memory ${m.id}`);
+    if (c && !memory.includes(c)) memory.push(c);
+  }
 
-  const notes = [
-    `Migrated from Grok Bot "${botName}" on ${date}. Files from the Grok box are under ${boxRoot}; a path /home/box/X in older instructions or routines now means ${boxRoot}/home/box/X.`,
-    `The full Grok Bot conversation (${msgCount} messages, ${span}) is imported as the Hermes session "${history[0]?.title ?? historyTitle}"; use session_search to recall it. A readable copy is ${join(base, 'history', 'main.md')}.`,
-  ];
-  const open = cap.todos.filter((t) => t.status === 'pending' || t.status === 'in_progress');
-  for (const t of open) notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${redact(t.content)}`);
-  const memoryAll = [...memory, ...notes];
+  // Main conversation first, then each side conversation: one Hermes session (or several parts) each.
+  const docs = new Map();
+  const history = [];
+  const transcripts = [...cap.transcripts.filter((t) => t.sessionId === ''), ...cap.transcripts.filter((t) => t.sessionId !== '')];
+  let side = 0, mainCount = 0, span = 'unknown dates', mainTitle = `Grok Bot · ${botName} · history`;
+  for (const t of transcripts) {
+    const main = t.sessionId === '';
+    const key = basename(t.path, '.jsonl');
+    const label = main ? 'the main conversation' : `side conversation ${++side}`;
+    const messages = [];
+    let other = 0, held = 0;
+    for (const m of archive.transcript(t)) {
+      if ((m.role !== 'user' && m.role !== 'assistant') || !m.text) { other++; continue; }
+      const content = clean(m.text);
+      if (content === null) { held++; continue; }
+      messages.push({ role: m.role, content, ...(m.timestampMs ? { timestamp: m.timestampMs / 1000 } : {}) });
+    }
+    if (other) omit(`${other} row(s) of ${label} that are not user or assistant text`, 'tool calls and system events are not chat turns; Hermes sessions hold user and assistant messages', 'they stay in the private archive (transcript/*.raw.jsonl)');
+    if (held) omit(`${held} message(s) of ${label}`, SECRET_REASON, SECRET_ALT);
+    if (t.unreadable) omit(`${t.unreadable} unreadable row(s) of ${label}`, 'the Grok Bot server could not return them', 'capture again');
+    const sessionTitle = `Grok Bot · ${botName} · ${main ? 'history' : label}`;
+    history.push(...historySessions(messages, sessionTitle, `${cap.bot.id}:${main ? 'main' : key}`));
+    docs.set(join(base, 'history', key + '.md'), Buffer.from(`# ${sessionTitle}\n\n` + messages.map((m) =>
+      `## ${m.role === 'user' ? 'You' : 'Bot'} · ${m.timestamp ? new Date(m.timestamp * 1000).toISOString() : 'time unknown'}\n\n${m.content}\n`).join('\n')));
+    if (main) {
+      mainCount = messages.length;
+      mainTitle = history.find((s) => s.foreign_id.startsWith(`${cap.bot.id}:main:`))?.title ?? mainTitle;
+      const stamps = messages.filter((m) => m.timestamp).map((m) => new Date(m.timestamp * 1000).toISOString().slice(0, 10));
+      if (stamps.length) span = `${stamps[0]} to ${stamps.at(-1)}`;
+    }
+  }
 
-  const skillRows = cap.box.filter((b) => b.reason === 'skill' && b.kind === 'file');
+  const open = [];
+  for (const t of cap.todos) {
+    if (t.status !== 'pending' && t.status !== 'in_progress') continue;
+    const content = clean(t.content, `open task ${t.id}`);
+    if (content !== null) open.push({ id: t.id, status: t.status, content });
+  }
+  const finished = cap.todos.filter((t) => t.status !== 'pending' && t.status !== 'in_progress').length;
+  if (finished) omit(`${finished} finished todo(s)`, 'only open tasks are carried over', 'they stay in the private archive (capture.json)');
+
+  const skillRoot = join(profileDir, 'skills', SKILL_CATEGORY);
   const skillDirs = new Map();
-  for (const b of skillRows) {
+  for (const b of cap.box.filter((x) => x.reason === 'skill' && x.kind === 'file')) {
     const m = /^\/home\/box\/sand-data\/workflows\/([^/]+)\/(.+)$/.exec(b.boxPath);
     if (!m) continue;
     if (!skillDirs.has(m[1])) skillDirs.set(m[1], []);
     skillDirs.get(m[1]).push({ rel: m[2], ...b });
   }
-  const skillPlan = skills === 'none' ? [] : [...skillDirs].filter(([, files]) => files.some((f) => f.rel === 'SKILL.md'))
-    .map(([slug, files]) => ({ slug, dir: join(profileDir, 'skills', SKILL_CATEGORY, slug), files }));
+  const skillPlan = [];
+  for (const [slug, rows] of skills === 'none' ? [] : skillDirs) {
+    if (!rows.some((f) => f.rel === 'SKILL.md')) continue;
+    const dir = destFor(skillRoot, slug, `skill folder "${slug}"`);
+    if (!dir) continue;
+    const files = [];
+    for (const f of rows) {
+      const dest = destFor(dir, f.rel, `skill file ${f.boxPath}`);
+      const r = dest && cleanFile(f, `skill file ${f.boxPath}`);
+      if (r) files.push({ ...f, dest, bytes: r.bytes, redacted: r.count });
+    }
+    if (!files.some((f) => f.rel === 'SKILL.md')) { omit(`skill "${slug}"`, 'its SKILL.md was left out (see above)', SECRET_ALT); continue; }
+    skillPlan.push({ slug, dir, files, pristine: files.length === rows.length && files.every((f) => !f.redacted) });
+  }
 
   const pathNote = `[Migrated from Grok Bot "${botName}". Box paths /home/box/... now live under ${boxRoot}/home/box/... . CLI logins that existed on the Grok box (for example glab, gh) must exist on this machine.]\n\n`;
-  const cron = [], unscheduled = [];
+  const cron = [], unscheduled = [], routines = [];
   const zones = new Set();
   for (const a of cap.automations) {
+    const routine = clean(a.name, `routine ${a.id}`);
+    const prompt = routine === null ? null : clean(a.prompt, `routine "${routine}"`);
+    const details = prompt === null ? null : clean(a.triggerDetails, `routine "${routine}"`);
+    if (details === null) continue;
+    routines.push({ name: routine, instruction: prompt, trigger: a.trigger, schedule_cron: a.scheduleCron, schedule_text: clean(a.scheduleText) ?? '',
+      timezone: a.timezone ?? '', paused: !a.enabled, skills: [], trigger_details: details });
     if (a.trigger === 'schedule' && a.scheduleCron) {
       if (a.timezone) zones.add(a.timezone);
-      cron.push({ name: `${botName}: ${a.name}`, schedule: a.scheduleCron, timezone: a.timezone, prompt: pathNote + redact(a.prompt),
+      // The source id in the name finds this job again on a re-run, whatever else shares its name.
+      const tag = `[grok-bot ${a.id || sha256(a.name).slice(0, 12)}]`;
+      cron.push({ name: `${botName}: ${routine} ${tag}`, routine, tag, schedule: a.scheduleCron, timezone: a.timezone, prompt: pathNote + prompt,
         paused: !(activateRoutines && a.enabled), sourceEnabled: a.enabled, sourceId: a.id });
-    } else unscheduled.push(a);
+    } else unscheduled.push({ name: routine, prompt, trigger: a.trigger, enabled: a.enabled, triggerDetails: details });
   }
   const timezone = zones.size === 1 ? [...zones][0] : null;
-  if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c) => c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c) => `"${c.name.split(': ').slice(1).join(': ')}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. Resume one only after turning it off in Grok Bot, so it does not run twice.`);
+
+  const notes = [
+    `Migrated from Grok Bot "${botName}" on ${date}. Files from the Grok box are under ${boxRoot}; a path /home/box/X in older instructions or routines now means ${boxRoot}/home/box/X.`,
+    `The full Grok Bot conversation (${mainCount} messages, ${span}) is imported as the Hermes session "${mainTitle}"; use session_search to recall it. A readable copy is ${join(base, 'history', 'main.md')}.`,
+  ];
+  if (side) notes.push(`${side} side conversation(s) from Grok Bot are imported as Hermes sessions titled "Grok Bot · ${botName} · side conversation N"; readable copies are in ${join(base, 'history')}.`);
+  for (const t of open) notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${t.content}`);
+  if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c) => c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c) => `"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. Resume one only after turning it off in Grok Bot, so it does not run twice.`);
   if (unscheduled.length) notes.push(`Event-triggered Grok Bot routines not scheduled in Hermes: ${unscheduled.map((a) => `"${a.name}" (${a.trigger})`).join('; ')}. Their prompts are in ${join(base, 'routines-not-scheduled.md')}.`);
   if (zones.size > 1) notes.push('Grok routines used several time zones; Hermes cron uses one profile time zone. Check each job schedule.');
+  const memoryAll = [...memory, ...notes];
+  // Used instead of SOUL.md when the user customized theirs.
+  const roleEntry = instructions.trim() ? `Grok Bot role for ${botName}: ${instructions}` : null;
 
-  const files = cap.box.filter((b) => b.kind === 'file').map((b) => {
-    const { bytes, redacted } = cleanBytes(b.path);
-    return { ...b, dest: join(boxRoot, b.boxPath.replace(/^\/+/, '')), bytes, redacted, destSha256: redacted ? sha256(bytes) : b.sha256 };
-  });
-  for (const sk of skillPlan) for (const f of sk.files) Object.assign(f, cleanBytes(f.path));
-  const docs = new Map();
-  docs.set(join(base, 'history', 'main.md'), cleanBytes(mainRows ? mainRows.path.replace(/\.jsonl$/, '.md') : 'REPORT.md').bytes);
+  const files = [];
+  for (const b of cap.box) {
+    if (b.kind === 'symlink') { omit(b.boxPath, `symlink to ${b.target}; links are not recreated`, 'recreate it on this machine if it is still needed'); continue; }
+    if (b.kind !== 'file') continue;
+    const dest = destFor(boxRoot, b.boxPath.replace(/^\//, ''), b.boxPath);
+    const r = dest && cleanFile(b, b.boxPath);
+    if (r) files.push({ ...b, dest, bytes: r.bytes, redacted: r.count, destSha256: r.count ? sha256(r.bytes) : b.sha256 });
+  }
   docs.set(join(base, 'AGENTS.md'), Buffer.from(`# Migrated Grok Bot workspace: ${botName}\n\n${notes[0]}\n\nOpen tasks:\n${open.map((t) => `- ${t.content}`).join('\n') || '- none'}\n`));
   if (unscheduled.length) {
     docs.set(join(base, 'routines-not-scheduled.md'), Buffer.from(`# Grok Bot routines with event triggers\n\nHermes cron runs on a schedule; these were triggered by events in Grok Bot (GitHub, Slack, ...), so they were not created as cron jobs. Their full prompts are below.\n\n` +
-      unscheduled.map((a) => `## ${a.name}\n\n- Trigger: ${a.trigger}\n- Was enabled in Grok Bot: ${a.enabled}\n- Listeners: \`${a.triggerDetails}\`\n\n${redact(a.prompt)}\n`).join('\n')));
+      unscheduled.map((a) => `## ${a.name}\n\n- Trigger: ${a.trigger}\n- Was enabled in Grok Bot: ${a.enabled}\n- Listeners: \`${a.triggerDetails}\`\n\n${a.prompt}\n`).join('\n')));
   }
+  const connectors = cap.connectors.map((c) => clean(c.name)).filter((n) => n !== null);
   docs.set(join(base, 'grok-bot-export.json'), Buffer.from(JSON.stringify({ format: 'grok-bot-export', version: 1, bots: [{
-    name: botName, title: cap.bot.title, instructions: redact(cap.bot.instructions), memories: memory, user_facts: user,
-    // The archive keeps every skill folder; the official importer copies a folder given as `path`.
-    skills: skillPlan.map((s) => ({ name: s.slug, path: join(archive.root, ...dirname(s.files.find((f) => f.rel === 'SKILL.md').path).split('/')) })),
-    routines: cap.automations.map((a) => ({ name: a.name, instruction: redact(a.prompt), trigger: a.trigger, schedule_cron: a.scheduleCron,
-      schedule_text: a.scheduleText, timezone: a.timezone ?? '', paused: !a.enabled, skills: [], trigger_details: a.triggerDetails })),
-    apps: cap.connectors.map((c) => ({ name: c.name, mcp_url: '' })),
+    name: botName, title, instructions, memories: memory, user_facts: user,
+    // The official importer copies a folder given as `path`: only skill folders whose archive copy needed no redaction.
+    skills: historyPath === archive.root ? skillPlan.filter((s) => s.pristine)
+      .map((s) => ({ name: s.slug, path: join(archive.root, ...dirname(s.files.find((f) => f.rel === 'SKILL.md').path).split('/')) })) : [],
+    routines, apps: connectors.map((c) => ({ name: c, mcp_url: '' })),
   }] }, null, 2) + '\n'));
 
-  const notMigrated = [
-    ...unscheduled.map((a) => ({ item: `routine "${a.name}"`, reason: `event trigger (${a.trigger}); Hermes cron has no ${a.trigger} event source`, alternative: `prompt kept in ${join(base, 'routines-not-scheduled.md')}; run it on a schedule or from a webhook` })),
-    ...cap.skipped.map((s) => ({ item: s.boxPath, reason: s.reason,
-      alternative: /credential/.test(s.reason) ? 'sign in to that service on this machine (the file holds a login)' : /larger than/.test(s.reason) ? 'capture again with a higher --max-file-mb' : 'capture again' })),
-    ...(cap.connectors.length ? [{ item: 'connector logins', reason: 'OAuth grants cannot leave Grok Bot', alternative: 'connect the same apps in Hermes (hermes mcp / hermes setup)' }] : []),
-    { item: 'Grok Bot platform skills (managed/plugin)', reason: 'owned by the Grok Bot platform', alternative: 'Hermes bundled skills cover similar tasks' },
-    ...(cap.groups ?? []).map((g) => ({ item: `group chat "${g.name}"`, reason: 'a group is shared by several bots', alternative: 'migrate its members too; each becomes a Hermes profile, and profiles can work together on the Hermes kanban board' })),
-    { item: 'teammates (other Grok bots it could message)', reason: 'each bot is its own agent', alternative: 'migrate them too; each becomes a Hermes profile' },
-  ];
-  for (const [area, c] of Object.entries(cap.coverage)) {
-    if (c.status === 'failed') notMigrated.push({ item: area, reason: 'source read failed: ' + (c.reason ?? ''), alternative: 'capture again' });
+  // Everything else that was captured, with the reason it does not become part of the profile.
+  for (const a of unscheduled) omit(`routine "${a.name}"`, `event trigger (${a.trigger}); Hermes cron has no ${a.trigger} event source`, `prompt kept in ${join(base, 'routines-not-scheduled.md')}; run it on a schedule or from a webhook`);
+  for (const s of cap.skipped) omit(s.boxPath, s.reason,
+    /credential/.test(s.reason) ? 'sign in to that service on this machine (the file holds a login)' : /larger than/.test(s.reason) ? 'capture again with a higher --max-file-mb' : 'capture again');
+  for (const c of cap.connectors) omit(`connector "${c.name}"`, 'OAuth grants cannot leave Grok Bot', 'connect the same app in Hermes (hermes mcp / hermes setup)');
+  omit('Grok Bot platform skills (managed/plugin)', 'owned by the Grok Bot platform', 'Hermes bundled skills cover similar tasks');
+  const mappedSkills = new Set(skillPlan.flatMap((s) => [s.slug, skillName(s)]));
+  for (const s of cap.serverSkills ?? []) {
+    if (!mappedSkills.has(s.name)) omit(`skill "${s.name}"`, /managed|plugin/.test(s.source) ? 'owned by the Grok Bot platform' : 'listed by the server without a folder in the box store', 'its text is kept in the private archive (capture.json)');
   }
+  if (cap.tasks?.length) omit(`${cap.tasks.length} Grok Bot task record(s)`, 'task runs are Grok Bot platform state; Hermes has no import for them', 'they stay in the private archive (capture.json); open todos are carried over as memory notes');
+  // Older archives only counted subagents and server files in coverage.
+  const subagents = cap.subagents ?? [], subagentCount = subagents.length || (cap.coverage.subagents?.running ?? 0);
+  if (subagentCount) omit(`${subagentCount} Grok Bot subagent(s)${subagents.length ? ': ' + subagents.map((x) => x.name || x.id).join(', ') : ''}`, 'Grok Bot subagents have no Hermes equivalent', 'they stop with Grok Bot; Hermes starts its own subagents when needed');
+  if (cap.library?.length) omit(`${cap.library.length} library document(s): ${cap.library.map((d) => d.title).join(', ')}`, 'documents stay with their provider; Grok Bot library links cannot be reconnected from here', 'connect the provider in Hermes (hermes mcp); titles and URLs are in the private archive (capture.json)');
+  const serverFileCount = (cap.serverFiles ?? []).length || (cap.coverage.serverFiles?.count ?? 0);
+  if (serverFileCount) omit(`${serverFileCount} file(s) in the Grok Bot file list`, 'the server file list is a listing only', `the files come from the box store and are under ${boxRoot}`);
+  for (const r of cap.coverage.boxStore?.unresolvedReferences ?? []) omit(r, 'named by the bot but not in the box store', 'nothing to copy; recreate it if it is still needed');
+  for (const g of cap.groups ?? []) omit(`group chat "${g.name}"`, 'a group is shared by several bots', 'migrate its members too; each becomes a Hermes profile, and profiles can work together on the Hermes kanban board');
+  omit('teammates (other Grok bots it could message)', 'each bot is its own agent', 'migrate them too; each becomes a Hermes profile');
+  for (const [area, c] of Object.entries(cap.coverage)) {
+    if (c.status === 'failed') omit(area, 'source read failed: ' + (c.reason ?? ''), 'capture again');
+    else if (c.status === 'unavailable') omit(area, 'not readable with this login: ' + (c.reason ?? '') + (c.note ? ` (${c.note})` : ''), 'capture again with a login that can read it');
+  }
+  const shown = (v) => { const r = sanitize(v); return r.clean ? r.text : '[withheld: holds an encoded token-shaped value]'; };
 
   return {
-    target: 'hermes', profile: name, profileDir, base, boxRoot, timezone,
-    soul: `# ${botName}\n\nYou are ${botName}${cap.bot.title ? ' (' + cap.bot.title + ')' : ''}, migrated from Grok Bot to Hermes. Introduce yourself by this name and keep this role.\n\n${redact(cap.bot.instructions).trim()}\n`,
-    user, memory: memoryAll,
-    limits: { memory: limitFor(memoryAll, DEFAULT_MEMORY_LIMIT), user: limitFor(user, DEFAULT_USER_LIMIT) },
-    skills: skillPlan, cron, unscheduled: unscheduled.map((a) => a.name), history, files, docs, notMigrated,
-    open: open.map((t) => ({ id: t.id, content: redact(t.content) })),
-    redactedSecrets: redact.tally.count,
+    target: 'hermes', profile: name, profileDir, base, boxRoot, timezone, botName, historyPath,
+    soul: `# ${botName}\n\nYou are ${botName}${title ? ' (' + title + ')' : ''}, migrated from Grok Bot to Hermes. Introduce yourself by this name and keep this role.\n\n${instructions.trim()}\n`,
+    roleEntry, user, memory: memoryAll,
+    limits: { memory: limitFor(roleEntry ? [roleEntry, ...memoryAll] : memoryAll, DEFAULT_MEMORY_LIMIT), user: limitFor(user, DEFAULT_USER_LIMIT) },
+    skills: skillPlan, cron, unscheduled: unscheduled.map((a) => a.name), history, files, docs,
+    notMigrated: notMigrated.map((n) => ({ item: shown(n.item), reason: shown(n.reason), alternative: shown(n.alternative) })),
+    open: open.map((t) => ({ id: t.id, content: t.content })),
+    redactedSecrets,
   };
+}
+
+/** Last gate before anything is written or run: no token-shaped value anywhere in the plan. */
+function assertPlanClean(plan) {
+  const { files, skills, docs, ...rest } = plan;
+  assertNoSecrets(JSON.stringify(rest), 'the Hermes plan');
+  const text = (bytes) => bytes.toString(isText(bytes) ? 'utf8' : 'latin1');
+  for (const f of [...files, ...skills.flatMap((s) => s.files)]) assertNoSecrets(f.dest + '\n' + text(f.bytes), f.dest);
+  for (const [path, bytes] of docs) assertNoSecrets(path + '\n' + text(bytes), path);
 }
 
 /** Collapse many files skipped for the same reason into one line for the terminal. */
@@ -246,6 +378,7 @@ export class Hermes {
   }
 
   async run(args, opts = {}) {
+    assertNoSecrets(args.join('\n'), `hermes ${args.slice(0, 3).join(' ')}`);
     const r = await this.exec(this.bin, args, opts);
     if (r.code !== 0) {
       const tail = (r.stderr || r.stdout).trim().split('\n').slice(-4).join(' ').slice(0, 400);
@@ -277,22 +410,42 @@ export class Hermes {
   }
 
   async helper(op, payload, { home }) {
-    const raw = await this.run(['--print-runtime-command'], { timeoutMs: 60_000 });
-    let argv;
-    try { argv = JSON.parse(raw.trim()); } catch { throw new MigrationError('This Hermes cannot print its runtime command; update Hermes.'); }
-    const marker = "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)";
-    const code = argv[argv.length - 1];
-    if (!Array.isArray(argv) || argv[argv.length - 2] !== '-c' || !code.includes(marker)) throw new MigrationError('Unrecognized Hermes runtime command; update gbot or Hermes.');
-    const boot = code.replace(marker, 'exec(compile(sys.stdin.readline() and __import__("base64").b64decode(sys.argv[1]).decode(), "gbot-hermes-helper", "exec"))');
+    if (!this.runtime) {
+      const raw = await this.run(['--print-runtime-command'], { timeoutMs: 60_000 });
+      let argv;
+      try { argv = JSON.parse(raw.trim()); } catch { throw new MigrationError('This Hermes cannot print its runtime command; update Hermes.'); }
+      if (!Array.isArray(argv) || argv.length < 3 || argv.at(-2) !== '-c' || typeof argv.at(-1) !== 'string' || !argv.at(-1).includes(RUNTIME_MARKER)) {
+        throw new MigrationError('Unrecognized Hermes runtime command; update gbot or Hermes.');
+      }
+      this.runtime = argv;
+    }
+    const argv = this.runtime;
+    const boot = argv.at(-1).replace(RUNTIME_MARKER, 'exec(compile(sys.stdin.readline() and __import__("base64").b64decode(sys.argv[1]).decode(), "gbot-hermes-helper", "exec"))');
+    const input = JSON.stringify({ op, ...payload });
+    assertNoSecrets(input, `the Hermes helper ${op} payload`);
     // The helper source travels in argv as base64 (not secret); the payload goes on stdin.
     const args = [...argv.slice(1, -1), boot, Buffer.from(HERMES_HELPER).toString('base64')];
-    const r = await this.exec(argv[0], args, { input: '\n' + JSON.stringify({ op, ...payload }), env: { HERMES_HOME: home }, timeoutMs: 600_000 });
-    let parsed;
-    try { parsed = JSON.parse(r.stdout.trim().split('\n').pop()); } catch {
-      throw new MigrationError(`Hermes helper ${op} failed (exit ${r.code}): ${(r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`);
+    const r = await this.exec(argv[0], args, { input: '\n' + input, env: { HERMES_HOME: home }, timeoutMs: 600_000 });
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { /* reported below */ }
+    if (r.code !== 0 || parsed?.ok !== true) {
+      const why = typeof parsed?.error === 'string' ? parsed.error : (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400);
+      throw new MigrationError(`Hermes helper ${op} failed (exit ${r.code}): ${why}`);
     }
-    if (!parsed.ok) throw new MigrationError(`Hermes helper ${op}: ${parsed.error}`);
     return parsed;
+  }
+
+  /**
+   * Before any change: the runtime resolves and has every store the helper uses. `root` is the
+   * existing Hermes root (a new directory as HERMES_HOME would make Hermes provision a runtime there).
+   */
+  async preflight(root) {
+    const pf = await this.helper('preflight', {}, { home: root });
+    const limits = pf.import_limits ?? {};
+    if ((limits.session_messages ?? Infinity) < HISTORY_SESSION_MESSAGES || (limits.session_bytes ?? Infinity) < HISTORY_SESSION_BYTES) {
+      throw new MigrationError('This Hermes imports smaller sessions than gbot writes; update gbot or Hermes.');
+    }
+    return pf;
   }
 }
 
@@ -307,111 +460,163 @@ export async function inspectHermes(hermes, { profile }) {
 }
 
 /**
- * Create a file, or leave an identical one. A different existing file is a conflict, unless
- * `owned` (inside the folders this migration created in a profile it created): then a re-run
- * updates it, so a newer gbot can repair what an older run wrote.
+ * Write `bytes` to `path` under `root` without following links: every parent from `root` down is
+ * a real directory and an existing file is a regular file with one link. A new file is created
+ * exclusively; a different existing file is replaced only when `mayUpdate(currentSha256)` allows
+ * it, otherwise it is left as a 'conflict'. Returns 'written' | 'present' | 'updated' | 'conflict'.
  */
-function writeCreateOnly(path, bytes, mode = 0o600, owned = false) {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  if (existsSync(path)) {
-    const st = lstatSync(path);
-    if (!st.isFile() || st.isSymbolicLink()) throw new MigrationError('Refusing to write over a non-file: ' + path);
-    const current = readFileSync(path);
-    if (current.equals(bytes)) return 'present';
-    if (!owned) return 'conflict';
-    writeFileSync(path, bytes, { mode });
-    return 'updated';
+function writeInside(root, path, bytes, mode, mayUpdate) {
+  const parts = relative(root, path).split(sep);
+  if (parts.some((p) => !p || p === '..')) throw new MigrationError('Refusing to write outside the profile: ' + path);
+  let dir = realpathSync(root);
+  for (const part of parts.slice(0, -1)) {
+    dir = join(dir, part);
+    try { mkdirSync(dir, { mode: 0o700 }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || st.isSymbolicLink()) throw new MigrationError('Refusing to write through a link or a non-directory: ' + dir);
   }
-  writeFileSync(path, bytes, { mode, flag: 'wx' });
-  return 'written';
+  const target = join(dir, parts.at(-1));
+  let fd, status = 'written';
+  try { fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, mode); } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    const st = lstatSync(target);
+    if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1) throw new MigrationError('Refusing to write over a link or a non-file: ' + target);
+    const current = regularBytes(target, st.size);
+    if (current.equals(bytes)) return 'present';
+    if (!mayUpdate(sha256(current))) return 'conflict';
+    fd = openSync(target, constants.O_WRONLY | NOFOLLOW | (constants.O_NONBLOCK ?? 0));
+    status = 'updated';
+  }
+  try {
+    const st = fstatSync(fd), now = lstatSync(target);
+    // A parent or the file swapped for a link after the checks: nothing is written.
+    if (!st.isFile() || st.nlink !== 1 || st.ino !== now.ino || st.dev !== now.dev || realpathSync(dir) !== dir) {
+      throw new MigrationError('Refusing to write: the destination changed while writing ' + target);
+    }
+    ftruncateSync(fd, 0);
+    writeFileSync(fd, bytes);
+    fchmodSync(fd, mode);
+  } finally { closeSync(fd); }
+  return status;
 }
+
+function readMarker(path) {
+  try { return parseBytes(regularBytes(path, 16 * 1024 * 1024)); } catch { return null; }
+}
+
+/** The text Hermes compares when it decides whether SOUL.md is still its seeded default. */
+const normSoul = (t) => t.replace(/\r\n?/g, '\n').replace(/^﻿/, '').trim();
 
 /**
  * Apply a plan. Every step is idempotent: re-running after a failure resumes where it stopped.
- * `owned` must be true when the profile was created by this migration (state file), so an
- * existing user profile is only extended, never overwritten.
+ * A profile that already exists is only extended, never overwritten, unless this migration of
+ * this bot created it (marker); even then a file is repaired only while it still holds exactly
+ * what the migration last wrote there.
  */
 export async function applyHermes(hermes, archive, plan, { onProgress = () => {}, allowExisting = false } = {}) {
+  assertPlanClean(plan);
   const steps = [];
   const step = (name, status, detail = {}) => { steps.push({ step: name, status, ...detail }); onProgress(`${name}: ${status}`); };
   const dest = await inspectHermes(hermes, { profile: plan.profile });
-  if (dest.profileExists && !allowExisting) {
-    const marker = join(dest.profileDir, 'workspace', 'grok-bot', '.gbot-migration.json');
-    if (!existsSync(marker)) throw new MigrationError(`Hermes profile "${plan.profile}" already exists and was not created by this migration. Pass --profile NEW_NAME, or --into-existing to add to it.`);
+  const pf = await hermes.preflight(dest.root);
+  const botId = archive.capture.bot.id;
+  const markerPath = join(plan.base, MARKER);
+  const marker = dest.profileExists ? readMarker(markerPath) : null;
+  const ours = marker?.botId === botId;
+  const created = ours && marker.createdProfile === true;
+  if (dest.profileExists && !allowExisting && !created) {
+    throw new MigrationError(`Hermes profile "${plan.profile}" already exists and was not created by this migration of this bot. Pass --profile NEW_NAME, or --into-existing to add to it.`);
   }
   if (!dest.profileExists) {
-    await hermes.run(['profile', 'create', plan.profile, '--no-alias', '--description', `Migrated from Grok Bot: ${archive.capture.bot.name}`], { timeoutMs: 300_000 });
+    await hermes.run(['profile', 'create', plan.profile, '--no-alias', '--description', `Migrated from Grok Bot: ${plan.botName}`], { timeoutMs: 300_000 });
     step('profile', 'created', { profile: plan.profile });
   } else step('profile', 'exists', { profile: plan.profile });
   const profileDir = await hermes.profileDir(plan.profile);
   if (profileDir !== plan.profileDir) throw new MigrationError('The Hermes profile path differs from the plan; plan again.');
-  const markerPath = join(plan.base, '.gbot-migration.json');
-  const owned = !dest.profileExists || existsSync(markerPath);
-  if (!existsSync(markerPath)) writeCreateOnly(markerPath, Buffer.from(JSON.stringify({ botId: archive.capture.bot.id, createdProfile: !dest.profileExists, archive: archive.root, capturedAt: archive.capture.capturedAt }, null, 2) + '\n'));
+  const owned = !dest.profileExists || created;
+  // A marker of another bot is left as it is, and nothing of this run is recorded in it.
+  const record = marker && !ours ? null : { botId, createdProfile: owned, archive: plan.historyPath, capturedAt: archive.capture.capturedAt, files: { ...(ours ? marker.files : {}) } };
+  const key = (path) => relative(profileDir, path).split(sep).join('/');
+  const put = (path, bytes, mode = 0o600, mayUpdate = (sha) => owned && record?.files[key(path)] === sha) => {
+    const r = writeInside(profileDir, path, bytes, mode, mayUpdate);
+    if (record && r !== 'conflict') record.files[key(path)] = sha256(bytes);
+    return r;
+  };
+  const saveMarker = () => { if (record) writeInside(profileDir, markerPath, Buffer.from(JSON.stringify(record, null, 2) + '\n'), 0o600, () => true); };
+  saveMarker();
 
   if (plan.timezone) { await hermes.run(['-p', plan.profile, 'config', 'set', 'timezone', plan.timezone]); step('timezone', 'set', { timezone: plan.timezone }); }
-  if (plan.limits.memory > DEFAULT_MEMORY_LIMIT) await hermes.run(['-p', plan.profile, 'config', 'set', 'memory.memory_char_limit', String(plan.limits.memory)]);
-  if (plan.limits.user > DEFAULT_USER_LIMIT) await hermes.run(['-p', plan.profile, 'config', 'set', 'memory.user_char_limit', String(plan.limits.user)]);
-  step('memory-limits', 'set', plan.limits);
 
-  // SOUL.md: replace Hermes' seeded default only; keep a backup. A customized SOUL is left alone.
+  // SOUL.md: replace an empty SOUL or exactly Hermes' seeded default (kept as a backup), or repair
+  // the one this migration wrote. A customized SOUL is left alone; the role goes to MEMORY.md.
   const soulPath = join(profileDir, 'SOUL.md');
-  const currentSoul = existsSync(soulPath) ? readFileSync(soulPath, 'utf8') : '';
-  if (currentSoul === plan.soul) step('soul', 'present');
-  else if (!currentSoul.trim() || currentSoul.startsWith('You are Hermes Agent, built by Nous Research.')) {
-    if (currentSoul) writeFileSync(soulPath + '.bak.grok-bot', currentSoul, { mode: 0o600 });
-    writeFileSync(soulPath, plan.soul, { mode: 0o600 });
+  const soulBytes = existsSync(soulPath) ? readFileSync(soulPath) : Buffer.alloc(0);
+  const currentSoul = soulBytes.toString('utf8');
+  const seeded = !currentSoul.trim() || (pf.default_souls ?? []).includes(normSoul(currentSoul));
+  let roleInMemory = false;
+  if (currentSoul === plan.soul) { put(soulPath, soulBytes); step('soul', 'present'); }
+  else if (seeded || (owned && record?.files['SOUL.md'] === sha256(soulBytes))) {
+    if (seeded && currentSoul.trim()) put(soulPath + '.bak.grok-bot', soulBytes, 0o600, () => false);
+    put(soulPath, Buffer.from(plan.soul), 0o600, () => true);
     step('soul', 'written');
   } else {
-    plan.memory.unshift(`Grok Bot role for ${archive.capture.bot.name}: ${archive.capture.bot.instructions}`);
+    roleInMemory = plan.roleEntry !== null;
     step('soul', 'kept-existing', { note: 'SOUL.md was customized; the role was added to MEMORY.md instead' });
   }
 
+  // Limits fit what the profile already holds plus everything added now.
+  const before = await hermes.helper('readback', { foreign_ids: [] }, { home: profileDir });
+  const memory = roleInMemory ? [plan.roleEntry, ...plan.memory] : plan.memory;
+  const union = (have, add) => [...have, ...add.filter((e) => !have.includes(e))];
+  const limits = {
+    memory: limitFor(union(before.memory, memory), Math.max(DEFAULT_MEMORY_LIMIT, before.limits.memory)),
+    user: limitFor(union(before.user, plan.user), Math.max(DEFAULT_USER_LIMIT, before.limits.user)),
+  };
+  if (limits.memory > before.limits.memory) await hermes.run(['-p', plan.profile, 'config', 'set', 'memory.memory_char_limit', String(limits.memory)]);
+  if (limits.user > before.limits.user) await hermes.run(['-p', plan.profile, 'config', 'set', 'memory.user_char_limit', String(limits.user)]);
+  step('memory-limits', 'set', limits);
   const mem = await hermes.helper('memory-add', {
-    memory_char_limit: plan.limits.memory, user_char_limit: plan.limits.user,
-    entries: [...plan.user.map((c) => ({ target: 'user', content: c })), ...plan.memory.map((c) => ({ target: 'memory', content: c }))],
+    memory_char_limit: limits.memory, user_char_limit: limits.user,
+    entries: [...plan.user.map((c) => ({ target: 'user', content: c })), ...memory.map((c) => ({ target: 'memory', content: c }))],
   }, { home: profileDir });
   const refused = mem.results.filter((r) => r.status === 'refused');
   step('memory', refused.length ? 'partial' : 'done', { added: mem.results.filter((r) => r.status === 'added').length, present: mem.results.filter((r) => r.status === 'present').length, refused });
 
-  let skillWritten = 0, skillConflicts = [];
+  const fileMode = (f) => ((f.mode ?? 0o644) & 0o111 ? 0o700 : 0o600);
+  let skillWritten = 0; const skillConflicts = [];
   for (const s of plan.skills) {
     for (const f of s.files) {
-      const r = writeCreateOnly(join(s.dir, f.rel), f.bytes ?? archive.read(f.path), (f.mode ?? 0o644) & 0o111 ? 0o700 : 0o600, owned);
+      const r = put(f.dest, f.bytes, fileMode(f));
       if (r === 'written' || r === 'updated') skillWritten++;
-      if (r === 'conflict') skillConflicts.push(join(s.dir, f.rel));
+      if (r === 'conflict') skillConflicts.push(f.dest);
     }
   }
   step('skills', skillConflicts.length ? 'partial' : 'done', { skills: plan.skills.length, filesWritten: skillWritten, conflicts: skillConflicts });
 
   let fileWritten = 0; const fileConflicts = [];
   for (const f of plan.files) {
-    const r = writeCreateOnly(f.dest, f.bytes, (f.mode ?? 0o644) & 0o111 ? 0o700 : 0o600, owned);
+    const r = put(f.dest, f.bytes, fileMode(f));
     if (r === 'written' || r === 'updated') fileWritten++;
     if (r === 'conflict') fileConflicts.push(f.dest);
   }
-  for (const [path, bytes] of plan.docs) {
-    const r = writeCreateOnly(path, bytes, 0o600, owned);
-    if (r === 'conflict') fileConflicts.push(path);
-  }
+  for (const [path, bytes] of plan.docs) if (put(path, bytes) === 'conflict') fileConflicts.push(path);
+  saveMarker();
   step('files', fileConflicts.length ? 'partial' : 'done', { files: plan.files.length, written: fileWritten, docs: plan.docs.size, conflicts: fileConflicts });
 
-  const before = await hermes.helper('readback', { foreign_ids: [] }, { home: profileDir });
-  const existingJobs = new Set(before.cron.map((j) => j.name));
-  let created = 0;
+  let jobsCreated = 0;
   for (const job of plan.cron) {
-    if (existingJobs.has(job.name)) continue;
+    if (before.cron.some((j) => String(j.name ?? '').endsWith(job.tag))) continue;
     const args = ['-p', plan.profile, 'cron', 'create', '--name', job.name, '--workdir', plan.base];
     if (job.paused) args.push('--paused', '--paused-reason', job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
     args.push(job.schedule, job.prompt);
     await hermes.run(args, { timeoutMs: 120_000 });
-    created++;
+    jobsCreated++;
   }
-  step('cron', 'done', { jobs: plan.cron.length, created });
+  step('cron', 'done', { jobs: plan.cron.length, created: jobsCreated });
 
   const hist = await hermes.helper('import-history', {
     profile: plan.profile,
-    sessions: plan.history.map((s) => ({ ...s, path: archive.root, cwd: plan.base })),
+    sessions: plan.history.map(({ digest, ...s }) => ({ ...s, path: plan.historyPath, cwd: plan.base })),
   }, { home: profileDir });
   step('history', 'done', { sessions: hist.results });
 
@@ -424,24 +629,27 @@ export async function verifyHermes(hermes, archive, plan) {
   const check = (area, ok, detail = {}) => checks.push({ area, ok, ...detail });
   const profileDir = await hermes.profileDir(plan.profile);
   const soul = existsSync(join(profileDir, 'SOUL.md')) ? readFileSync(join(profileDir, 'SOUL.md'), 'utf8') : '';
-  check('role', soul === plan.soul, { where: 'SOUL.md' });
-  const rb = await hermes.helper('readback', {
-    memory_char_limit: plan.limits.memory, user_char_limit: plan.limits.user,
-    foreign_ids: plan.history.map((s) => s.foreign_id), history_path: archive.root,
-  }, { home: profileDir });
+  // Read with the profile's configured limits, as the agent loads its memory.
+  const rb = await hermes.helper('readback', { foreign_ids: plan.history.map((s) => s.foreign_id), history_path: plan.historyPath }, { home: profileDir });
+  check('role', soul === plan.soul || (plan.roleEntry !== null && rb.memory.includes(plan.roleEntry)), { where: soul === plan.soul ? 'SOUL.md' : 'MEMORY.md' });
   const missingUser = plan.user.filter((e) => !rb.user.includes(e));
-  const missingMem = plan.memory.filter((e) => !rb.memory.includes(e) && !e.startsWith('Grok Bot role for '));
+  const missingMem = plan.memory.filter((e) => !rb.memory.includes(e));
   check('user-facts', !missingUser.length && !rb.user_prompt.includes('[BLOCKED'), { expected: plan.user.length, missing: missingUser });
   check('memory', !missingMem.length && !rb.memory_prompt.includes('[BLOCKED'), { expected: plan.memory.length, missing: missingMem });
-  const missingSkills = plan.skills.filter((s) => !rb.skills.includes(s.slug) && !rb.skills.includes(skillName(archive, s)));
+  const missingSkills = plan.skills.filter((s) => !rb.skills.includes(s.slug) && !rb.skills.includes(skillName(s)));
   check('skills', !missingSkills.length, { expected: plan.skills.length, visibleToHermes: plan.skills.length - missingSkills.length, missing: missingSkills.map((s) => s.slug) });
-  const jobs = new Map(rb.cron.map((j) => [j.name, j]));
   const cronIssues = [];
   for (const job of plan.cron) {
-    const j = jobs.get(job.name);
-    if (!j) { cronIssues.push(`${job.name}: missing`); continue; }
-    if (job.paused && j.state !== 'paused') cronIssues.push(`${job.name}: expected paused, is ${j.state}`);
-    if (j.prompt !== job.prompt) cronIssues.push(`${job.name}: prompt differs`);
+    const found = rb.cron.filter((j) => String(j.name ?? '').endsWith(job.tag));
+    if (!found.length) { cronIssues.push(`${job.routine}: missing`); continue; }
+    if (found.length > 1) cronIssues.push(`${job.routine}: ${found.length} jobs for one routine`);
+    const j = found[0];
+    const expr = j.schedule?.expr ?? j.schedule;
+    if (expr !== job.schedule) cronIssues.push(`${job.routine}: schedule is ${typeof expr === 'string' ? expr : JSON.stringify(expr)}, expected ${job.schedule}`);
+    if (job.timezone && rb.timezone !== job.timezone) cronIssues.push(`${job.routine}: profile time zone is ${rb.timezone || 'server local'}, expected ${job.timezone}`);
+    const want = job.paused ? 'paused' : 'scheduled';
+    if (j.state !== want) cronIssues.push(`${job.routine}: ${j.state}, expected ${want}`);
+    if (j.prompt !== job.prompt) cronIssues.push(`${job.routine}: prompt differs`);
   }
   check('schedules', !cronIssues.length, { expected: plan.cron.length, issues: cronIssues });
   const histIssues = [];
@@ -449,6 +657,7 @@ export async function verifyHermes(hermes, archive, plan) {
     const got = rb.sessions.find((r) => r.foreign_id === s.foreign_id);
     if (!got?.session_id) histIssues.push(`${s.foreign_id}: not imported`);
     else if (got.messages !== s.messages.length) histIssues.push(`${s.foreign_id}: ${got.messages}/${s.messages.length} messages`);
+    else if (got.digest !== s.digest) histIssues.push(`${s.foreign_id}: message content differs from the archive`);
   }
   check('history', !histIssues.length, { sessions: plan.history.length, messages: plan.history.reduce((n, s) => n + s.messages.length, 0), issues: histIssues });
   const fileIssues = [];
@@ -460,16 +669,12 @@ export async function verifyHermes(hermes, archive, plan) {
   return { ok: checks.every((c) => c.ok), checks };
 }
 
-function skillName(archive, s) {
-  const row = s.files.find((f) => f.rel === 'SKILL.md');
-  const text = row ? archive.read(row.path).toString('utf8') : '';
-  return /^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(text)?.[1]?.trim() ?? s.slug;
-}
-
-// Words any assistant already knows; a keyword check on them proves nothing.
 /** Lowercase letters and digits only, so squash-merge matches "squash merge". */
 const norm = (t) => String(t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+/** `alt` appears in `text`, verbatim (any case) or with punctuation and spacing ignored. */
+const mentions = (text, alt) => text.toLowerCase().includes(alt.toLowerCase()) || Boolean(norm(alt) && norm(text).includes(norm(alt)));
 
+// Words any assistant already knows; a keyword check on them proves nothing.
 const COMMON_TOKENS = new Set(['github', 'gitlab', 'chatgpt', 'openai', 'google', 'youtube', 'linkedin', 'iphone', 'ipad', 'javascript',
   'typescript', 'whatsapp', 'ios', 'macos', 'json', 'yaml', 'http', 'https', 'url', 'api', 'pdf', 'grok', 'hermes', 'muse', 'slack', 'telegram']);
 
@@ -517,37 +722,51 @@ export function skillDescription(text) {
 
 /**
  * Behavioral acceptance: ask the migrated Hermes agent questions only the migrated data can
- * answer, and check the answers. Each question is one real model call.
+ * answer, and check the answers. Each question is one real model call. Questions are built from
+ * the plan (redacted data), and a keyword the question itself contains never counts.
  */
 export function acceptanceQuestions(archive, plan) {
   const qs = [];
-  const name = archive.capture.bot.name.split(' · ')[0];
-  qs.push({ area: 'role', prompt: 'In one sentence: what is your name and your job? Answer in English.', expect: [name] });
+  const fresh = (prompt, tokens) => tokens.filter((t) => !(Array.isArray(t) ? t : [t]).some((alt) => mentions(prompt, alt)));
+  // False when no expected keyword is left: the caller then tries another source item.
+  const ask = (q) => {
+    const expect = fresh(q.prompt, q.expect);
+    if (!expect.length) return false;
+    qs.push({ ...q, expect, ...(q.min ? { min: Math.min(q.min, expect.length) } : {}) });
+    return true;
+  };
+  const name = plan.botName.split(' · ')[0];
+  ask({ area: 'role', prompt: 'In one sentence: what is your name and your job? Answer in English.', expect: [name] });
   const facts = [...new Set(plan.user.map((f) => distinctiveTokens(f, 1)[0]).filter(Boolean))].slice(0, 4);
-  if (facts.length) qs.push({ area: 'user-facts', prompt: 'List every fact you remember about the user, one per line, verbatim.', expect: facts, min: Math.max(1, Math.ceil(facts.length * 0.75)) });
-  if (plan.cron.length) qs.push({ area: 'schedules', prompt: 'Which of your Grok Bot routines became Hermes cron jobs, and is each one paused or active? One line per routine with its exact name.', expect: [...plan.cron.map((c) => c.name.split(': ').slice(1).join(': ')), ...(plan.cron.some((c) => c.paused) ? [['paused', '暫停', '暂停', 'pausiert', 'en pause']] : [])] });
+  if (facts.length) ask({ area: 'user-facts', prompt: 'List every fact you remember about the user, one per line, verbatim.', expect: facts, min: Math.max(1, Math.ceil(facts.length * 0.75)) });
+  if (plan.cron.length) ask({ area: 'schedules', prompt: 'Which of your Grok Bot routines became Hermes cron jobs, and what state is each one in right now? One line per routine with its exact name.', expect: [...plan.cron.map((c) => c.routine), ...(plan.cron.some((c) => c.paused) ? [['paused', '暫停', '暂停', 'pausiert', 'en pause']] : [])] });
   const openTokens = plan.open.flatMap((t) => distinctiveTokens(t.content, 1)).slice(0, 4);
-  if (openTokens.length) qs.push({ area: 'open-tasks', prompt: 'Which open tasks did you carry over from Grok Bot? Reply with each task on one line.', expect: openTokens });
-  const lastUser = [...(plan.history.at(-1)?.messages ?? [])].reverse().find((m) => m.role === 'user' && distinctiveTokens(m.content, 2).length);
-  if (lastUser) qs.push({ area: 'history', prompt: 'Search your imported Grok Bot conversation history (session_search) and quote, verbatim, the most recent message from the user that mentions ' + JSON.stringify(distinctiveTokens(lastUser.content, 1)[0]) + '. Quote at least its first 120 characters.', expect: distinctiveTokens(lastUser.content, 2) });
+  if (openTokens.length) ask({ area: 'open-tasks', prompt: 'Which open tasks did you carry over from Grok Bot? Reply with each task on one line.', expect: openTokens });
+  // The newest user message, or an older one named by a keyword no newer message contains.
+  const users = plan.history.filter((s) => s.foreign_id.startsWith(`${archive.capture.bot.id}:main:`)).flatMap((s) => s.messages).filter((m) => m.role === 'user').reverse().slice(0, 200);
+  for (const [i, m] of users.entries()) {
+    const tokens = distinctiveTokens(m.content, 3);
+    if (i === 0) {
+      const prompt = 'Search your imported Grok Bot conversation history (session_search) and quote, verbatim, the most recent message the user sent there. Quote at least its first 120 characters.';
+      if (ask({ area: 'history', prompt, expect: fresh(prompt, tokens).slice(0, 2) })) break;
+    } else if (tokens.length > 1 && !users.slice(0, i).some((n) => n.content.includes(tokens[0]))) {
+      const prompt = 'Search your imported Grok Bot conversation history (session_search) and quote, verbatim, the most recent message from the user that mentions ' + JSON.stringify(tokens[0]) + '. Quote at least its first 120 characters.';
+      if (ask({ area: 'history', prompt, expect: fresh(prompt, tokens.slice(1)).slice(0, 1) })) break;
+    }
+  }
   // A migrated skill must be loadable by the agent's own skills tool.
   for (const sk of plan.skills) {
-    const row = sk.files.find((f) => f.rel === 'SKILL.md');
-    const text = row ? archive.read(row.path).toString('utf8') : '';
-    const desc = skillDescription(text);
-    const token = distinctiveTokens(desc, 1)[0];
-    if (!token) continue;
-    qs.push({ area: 'skills', prompt: `Use your skills tool to open the skill "${skillName(archive, sk)}" and quote its description exactly.`, expect: [token] });
-    break;
+    const prompt = `Use your skills tool to open the skill "${skillName(sk)}" and quote its description exactly.`;
+    const desc = skillDescription(sk.files.find((f) => f.rel === 'SKILL.md').bytes.toString('utf8'));
+    if (ask({ area: 'skills', prompt, expect: fresh(prompt, distinctiveTokens(desc, 3)).slice(0, 1) })) break;
   }
   // A file the bot's own prompts name: find a line with a distinctive token and ask for its line number.
-  for (const f of plan.files.filter((x) => x.reason === 'referenced' && x.size < 64 * 1024)) {
+  files: for (const f of plan.files.filter((x) => x.reason === 'referenced' && x.size < 64 * 1024)) {
     const lines = f.bytes.toString('utf8').split('\n');
-    const index = lines.findIndex((l, i) => i > 0 && i < 40 && distinctiveTokens(l, 1).length);
-    if (index < 0) continue;
-    const token = distinctiveTokens(lines[index], 1)[0];
-    qs.push({ area: 'files', prompt: `Open the file ${f.dest} (migrated from the Grok box path ${f.boxPath}). Copy line ${index + 1} of it exactly, and nothing else.`, expect: [token] });
-    break;
+    for (let index = 1; index < Math.min(40, lines.length); index++) {
+      const prompt = `Open the file ${f.dest} (migrated from the Grok box path ${f.boxPath}). Copy line ${index + 1} of it exactly, and nothing else.`;
+      if (ask({ area: 'files', prompt, expect: fresh(prompt, distinctiveTokens(lines[index], 3)).slice(0, 1) })) break files;
+    }
   }
   return qs;
 }
@@ -564,9 +783,7 @@ export async function acceptHermes(hermes, archive, plan, { onProgress = () => {
       if (usageDir) args.push('--usage-file', join(usageDir, `acceptance-${q.area}-${attempt}.json`));
       let answer = '', error = null;
       try { answer = await hermes.run(args, { timeoutMs: 600_000, cwd: plan.base }); } catch (e) { error = e.message; }
-      const lower = answer.toLowerCase();
-      const flat = norm(answer);
-      const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => lower.includes(alt.toLowerCase()) || (norm(alt) && flat.includes(norm(alt)))));
+      const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => mentions(answer, alt)));
       const need = q.min ?? q.expect.length;
       attempts.push({ answer: answer.trim().slice(0, 2000), hits, error, ok: !error && hits.length >= need });
       if (attempts.at(-1).ok) break;

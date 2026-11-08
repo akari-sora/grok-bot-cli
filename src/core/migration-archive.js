@@ -6,6 +6,8 @@ import { ARCHIVE_FORMAT, ARCHIVE_VERSION } from './migration-capture.js';
 import { MigrationError, directory, parseBytes, privateWrite, regularBytes, safeRelative } from './migration.js';
 
 const MAX_ARCHIVE_FILE = 512 * 1024 * 1024;
+const MAX_ARCHIVE_TOTAL = 2 * 1024 * 1024 * 1024;
+const BOX_PATH = /^\/(?!.*(?:^|\/)\.\.?(?:\/|$))[^\0\\]+$/;
 const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 const json = (v) => JSON.stringify(v, null, 2) + '\n';
 const fail = (m) => { throw new MigrationError(m); };
@@ -58,6 +60,7 @@ export function captureFiles(cap) {
   const boxIndex = [];
   for (const f of cap.files) {
     if (f.kind === 'symlink') { boxIndex.push({ boxPath: f.boxPath, kind: 'symlink', target: f.target, reason: f.reason }); continue; }
+    if (!BOX_PATH.test(f.boxPath)) fail('Unsafe box path: ' + JSON.stringify(f.boxPath));
     const path = archivePathFor(f.boxPath);
     if (sha256(f.bytes) !== f.sha256) fail('Box file digest changed in memory: ' + f.boxPath);
     add(path, f.bytes);
@@ -105,18 +108,10 @@ export function openArchive(path) {
     if (!safeRelative(row.path) || wanted.has(row.path) || !/^[0-9a-f]{64}$/.test(row.sha256 ?? '') || !Number.isSafeInteger(row.bytes)) fail('Invalid archive index.');
     wanted.set(row.path, row);
   }
-  const cache = new Map();
-  const read = (p) => {
-    const row = wanted.get(p);
-    if (!row) fail('Not in the archive: ' + p);
-    if (cache.has(p)) return cache.get(p);
-    const bytes = regularBytes(join(root, ...p.split('/')), Math.min(row.bytes, MAX_ARCHIVE_FILE));
-    if (bytes.length !== row.bytes || sha256(bytes) !== row.sha256) fail('Archive checksum mismatch: ' + p);
-    cache.set(p, bytes);
-    return bytes;
-  };
-  for (const p of wanted.keys()) read(p);
-  // No untracked files.
+  let total = 0;
+  for (const row of wanted.values()) total += row.bytes;
+  if (total > MAX_ARCHIVE_TOTAL) fail('The archive is larger than gbot reads (' + total + ' bytes).');
+  // Layout first: no symlink, untracked file or directory anywhere, before any file is read.
   const dirs = new Set();
   for (const p of [...wanted.keys(), 'manifest.json']) { const parts = p.split('/'); for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join('/')); }
   const walk = (rel = '') => {
@@ -128,7 +123,25 @@ export function openArchive(path) {
     }
   };
   walk();
+  const cache = new Map();
+  const read = (p) => {
+    const row = wanted.get(p);
+    if (!row) fail('Not in the archive: ' + p);
+    if (cache.has(p)) return cache.get(p);
+    const bytes = regularBytes(join(root, ...p.split('/')), Math.min(row.bytes, MAX_ARCHIVE_FILE));
+    if (bytes.length !== row.bytes || sha256(bytes) !== row.sha256) fail('Archive checksum mismatch: ' + p);
+    cache.set(p, bytes);
+    return bytes;
+  };
+  for (const p of wanted.keys()) read(p);
   const capture = parseBytes(read('capture.json'));
+  // Destinations build paths from these fields: they must be what writeArchive produced.
+  if (!Array.isArray(capture?.box) || !Array.isArray(capture.transcripts)) fail('Invalid capture.json.');
+  for (const b of capture.box) {
+    if (typeof b?.boxPath !== 'string' || !BOX_PATH.test(b.boxPath)) fail('Unsafe box path in capture.json: ' + JSON.stringify(b?.boxPath));
+    if (b.kind === 'file' && !wanted.has(b.path)) fail('capture.json names a file that is not in the archive.');
+  }
+  for (const t of capture.transcripts) if (!wanted.has(t.path)) fail('capture.json names a transcript that is not in the archive.');
   const transcript = (t) => read(t.path).toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const boxFile = (boxPath) => {
     const row = capture.box.find((b) => b.boxPath === boxPath && b.kind === 'file');

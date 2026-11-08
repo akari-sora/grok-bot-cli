@@ -12,7 +12,6 @@ import { openLiveCapture } from './migration-source.js';
 import { Hermes, acceptHermes, applyHermes, buildHermesPlan, inspectHermes, summarizeHermesPlan, verifyHermes } from './migration-hermes.js';
 import { MigrationError } from './migration.js';
 
-export const FLOW_TARGETS = Object.freeze(['hermes', 'muse', 'dot']);
 const progress = (text) => process.stderr.write(`gbot migrate: ${text}\n`);
 
 export function migrationsHome(env = process.env) {
@@ -78,8 +77,15 @@ function reportPath(archiveRoot, to, profile) {
   return join(dirname(archiveRoot), `${basename(archiveRoot)}.${to}-${profile}.report.json`);
 }
 
+const hermesSkills = (skills = 'all') => {
+  if (skills !== 'all' && skills !== 'none') throw new MigrationError('For Hermes, --skills is all or none (the whole skill folders are copied).');
+  return skills;
+};
+const trinityOpts = ({ via, history, skills, folder }) => ({ via, history, skills, folder });
+
 /** @param {{archive: string, profile?: string, skills?: string, activateRoutines?: boolean, hermes?: any}} opts */
-async function hermesContext({ archive, profile, skills, activateRoutines = false, hermes }) {
+async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, hermes }) {
+  const skills = hermesSkills(wanted);
   const opened = openArchive(archive);
   const h = hermes ?? new Hermes();
   const name = profile ?? buildHermesPlan(opened, { profileDir: '/', skills }).profile;
@@ -98,22 +104,22 @@ function planFacts(plan) {
   };
 }
 
-/** @param {{archive: string, to: string, profile?: string, skills?: string, activateRoutines?: boolean}} opts */
-export async function previewMigration({ archive, to, profile, skills = 'all', activateRoutines = false }) {
+/** @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, activateRoutines?: boolean}} opts */
+export async function previewMigration({ archive, to, profile, skills, via, history, folder, activateRoutines = false }) {
   if (to !== 'hermes') {
     const { previewTrinity } = await import('./migration-trinity.js');
-    return previewTrinity({ archive, to, activateRoutines });
+    return previewTrinity({ archive, to, activateRoutines, ...trinityOpts({ via, history, skills, folder }) });
   }
   const { dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   return { exitCode: 0, to, destination: dest, summary: summarizeHermesPlan(plan, dest), plan: planFacts(plan) };
 }
 
-/** @param {{archive: string, to: string, profile?: string, skills?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
-export async function importMigration({ archive, to, profile, skills = 'all', yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
+/** @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
+export async function importMigration({ archive, to, profile, skills, via, history, folder, yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
   if (!yes) throw new MigrationError('Review gbot migrate preview first, then pass --yes to import.');
   if (to !== 'hermes') {
     const { importTrinity } = await import('./migration-trinity.js');
-    return importTrinity({ archive, to, accept, activateRoutines, onProgress });
+    return importTrinity({ archive, to, accept, activateRoutines, onProgress, ...trinityOpts({ via, history, skills, folder }) });
   }
   const { opened, hermes, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   const applied = await applyHermes(hermes, opened, plan, { onProgress, allowExisting: intoExisting });
@@ -129,11 +135,16 @@ export async function importMigration({ archive, to, profile, skills = 'all', ye
   return { ...report, report: path };
 }
 
-/** @param {{archive: string, to: string, profile?: string, skills?: string, accept?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
-export async function checkMigration({ archive, to, profile, skills = 'all', accept = false, activateRoutines = false, onProgress = progress }) {
+/**
+ * Read the destination back (and with accept, ask again). Never delivers: for Muse/dot it runs
+ * trinity-cli migrate --check-only, so a step that was not delivered is reported, not sent.
+ * Use the same --via/--history/--skills/--folder as the import.
+ * @param {{archive: string, to: string, profile?: string, skills?: string, via?: string, history?: string, folder?: string, accept?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts
+ */
+export async function checkMigration({ archive, to, profile, skills, via, history, folder, accept = false, activateRoutines = false, onProgress = progress }) {
   if (to !== 'hermes') {
     const { checkTrinity } = await import('./migration-trinity.js');
-    return checkTrinity({ archive, to, accept, activateRoutines, onProgress });
+    return checkTrinity({ archive, to, accept, activateRoutines, onProgress, ...trinityOpts({ via, history, skills, folder }) });
   }
   const { opened, hermes, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   const verified = await verifyHermes(hermes, opened, plan);
@@ -146,14 +157,14 @@ export async function checkMigration({ archive, to, profile, skills = 'all', acc
 }
 
 /** Capture, preview and (with --yes) import, verify and accept, in one command. */
-/** @param {{account?: string, bot: string, to: string, profile?: string, out?: string, maxFileMb?: number, skills?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
-export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills = 'all', yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
+/** @param {{account?: string, bot: string, to: string, profile?: string, out?: string, maxFileMb?: number, skills?: string, via?: string, history?: string, folder?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
+export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
   const captured = await captureToArchive({ account, bot, out, maxFileMb, onProgress });
-  const preview = await previewMigration({ archive: captured.archive, to, profile, skills, activateRoutines });
+  const preview = await previewMigration({ archive: captured.archive, to, profile, skills, via, history, folder, activateRoutines });
   if (!yes) {
     return { exitCode: 0, stage: 'preview', captured, preview,
-      next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''} --yes` };
+      next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''} --yes` };
   }
-  const imported = await importMigration({ archive: captured.archive, to, profile, skills, yes, accept, intoExisting, activateRoutines, onProgress });
+  const imported = await importMigration({ archive: captured.archive, to, profile, skills, via, history, folder, yes, accept, intoExisting, activateRoutines, onProgress });
   return { exitCode: imported.exitCode, stage: 'imported', captured, preview: { summary: preview.summary }, imported };
 }

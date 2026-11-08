@@ -23,6 +23,8 @@ export const DEFAULT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 const MAX_TRANSCRIPT_PAGES = 2000;
 const BLOB_BATCH = 8;
 const MANIFEST_RANGE = 8 * 1024 * 1024;
+// The Grok Bot app reads the store 8 requests at a time (node-agent-coordinator readBlobs, n$ = 8)
+// and pages transcripts at 500 + 1 rows (cH = 500); capture does the same.
 const MANIFEST_PARALLEL = 8;
 const MAX_MANIFEST_BYTES = 1024 * 1024 * 1024;
 
@@ -96,8 +98,10 @@ export function normalizeEntry(row, body) {
 }
 
 /**
- * Read every transcript row of one session, newest page first, until a short page. The server
- * caps a page at 500 rows; `limit + 1` tells whether more rows exist, as the desktop app does.
+ * Read every transcript row of one session, newest page first. A short page does not prove the
+ * end (the server may cap a page below the requested limit), so paging stops only at an empty
+ * page or at seq 1. Pages are disjoint by `beforeSeq`; a repeated seq with other content means
+ * the transcript changed during the read.
  */
 export async function readFullTranscript({ rpc, readBlobs, agentId, sessionId = '' }) {
   const rows = new Map();
@@ -117,10 +121,12 @@ export async function readFullTranscript({ rpc, readBlobs, agentId, sessionId = 
     for (const e of entries) {
       const seq = num(e.seq);
       if (seq === null) throw new MigrationError('Transcript row without a sequence number.');
-      if (!rows.has(seq)) rows.set(seq, e);
+      const seen = rows.get(seq);
+      if (seen && JSON.stringify(seen) !== JSON.stringify(e)) throw new MigrationError(`Transcript row ${seq} changed during the read; run the capture again.`);
+      rows.set(seq, e);
       min = Math.min(min, seq);
     }
-    if (entries.length <= TRANSCRIPT_PAGE || !Number.isFinite(min) || min <= 1) break;
+    if (!entries.length || min <= 1) break;
     if (beforeSeq !== undefined && min >= beforeSeq) throw new MigrationError('Transcript pagination did not advance.');
     beforeSeq = min;
   }
@@ -177,16 +183,22 @@ export async function readStoreManifest({ presign, fetchImpl = fetch }) {
 }
 
 // Never exported, even when a prompt names them.
-const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|jks|keystore)|id_[a-z0-9]+|auth\.json|credentials?[^/]*|\.netrc|\.git-credentials|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
-const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;
+const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
+const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.azure|\.oci|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|\.config\/rclone|\.config\/hub|\.config\/op|\.config\/doctl|\.local\/share\/keyrings|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;
+// A best-effort name list, not a guarantee: content is redacted separately (migration-redact.js).
 export const isSecretPath = (p) => SECRET_PATH.test(p) || SECRET_DIR.test(p);
 
 /** Box paths a bot owns or names, from the manifest. Returns [{path, entry, reason}]. */
+const UNSAFE_PATH = /(^\/|\\|\0|(^|\/)\.\.?(\/|$))/;
+export const isUnsafeBoxPath = (p) => typeof p !== 'string' || !p || UNSAFE_PATH.test(p);
+
 export function selectBoxFiles(entries, { agentId, referenced = [], skillDirs = [], projects = [] }) {
   const picks = new Map();
+  // The same bytes under a credential path and under an ordinary name are still a credential.
+  const secretShas = new Set(Object.entries(entries).filter(([p, e]) => isSecretPath(p) && e?.sha).map(([, e]) => e.sha));
   const add = (path, reason) => {
     const entry = entries[path];
-    if (!entry || picks.has(path) || isSecretPath(path)) return;
+    if (!entry || picks.has(path) || isSecretPath(path) || isUnsafeBoxPath(path) || (entry.sha && secretShas.has(entry.sha))) return;
     picks.set(path, { path, entry, reason });
   };
   // Grok Bot memory has three tiers (its prompt says so): shared user memory (every assistant's
@@ -254,7 +266,7 @@ export function normalizeAutomation(record) {
 
 /**
  * Capture one bot. `io` is injected so tests can run without a network:
- *   rpc(name, body) → JSON; presign(relPath) → url; fetchImpl; workflows(agentId) → [{id,name,body,...}]
+ *   rpc(name, body) → JSON; presign(relPath) → url; fetchImpl
  *   onProgress(text)
  */
 export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes = DEFAULT_MAX_FILE_BYTES, maxTotalBytes = DEFAULT_MAX_TOTAL_BYTES, now = () => new Date() }) {
@@ -323,7 +335,7 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     note('transcript', main.unreadable ? 'partial' : 'complete', {
       source: 'ListGrokBotTranscriptEntries (beforeSeq pagination)', rows: main.entries.length, messages,
       firstSeq: main.firstSeq, lastSeq: main.lastSeq, pages: main.pages, unreadableRows: main.unreadable,
-      seqGaps: main.gaps.length, note: main.gaps.length ? 'Sequence gaps are rows the server deleted or rolled back; they are not readable.' : undefined,
+      seqGaps: main.gaps.length, note: main.gaps.length ? 'Sequence numbers with no row (deleted, rolled back or never written); the API returns nothing for them.' : undefined,
     });
   }
 
@@ -353,10 +365,12 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     note('tasks', 'complete', { count: list.length });
     return list;
   }, []);
-  await attempt('subagents', async () => {
+  const subagents = await attempt('subagents', async () => {
     const r = await io.rpc('ListGrokBotSubagents', { agentId });
-    note('subagents', 'complete', { running: (r?.subagents ?? []).length });
-  });
+    const list = (r?.subagents ?? []).map((a) => ({ id: str(a.id ?? a.subagentId), name: str(a.name ?? a.title), status: str(a.status ?? a.state) }));
+    note('subagents', 'complete', { running: list.length });
+    return list;
+  }, []);
 
   progress('memory (server)');
   const serverMemories = await attempt('serverMemories', async () => {
@@ -374,11 +388,6 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     note('serverSkills', 'complete', { count: list.length });
     return list;
   }, []);
-  const workflows = io.workflows ? await attempt('workflows', async () => {
-    const list = await io.workflows(agentId);
-    note('workflows', 'complete', { count: list.length, withBody: list.filter((w) => w.body).length });
-    return list;
-  }, []) : [];
 
   const plugins = await attempt('connectors', async () => {
     const r = await io.rpc('GetGrokBotAgentPlugins', { agentId, includeMcpConfig: false });
@@ -392,18 +401,24 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     note('libraryDocs', 'complete', { count: list.length });
     return list;
   }, []);
-  await attempt('serverFiles', async () => {
-    let pageToken = '', count = 0;
-    do { const r = await io.rpc('ListGrokBotAgentFiles', { agentId, pageToken }); count += (r?.files ?? []).length; pageToken = str(r?.nextPageToken); } while (pageToken);
-    note('serverFiles', 'complete', { count, note: count ? 'Listed only; agent files live in the box store and are captured from there.' : undefined });
-  });
+  const serverFiles = await attempt('serverFiles', async () => {
+    let pageToken = '';
+    const list = [];
+    do {
+      const r = await io.rpc('ListGrokBotAgentFiles', { agentId, pageToken });
+      for (const f of r?.files ?? []) list.push({ path: str(f.path ?? f.relPath ?? f.name), size: num(f.size ?? f.sizeBytes) });
+      pageToken = str(r?.nextPageToken);
+    } while (pageToken);
+    note('serverFiles', 'complete', { count: list.length, note: list.length ? 'Listed only; agent files live in the box store and are captured from there.' : undefined });
+    return list;
+  }, []);
 
   progress('box store manifest');
   const files = [];
   const skipped = [];
   const store = await attempt('boxStore', () => readStoreManifest({ presign: io.presign, fetchImpl: io.fetchImpl }), null);
   if (store) {
-    const texts = [bot.instructions, ...automations.map((a) => a.prompt), ...workflows.map((w) => w.body), ...todos.map((t) => t.content),
+    const texts = [bot.instructions, ...automations.map((a) => a.prompt), ...todos.map((t) => t.content),
       ...(main?.entries ?? []).filter((e) => e.message.role !== 'event').map((e) => e.message.text)];
     // Skills are shared by every bot of the login (Grok Bot docs), so the whole user skill library
     // travels with the bot. Platform-owned managed/plugin skills are not the user's and stay.
@@ -449,12 +464,21 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
     const memoryRefs = referencedBoxPaths(memoryTexts).filter((r) => !picks.some((p) => '/' + p.path === r));
     if (memoryRefs.length) {
       const have = new Set([...files.map((f) => f.boxPath), ...skipped.map((x) => x.boxPath)]);
-      const extra = selectBoxFiles(store.entries, { agentId: '\0', referenced: memoryRefs })
-        .filter((p) => p.entry.kind === 'file' && p.entry.size <= maxFileBytes && !have.has('/' + p.path) && !p.path.startsWith('home/box/sand-data/user-memory/'));
+      const extra = [];
+      for (const p of selectBoxFiles(store.entries, { agentId: '\0', referenced: memoryRefs })) {
+        if (have.has('/' + p.path) || p.path.startsWith('home/box/sand-data/user-memory/')) continue;
+        const e = p.entry;
+        if (e.kind !== 'file' || !SHA_RE.test(str(e.sha))) { skipped.push({ boxPath: '/' + p.path, reason: 'not a regular file' }); continue; }
+        if (e.size > maxFileBytes) { skipped.push({ boxPath: '/' + p.path, reason: `larger than ${maxFileBytes} bytes (${e.size})`, size: e.size }); continue; }
+        if (total + e.size > maxTotalBytes) { skipped.push({ boxPath: '/' + p.path, reason: 'total size budget reached', size: e.size }); continue; }
+        total += e.size;
+        extra.push(p);
+      }
       const extraBlobs = await blobReader([...new Set(extra.map((p) => p.entry.sha))]);
       for (const p of extra) {
         const bytes = extraBlobs.get(p.entry.sha);
-        if (bytes) files.push({ boxPath: '/' + p.path, reason: 'referenced-by-memory', kind: 'file', size: bytes.length, sha256: p.entry.sha, mode: p.entry.mode ?? null, bytes });
+        if (!bytes) { skipped.push({ boxPath: '/' + p.path, reason: 'blob unreadable or digest mismatch' }); continue; }
+        files.push({ boxPath: '/' + p.path, reason: 'referenced-by-memory', kind: 'file', size: bytes.length, sha256: p.entry.sha, mode: p.entry.mode ?? null, bytes });
       }
     }
     const refs = referencedBoxPaths(texts);
@@ -479,7 +503,7 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
   return {
     format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, capturedAt: now().toISOString(),
     source: { platform: 'grok-bot', harness: bot.harness },
-    bot, groups, sessions, transcripts, automations, todos, tasks, serverMemories, serverSkills, workflows,
-    connectors: plugins, library, files, skipped, coverage,
+    bot, groups, sessions, transcripts, automations, todos, tasks, subagents, serverMemories, serverSkills,
+    connectors: plugins, library, serverFiles, files, skipped, coverage,
   };
 }
