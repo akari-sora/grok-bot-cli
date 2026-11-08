@@ -2,7 +2,7 @@
 
 [English](README.md) | 繁體中文
 
-在終端機管理 Grok Bot 的 bot、群組和訊息，也能把 bot 搬到 Hermes、Muse 或 Your dot。
+**把 Grok Bot 的 bot 搬到 Hermes、Muse 或 Your dot**：角色、記憶、Skills、排程、還沒做完的任務、完整對話和檔案。`gbot migrate` 匯入後會讀回比對，再確認搬過去的 bot 能接著做事。它只讀 Grok Bot、不會傳訊息給你的 bot，所以搬家不花 Grok Bot 用量。同一個 CLI 也能在終端機管理 Grok Bot 的 bot、群組和訊息。
 
 > 正本和 issue 在 <https://gitlab.com/aa22396584/grok-bot-cli>。Release 與下載：<https://gitlab.com/aa22396584/grok-bot-cli/-/releases>。GitHub 鏡像：<https://github.com/akari-sora/grok-bot-cli>（issue 與 merge request 請開在 GitLab）。
 
@@ -14,9 +14,12 @@
 
 `gbot migrate` 會依序問登入、bot、目的地，先列出目的地會多什麼，確認後匯入、從目的地讀回，再問搬過去的 bot 只有搬過去的資料才答得出來的問題。2026-11-08 用為示範建立的真實 bot（Demo · Trip Planner）實際錄製：Hermes 多一個新 profile，含角色、記憶、skill 資料夾、排程（先暫停）、完整對話和檔案，每一項都透過 Hermes 讀回（7/7）；最後搬到 Hermes 的 bot 說出京都行程還有哪件事沒做。[MP4](demo/gbot-migrate-hermes.mp4) · tape：[demo/gbot-migrate-hermes.tape](demo/gbot-migrate-hermes.tape)
 
-**手機版影片（66 秒，直式）：** 用已發布的版本走完整個流程，接著 Hermes、Muse、Your dot 各自用搬過去的資料做行程的下一步，最後是 Move to Hermes 範本和給 agent 用的方式。
+**影片（直式，適合手機）：**
 
-<a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="手機版影片：gbot migrate 從頭到尾" width="270"></a>
+| 終端機裡的 `gbot migrate`（66 秒） | Grok Bot 裡的 Move to Hermes（51 秒） |
+| --- | --- |
+| <a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="手機版影片：gbot migrate 從頭到尾" width="270"></a> | <a href="demo/move-to-hermes-phone.mp4"><img src="demo/move-to-hermes-phone.png" alt="手機版影片：Move to Hermes bot 幫忙搬家" width="270"></a> |
+| 用已發布的版本走完整個流程，接著 Hermes、Muse、Your dot 各自用搬過去的資料做行程的下一步。 | 真實對話（2026-11-09）：開口、檢查、預覽、排程三選一、確認、匯入並驗收。 |
 
 ## 這個 fork 多了什麼
 
@@ -86,7 +89,7 @@ Hermes 每個 bot 一個新 profile；Muse 和 Your dot 在它們自己的電腦
 
 ## 不開終端機：Move to Hermes
 
-**Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。它只搬到 Hermes。從公開範本加入：<https://x.ai/bot/y2AFnYLdbz5T66loRBHar>。自己建一個或用範本分享，見 [docs/move-to-hermes.zh-TW.md](docs/move-to-hermes.zh-TW.md)。
+**Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。它只搬到 Hermes。從公開範本加入：<https://x.ai/bot/y2AFnYLdbz5T66loRBHar>。自己建一個或用範本分享，見 [docs/move-to-hermes.zh-TW.md](docs/move-to-hermes.zh-TW.md)。每一步都是這個 bot 的一個回合，所以會用到一些 Grok Bot 用量；用量用完時，改用 `gbot migrate` 或 agent（見下方），這兩種不花用量。真實操作的影片：[demo/move-to-hermes-phone.mp4](demo/move-to-hermes-phone.mp4)。
 
 ## 給 agent 用
 

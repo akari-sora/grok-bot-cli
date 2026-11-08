@@ -4,7 +4,7 @@
 
 「Move to Hermes」是一個 Grok Bot bot，唯一的工作是把你其他的 bot 搬到 Hermes Agent，就像「移轉到 iOS」搬手機一樣。它自己不複製任何東西：每條命令先徵求同意，再在你自己的電腦上跑開源的 `gbot migrate`；`gbot migrate` 讀那台電腦上的 Grok Bot App 登入，寫進你本機的 Hermes（見 [migration.zh-TW.md](migration.zh-TW.md)）。
 
-它的指示在 [templates/move-to-hermes.md](../templates/move-to-hermes.md)（英文，就是 bot 實際使用的內容）。
+它的指示在 [templates/move-to-hermes.md](../templates/move-to-hermes.md)（英文，就是 bot 實際使用的內容）。一次真實操作排成手機畫面的影片（51 秒）：[demo/move-to-hermes-phone.mp4](../demo/move-to-hermes-phone.mp4)。
 
 ## 取得
 
@@ -48,6 +48,7 @@ gbot bots template "Move to Hermes" --publish  # 3. 發布
 
 - 對方需要有 `migrate` 的 gbot release；bot 會檢查 `gbot migrate --help`，沒有時指向那個 release。
 - 從範本建立的副本不會自己開始；說出你要做什麼。
+- 每一步都是 bot 的一個回合，所以搬一次會用到一些 Grok Bot 用量。用量用完時，自己跑 `gbot migrate` 或交給 agent：它只讀 Grok Bot，不會傳訊息給任何 bot。
 - 這個 bot 不搬到 Muse 和 Your dot（那兩個還需要 trinity-cli 和各自的工具）；要搬到那裡，直接用 `gbot migrate`。
 - 範本的每一條指示最多 500 字，超過的部分會被截掉（2026-11-08 實測），所以 bot 指示的每一步都要寫短；`--show` 會標出剛好到 500 字的項目。目前上線的是第 4 版。
 - 已經加過舊版的人會保留舊版；重新加一次範本就是最新版。

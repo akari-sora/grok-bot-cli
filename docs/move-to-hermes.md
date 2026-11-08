@@ -4,7 +4,7 @@ English | [繁體中文](move-to-hermes.zh-TW.md)
 
 "Move to Hermes" is a Grok Bot bot whose only job is to move your other bots to Hermes Agent, the way Move to iOS moves a phone. It does not copy anything itself: it asks before each command and runs the open-source `gbot migrate` on your own computer, which reads the Grok Bot app login there and writes into your local Hermes (see [migration.md](migration.md)).
 
-Its instructions are [templates/move-to-hermes.md](../templates/move-to-hermes.md).
+Its instructions are [templates/move-to-hermes.md](../templates/move-to-hermes.md). A real run, laid out for phones (51 s): [demo/move-to-hermes-phone.mp4](../demo/move-to-hermes-phone.mp4).
 
 ## Get it
 
@@ -48,6 +48,7 @@ A template is a copy for each person: they never get your computer, logins, memo
 
 - The recipient needs a gbot release that has `migrate`; the bot checks `gbot migrate --help` and points to the release otherwise.
 - A copy from a template does not start on its own; say what you want.
+- Each step is a turn of the bot, so a move uses some Grok Bot usage. With none left, run `gbot migrate` yourself or through an agent: it only reads from Grok Bot and never messages a bot.
 - Muse and Your dot are not in this bot (they also need trinity-cli and the seat tools); use `gbot migrate` directly for those.
 - A template keeps each instruction step to 500 characters and cuts the rest (seen 2026-11-08), so keep every step in the bot's instructions shorter; `--show` marks an entry that reached 500 characters. The template that is live now is version 4.
 - Someone who added an older version keeps it; adding the template again gets the current one.
