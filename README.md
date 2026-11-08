@@ -140,7 +140,7 @@ The same bot to Muse and to Your dot: one zip each (4.2 MB, 329 files, two messa
 
 **What is checked.** Hermes is read back through Hermes' own code, then asked questions with `hermes -p`. Muse and dot run one read-only command on their computer that prints a salted SHA-256 for each part; then they get questions whose answers need words only the migrated data has. That is a behavioural test, not a proof. Known credential paths are not read, and known token formats are replaced with `[redacted]` before anything leaves the private local archive (a match on known formats, not every secret). Routines start paused in Hermes; after turning the Grok Bot copy off, run `hermes -p grok-<bot> cron resume <id>`. Exit codes: 0 migrated and verified, 3 imported but something did not verify, 2 usage or missing `--yes`, 1 other errors.
 
-**Without a terminal.** The **Move to Hermes** bot asks before each command and runs `gbot migrate` on your computer. Create it with `gbot bots create --name "Move to Hermes" --description "$(cat templates/move-to-hermes.md)"`, or share it as a Grok Bot template: `gbot bots template "Move to Hermes"` prints the x.ai link, `--show` reviews the draft and `--publish` publishes it ([docs/move-to-hermes.md](docs/move-to-hermes.md)). It moves bots to Hermes only.
+**Without a terminal.** The **Move to Hermes** bot asks before each command and runs `gbot migrate` on your computer. Add it from its public template: https://x.ai/bot/y2AFnYLdbz5T66loRBHar. Create it with `gbot bots create --name "Move to Hermes" --description "$(cat templates/move-to-hermes.md)"`, or share it as a Grok Bot template: `gbot bots template "Move to Hermes"` prints the x.ai link, `--show` reviews the draft and `--publish` publishes it ([docs/move-to-hermes.md](docs/move-to-hermes.md)). It moves bots to Hermes only.
 
 Guide, destination differences and limits: [docs/migration.md](docs/migration.md). The real-run record (a 903-row bot and the demo bot, all three destinations): [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md).
 
@@ -156,7 +156,7 @@ Guide, destination differences and limits: [docs/migration.md](docs/migration.md
 
 **怎麼驗。** Hermes 用 Hermes 自己的程式讀回，再用 `hermes -p` 問問題。Muse 和 dot 在它們的電腦上跑一行只讀指令，印出每一部分的加鹽 SHA-256；接著問只有搬過去的資料才答得出來的問題。這是行為測試，不是證明。已知的憑證路徑不讀；已知格式的 token 在離開本機私人存檔前換成 `[redacted]`（只比對已知格式，不是所有秘密都認得出來）。排程在 Hermes 一律先暫停；在 Grok Bot 關掉原本那份後，用 `hermes -p grok-<bot> cron resume <id>` 打開。結束碼：0 搬完並驗證；3 搬了但有項目沒驗過；2 參數錯誤或沒有 `--yes`；1 其他錯誤。
 
-**不開終端機。** **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。用上面的 `gbot bots create` 命令建立，或用 Grok Bot 範本分享：`gbot bots template "Move to Hermes"` 會印出 x.ai 連結，`--show` 檢查草稿，`--publish` 發布（見 [docs/move-to-hermes.md](docs/move-to-hermes.md)）。它只搬到 Hermes。
+**不開終端機。** **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。從公開範本加入：https://x.ai/bot/y2AFnYLdbz5T66loRBHar。用上面的 `gbot bots create` 命令建立，或用 Grok Bot 範本分享：`gbot bots template "Move to Hermes"` 會印出 x.ai 連結，`--show` 檢查草稿，`--publish` 發布（見 [docs/move-to-hermes.md](docs/move-to-hermes.md)）。它只搬到 Hermes。
 
 使用說明、三個目的地的差異與限制見 [docs/migration.md](docs/migration.md)；實際執行紀錄（一個 903 列對話的 bot 和示範 bot，三個目的地）見 [docs/verification/2026-11-08-full-migration.md](docs/verification/2026-11-08-full-migration.md)。
 
