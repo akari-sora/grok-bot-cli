@@ -352,6 +352,7 @@ test('acceptance: every answer starts with its marker and needs a keyword the qu
       assert.equal(q.marker, `Q${i + 1}:`);
       assert.ok(q.text.endsWith('Start your reply with ' + q.marker));
       for (const e of q.expect) assert.ok(!n(q.text).includes(n(e)), `${q.area}: "${e}" is already in the question`);
+      for (const e of q.expect) assert.ok(!hasSecret(e) && !/redacted/.test(e), `${q.area}: keyword from unredacted text`);
     });
   }
 });

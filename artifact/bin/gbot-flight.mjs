@@ -37737,6 +37737,7 @@ else:
         }
         __webpack_require__.d(__webpack_exports__, {
             KH: ()=>isText,
+            TA: ()=>hasSecret,
             aj: ()=>sanitize,
             v7: ()=>assertNoSecrets,
             vT: ()=>sanitizeBytes
@@ -38330,7 +38331,7 @@ else:
                 const marker = `Q${questions.length + 1}:`;
                 const text = `${q.text}\nStart your reply with ${marker}`;
                 const expect = [
-                    ...new Set(q.expect.filter((t)=>t && norm(t).length >= 2 && !norm(text).includes(norm(t))))
+                    ...new Set(q.expect.filter((t)=>t && norm(t).length >= 2 && !(0, _migration_redact_js__rspack_import_6.TA)(t) && !norm(text).includes(norm(t))))
                 ];
                 if (!expect.length) return;
                 questions.push({
@@ -38343,12 +38344,16 @@ else:
                     } : {}
                 });
             };
-            const roleTokens = (0, _migration_hermes_js__rspack_import_4.v0)(cap.bot.instructions, 4);
+            const clean = (t)=>(0, _migration_redact_js__rspack_import_6.aj)(t).text.replace(/\[redacted\]/g, ' ');
+            const roleTokens = (0, _migration_hermes_js__rspack_import_4.v0)(clean(cap.bot.instructions), 4);
             ask({
                 area: 'memory',
                 note: contextNote,
                 text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
-                expect: roleTokens,
+                expect: [
+                    folder.replace(/^~\//, ''),
+                    ...roleTokens
+                ],
                 min: 1
             });
             const payload = Buffer.from(JSON.stringify({
@@ -38373,10 +38378,10 @@ else:
                 area: 'open-tasks',
                 note: contextNote,
                 text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`,
-                expect: open1.flatMap((t)=>(0, _migration_hermes_js__rspack_import_4.v0)(t.content, 1)).slice(0, 3)
+                expect: open1.flatMap((t)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(t.content), 1)).slice(0, 3)
             });
             const facts = [
-                ...new Set(user.map((u)=>(0, _migration_hermes_js__rspack_import_4.v0)(u, 1)[0]).filter(Boolean))
+                ...new Set(user.map((u)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(u), 1)[0]).filter(Boolean))
             ].slice(0, 3);
             if (facts.length) ask({
                 area: 'memory-file',
@@ -38392,12 +38397,13 @@ else:
                 expect: cap.automations.slice(0, 3).map((a)=>a.name),
                 min: Math.min(2, cap.automations.length)
             });
-            const skill = fullSkills.find((s)=>(0, _migration_hermes_js__rspack_import_4.v0)(s.text.replace(s.desc, ''), 1).length) ?? skillInfo.find((l)=>(0, _migration_hermes_js__rspack_import_4.v0)(l.desc, 1).length);
+            const opening = (t)=>clean(t.replace(/^---\n[\s\S]*?\n---\n/, '')).slice(0, 1200);
+            const skill = fullSkills.find((x)=>(0, _migration_hermes_js__rspack_import_4.v0)(opening(x.text), 1).length) ?? skillInfo.find((l)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(l.desc), 1).length);
             if (skill && fullSkills.includes(skill)) ask({
                 area: 'skills',
                 note: contextNote,
                 text: `Open ${folder}/skills/${safeSegment(skill.slug)}/SKILL.md on your computer and quote its first steps.`,
-                expect: (0, _migration_hermes_js__rspack_import_4.v0)(skill.text.replace(skill.desc, ''), 2),
+                expect: (0, _migration_hermes_js__rspack_import_4.v0)(opening(skill.text), 3),
                 min: 1
             });
             else if (skill && skillsMode !== 'none') ask({
@@ -38405,15 +38411,15 @@ else:
                 note: contextNote,
                 text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`,
                 expect: [
-                    (0, _migration_hermes_js__rspack_import_4.v0)(skill.desc, 1)[0]
+                    (0, _migration_hermes_js__rspack_import_4.v0)(clean(skill.desc), 1)[0]
                 ]
             });
-            const first = shownMain.find((m)=>m.role === 'user' && (0, _migration_hermes_js__rspack_import_4.v0)(m.text, 1).length);
+            const first = shownMain.find((m)=>m.role === 'user' && !(0, _migration_redact_js__rspack_import_6.aj)(m.text).count && (0, _migration_hermes_js__rspack_import_4.v0)(clean(m.text), 1).length);
             if (first && recentN > 0) ask({
                 area: 'history',
                 note: contextNote,
-                text: `Open ${folder}/HISTORY.md on your computer: what is the first message I sent ${short} there? Quote it.`,
-                expect: (0, _migration_hermes_js__rspack_import_4.v0)(first.text, 2),
+                text: `Open ${folder}/HISTORY.md on your computer and quote the first message I sent ${short} that contains no [redacted] part.`,
+                expect: (0, _migration_hermes_js__rspack_import_4.v0)(clean(first.text), 2),
                 min: 1
             });
             if (roleTokens.length) ask({
@@ -38449,7 +38455,7 @@ else:
                 }
             } : {};
             for (const s of steps)(0, _migration_redact_js__rspack_import_6.v7)(s.text, `step ${s.id}`);
-            for (const q of questions)(0, _migration_redact_js__rspack_import_6.v7)(q.text, `question ${q.area}`);
+            for (const q of questions)(0, _migration_redact_js__rspack_import_6.v7)(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
             (0, _migration_redact_js__rspack_import_6.v7)(JSON.stringify(titles), 'the chat titles');
             const id = 'gbot-' + sha(JSON.stringify([
                 cap.bot.id,

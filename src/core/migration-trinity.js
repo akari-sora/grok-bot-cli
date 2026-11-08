@@ -18,7 +18,7 @@ import { basename, dirname, join } from 'node:path';
 import { openArchive } from './migration-archive.js';
 import { defaultExec, distinctiveTokens, groupNotMigrated, memoryEntries, skillDescription } from './migration-hermes.js';
 import { MigrationError } from './migration.js';
-import { assertNoSecrets, sanitize, sanitizeBytes } from './migration-redact.js';
+import { assertNoSecrets, hasSecret, sanitize, sanitizeBytes } from './migration-redact.js';
 import { zipFiles } from './migration-zip.js';
 
 const LABEL = { muse: 'Muse', dot: 'Your dot' };
@@ -276,24 +276,30 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   const ask = (q) => {
     const marker = `Q${questions.length + 1}:`;
     const text = `${q.text}\nStart your reply with ${marker}`;
-    const expect = [...new Set(q.expect.filter((t) => t && norm(t).length >= 2 && !norm(text).includes(norm(t))))];
+    const expect = [...new Set(q.expect.filter((t) => t && norm(t).length >= 2 && !hasSecret(t) && !norm(text).includes(norm(t))))];
     if (!expect.length) return;
     questions.push({ ...q, marker, text, expect, ...(q.min ? { min: Math.min(q.min, expect.length) } : {}) });
   };
-  const roleTokens = distinctiveTokens(cap.bot.instructions, 4);
-  ask({ area: 'memory', note: contextNote, text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`, expect: roleTokens, min: 1 });
+  // Keywords come from what was delivered (redacted), never from the raw archive.
+  const clean = (t) => sanitize(t).text.replace(/\[redacted\]/g, ' ');
+  const roleTokens = distinctiveTokens(clean(cap.bot.instructions), 4);
+  // Remembered across chats: the folder it was told to keep (the question does not name it).
+  ask({ area: 'memory', note: contextNote, text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
+    expect: [folder.replace(/^~\//, ''), ...roleTokens], min: 1 });
   const payload = Buffer.from(JSON.stringify({ root: folder, salt })).toString('base64');
   const expected = [...units].map(([u, list]) => ({ unit: u, digest: unitDigest(salt, list, !upload), ids: [...new Set(unitIds.get(u))] }));
   ask({ area: 'files-on-computer', text: `Run this exactly on your computer (it only reads files) and paste its whole output:\n\npython3 -c '${CHECK_PY}' ${payload}`, expect: expected.map((e) => e.digest) });
-  if (open.length) ask({ area: 'open-tasks', note: contextNote, text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`, expect: open.flatMap((t) => distinctiveTokens(t.content, 1)).slice(0, 3) });
-  const facts = [...new Set(user.map((u) => distinctiveTokens(u, 1)[0]).filter(Boolean))].slice(0, 3);
+  if (open.length) ask({ area: 'open-tasks', note: contextNote, text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`, expect: open.flatMap((t) => distinctiveTokens(clean(t.content), 1)).slice(0, 3) });
+  const facts = [...new Set(user.map((u) => distinctiveTokens(clean(u), 1)[0]).filter(Boolean))].slice(0, 3);
   if (facts.length) ask({ area: 'memory-file', note: contextNote, text: `Open ${folder}/MEMORY.md on your computer and quote, word for word, what it says about me.`, expect: facts, min: twoThirds(facts.length) });
   if (cap.automations.length) ask({ area: 'routines', note: contextNote, text: `Open ${folder}/ROUTINES.md on your computer and list the routine names.`, expect: cap.automations.slice(0, 3).map((a) => a.name), min: Math.min(2, cap.automations.length) });
-  const skill = fullSkills.find((s) => distinctiveTokens(s.text.replace(s.desc, ''), 1).length) ?? skillInfo.find((l) => distinctiveTokens(l.desc, 1).length);
-  if (skill && fullSkills.includes(skill)) ask({ area: 'skills', note: contextNote, text: `Open ${folder}/skills/${safeSegment(skill.slug)}/SKILL.md on your computer and quote its first steps.`, expect: distinctiveTokens(skill.text.replace(skill.desc, ''), 2), min: 1 });
-  else if (skill && skillsMode !== 'none') ask({ area: 'skills', note: contextNote, text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`, expect: [distinctiveTokens(skill.desc, 1)[0]] });
-  const first = shownMain.find((m) => m.role === 'user' && distinctiveTokens(m.text, 1).length);
-  if (first && recentN > 0) ask({ area: 'history', note: contextNote, text: `Open ${folder}/HISTORY.md on your computer: what is the first message I sent ${short} there? Quote it.`, expect: distinctiveTokens(first.text, 2), min: 1 });
+  // "Its first steps": keywords from the opening of the body (after the front matter), where the answer will be.
+  const opening = (t) => clean(t.replace(/^---\n[\s\S]*?\n---\n/, '')).slice(0, 1200);
+  const skill = fullSkills.find((x) => distinctiveTokens(opening(x.text), 1).length) ?? skillInfo.find((l) => distinctiveTokens(clean(l.desc), 1).length);
+  if (skill && fullSkills.includes(skill)) ask({ area: 'skills', note: contextNote, text: `Open ${folder}/skills/${safeSegment(skill.slug)}/SKILL.md on your computer and quote its first steps.`, expect: distinctiveTokens(opening(skill.text), 3), min: 1 });
+  else if (skill && skillsMode !== 'none') ask({ area: 'skills', note: contextNote, text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`, expect: [distinctiveTokens(clean(skill.desc), 1)[0]] });
+  const first = shownMain.find((m) => m.role === 'user' && !sanitize(m.text).count && distinctiveTokens(clean(m.text), 1).length);
+  if (first && recentN > 0) ask({ area: 'history', note: contextNote, text: `Open ${folder}/HISTORY.md on your computer and quote the first message I sent ${short} that contains no [redacted] part.`, expect: distinctiveTokens(clean(first.text), 2), min: 1 });
   if (roleTokens.length) ask({ area: 'role', note: contextNote, text: `Open ${folder}/ROLE.md on your computer: which projects or accounts did ${short} work on?`, expect: roleTokens, min: 1 });
   // Muse keeps Memory.md short and curated: whether the pointer landed there is reported, not judged.
   const checks = seat === 'muse' ? [{ id: 'memory-pointer', kind: 'memory', contains: [short, folderName], min: 1, informational: true }] : [];
@@ -301,7 +307,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
 
   const titles = seat === 'muse' ? { chat: { title: `Grok Bot · ${short}` }, checkChat: { title: `Grok Bot · ${short} · check` } } : {};
   for (const s of steps) assertNoSecrets(s.text, `step ${s.id}`);
-  for (const q of questions) assertNoSecrets(q.text, `question ${q.area}`);
+  for (const q of questions) assertNoSecrets(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
   assertNoSecrets(JSON.stringify(titles), 'the chat titles');
   // The id follows what is delivered (text and attached bytes): a changed step starts a new plan,
   // while changed questions reuse the delivered steps and only ask again.
