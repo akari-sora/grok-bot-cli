@@ -151,7 +151,7 @@ test('apply refuses a group-only export', async (t) => {
   const { archive, out } = await archived(t, { records: [records[1]] });
   assert.throws(() => applyMigration(archive, { out, yes: true }), /no bots/);
 });
-for (const to of ['hermes', '', '../openclaw']) test('unsupported target fails closed: ' + to, async (t) => {
+for (const to of ['unsupported', '', '../openclaw']) test('unsupported target fails closed: ' + to, async (t) => {
   const { archive } = await archived(t);
   assert.throws(() => planMigration(archive, { to }), /Only/);
 });
