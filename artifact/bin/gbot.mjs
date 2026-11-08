@@ -56905,6 +56905,7 @@ else:
             for (const m of cleaned.matchAll(/\b[A-Za-z][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\b/g))add(m[0], 3);
             for (const m of cleaned.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/g))if (/\d/.test(m[0]) || m[0].split('-').length >= 3) add(m[0], 2);
             for (const m of cleaned.matchAll(/\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\b/g))add(m[0], 1);
+            if (!seen.size) for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)]\s+)[A-Z][a-z]{3,}\b/g))add(m[0], 0.5);
             const order1 = [
                 ...seen
             ].map(([t, score], i)=>({

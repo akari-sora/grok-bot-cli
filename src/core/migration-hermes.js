@@ -762,6 +762,9 @@ export function distinctiveTokens(text, max = 3) {
   // two plain words (built-in, squash-merge) are ordinary English and get translated in answers.
   for (const m of cleaned.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/g)) if (/\d/.test(m[0]) || m[0].split('-').length >= 3) add(m[0], 2);
   for (const m of cleaned.matchAll(/\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\b/g)) add(m[0], 1);
+  // Plain-language text (no ids, numbers or code names): a proper noun mid-sentence (Kyoto,
+  // Taipei) is still something only this data says. Never a sentence's first word.
+  if (!seen.size) for (const m of cleaned.matchAll(/(?<=[a-z0-9,;:)]\s+)[A-Z][a-z]{3,}\b/g)) add(m[0], 0.5);
   const order = [...seen].map(([t, score], i) => ({ t, score, i: cleaned.indexOf(t) + i * 0 }));
   order.sort((a, b) => b.score - a.score || a.i - b.i);
   return order.slice(0, max).map((o) => o.t);

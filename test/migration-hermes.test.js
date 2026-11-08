@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, verifyHermes, writeInside } from '../src/core/migration-hermes.js';
+import { Hermes, acceptanceQuestions, applyHermes, buildHermesPlan, distinctiveTokens, verifyHermes, writeInside } from '../src/core/migration-hermes.js';
 import { hasSecret } from '../src/core/migration-redact.js';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -622,4 +622,10 @@ test('r3-2: a memory file stored as UTF-16 is checked as such, never decoded int
   assert.ok(!hasSecret(planText(plan)));
   assert.ok(!plan.user.length && !plan.memory.some((m) => m.includes('Key')));
   assert.ok(plan.notMigrated.some((n) => /profile\.md/.test(n.item)));
+});
+
+test('r3-3: plain-language tasks still get a keyword: a proper noun mid-sentence, never the first word', () => {
+  assert.deepEqual(distinctiveTokens('Book the Kyoto hotel only after the user confirms dates.'), ['Kyoto']);
+  assert.deepEqual(distinctiveTokens('Hello there. Thanks a lot.'), []);
+  assert.deepEqual(distinctiveTokens('Watch !65 in Kyoto', 1), ['!65'], 'ids still come first; the fallback is only for plain text');
 });
