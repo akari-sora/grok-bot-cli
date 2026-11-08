@@ -9,7 +9,7 @@ import {
   referencedBoxPaths, selectBoxFiles,
 } from '../src/core/migration-capture.js';
 import { archivePathFor, openArchive, writeArchive } from '../src/core/migration-archive.js';
-import { acceptanceQuestions, buildHermesPlan, distinctiveTokens, memoryEntries, profileNameFor, skillDescription } from '../src/core/migration-hermes.js';
+import { acceptanceQuestions, buildHermesPlan, distinctiveTokens, groupNotMigrated, memoryEntries, profileNameFor, skillDescription } from '../src/core/migration-hermes.js';
 import { buildTrinityPlan } from '../src/core/migration-trinity.js';
 import { redactSecrets } from '../src/core/migration-redact.js';
 import { resolveBot } from '../src/core/migration-flow.js';
@@ -231,9 +231,18 @@ test('trinity plan differs per seat: Muse gets its own side chat and memory read
   const muse = buildTrinityPlan(a, 'muse');
   const dot = buildTrinityPlan(a, 'dot');
   assert.deepEqual(muse.chat, { title: 'Grok Bot · Deploy QA' });
+  assert.deepEqual(muse.checkChat, { title: 'Grok Bot · Deploy QA · check' });
   assert.equal(dot.chat, undefined);
-  assert.ok(muse.checks.some((c) => c.kind === 'memory'));
+  assert.equal(dot.checkChat, undefined);
+  assert.ok(muse.checks.every((c) => c.informational), 'Memory.md is reported, not judged');
   assert.ok(!dot.checks.some((c) => c.kind === 'memory'));
+  // Durable copy: files on the agent's computer, never executed, plus one long-term pointer.
+  const ids = muse.steps.map((s) => s.id);
+  for (const want of ['role', 'memory', 'tasks', 'routines', 'skills', 'history', 'remember']) assert.ok(ids.some((i) => i === want || i.startsWith(want + '-')), want);
+  assert.ok(muse.steps.filter((s) => /Create \(or overwrite\) the file|Append to the end/.test(s.text)).every((s) => /Do not run/.test(s.text)));
+  assert.match(muse.steps.find((s) => s.id === 'remember').text, /long-term/);
+  assert.ok(muse.questions.filter((q) => q.area !== 'memory').every((q) => /Open ~\/grok-bot\/Deploy-QA\//.test(q.text)));
+  assert.match(dot.questions[0].note, /one inbox/);
   for (const plan of [muse, dot]) {
     assert.doesNotMatch(JSON.stringify(plan.steps), /ghp_/);
     assert.ok(plan.steps.every((s) => s.text.length <= 16000));
@@ -245,7 +254,7 @@ test('trinity plan differs per seat: Muse gets its own side chat and memory read
 
 test('keywords skip dates, URLs and common product names; YAML folded descriptions parse', () => {
   assert.deepEqual(distinctiveTokens('Watch GitLab repo aa22396584/telltale; see https://x.example/zz9 on 2026-10-16T21:54:00+08:00'), ['aa22396584']);
-  assert.deepEqual(distinctiveTokens('After user undrafts !65: squash-merge'), ['!65', 'squash-merge']);
+  assert.deepEqual(distinctiveTokens('After user undrafts !65: squash-merge and use the built-in connector for deploy-qa-scan'), ['!65', 'deploy-qa-scan']);
   assert.equal(skillDescription('---\nname: a\ndescription: |\n  line one\n  line two\nx: 1\n---'), 'line one line two');
   assert.deepEqual(memoryEntries('# h\n<!-- note -->\n- a\n- b\n'), ['a', 'b']);
   assert.equal(profileNameFor({ name: '醫美雷達', id: '83f9be4d-aaaa' }), 'grok-83f9be4d');
@@ -275,4 +284,28 @@ test('archive paths are safe even for hostile box names', () => {
     assert.match(out, /^box\//);
     assert.ok(!out.includes('..'));
   }
+});
+
+test('wizard: only `gbot migrate` or `gbot migrate wizard` starts it; choices parse strictly', async () => {
+  const { migrateWizardRequested, parseChoice } = await import('../bin/gbot.mjs');
+  assert.ok(migrateWizardRequested(['migrate']));
+  assert.ok(migrateWizardRequested(['migrate', 'wizard']));
+  assert.ok(!migrateWizardRequested(['migrate', 'bots']));
+  assert.ok(!migrateWizardRequested(['send', 'migrate']));
+  assert.deepEqual(parseChoice('2', 3), [1]);
+  assert.deepEqual(parseChoice('1,3', 3, { multiple: true }), [0, 2]);
+  assert.deepEqual(parseChoice('2-3', 3, { multiple: true }), [1, 2]);
+  assert.deepEqual(parseChoice('all', 2, { multiple: true }), [0, 1]);
+  for (const bad of ['', '0', '4', '1,2', 'x', '1.5']) assert.equal(parseChoice(bad, 3), null, bad);
+});
+
+test('not-migrated lines are grouped for the terminal', () => {
+  const grouped = groupNotMigrated([
+    { item: '/home/box/a', reason: 'larger than 8 bytes (41943040)', alternative: 'x' },
+    { item: '/home/box/b', reason: 'larger than 8 bytes (100)', alternative: 'x' },
+    { item: '/home/box/.secrets/t', reason: 'credential path; never exported', alternative: 'y' },
+    { item: 'routine "a"', reason: 'event trigger (github)', alternative: 'z' },
+  ]);
+  assert.equal(grouped.length, 3);
+  assert.match(grouped.find((g) => /large/.test(g.item)).item, /2 large file\(s\), up to 40 MiB/);
 });

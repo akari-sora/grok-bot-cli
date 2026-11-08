@@ -1,0 +1,5 @@
+---
+"grok-bot-cli": minor
+---
+
+Add `gbot migrate`: move one Grok Bot to Hermes, Muse or Your dot and prove it works there. `gbot migrate` alone (in a terminal) walks through account → bot(s) → destination → diff → confirm → import → verify; `bots`, `capture`, `preview`, `import`, `check` and `run` are the same steps as commands. Capture is read-only and complete: every transcript page (not a 200-message tail), the bot's own, shared-user and project memory from the box store, the whole skill library, routines with their schedules and time zones, open todos and tasks, and files the bot names; every archived file is SHA-256 verified. Hermes gets a new profile per bot (SOUL, memory through Hermes' MemoryStore, skills, paused cron jobs, searchable full history, workspace files); Muse and dot get a per-seat plan delivered by `trinity-cli migrate` (Muse in its own side chat). Token-shaped secrets never leave the private archive. After import the destination is read back and the migrated agent answers acceptance questions only migrated data can answer. The earlier `targets`, `inspect`, `export`, `plan`, `apply` and `verify` snapshot commands are replaced.

@@ -231,6 +231,111 @@ export function unknownOutcomeOutput(sent, visible) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// `gbot migrate` with no subcommand, in a terminal: the whole migration as one guided flow.
+// Every step is an ordinary `gbot migrate …` command run as a child, so the wizard adds no
+// behaviour of its own: account → bot(s) → destination → diff → confirm → import + verify.
+
+export const MIGRATE_TARGETS = [
+  { key: "hermes", label: "Hermes (a new Hermes profile per bot: role, memory, skills, paused schedules, full history, files)" },
+  { key: "muse", label: "Muse (one Muse with a side chat per bot; memory, open tasks, routines as notes, recent history, files)" },
+  { key: "dot", label: "Your dot (one dot: memory, open tasks, routines as notes, recent history, files)" },
+];
+
+/** True when argv asks for the guided flow: `migrate` alone or `migrate wizard`. */
+export function migrateWizardRequested(argv) {
+  const words = argv.filter((a) => a !== "--json");
+  return words[0] === "migrate" && (words.length === 1 || (words.length === 2 && words[1] === "wizard"));
+}
+
+/** Parse "1", "1,3", "1-3" or "all" against n choices. Returns zero-based indexes or null. */
+export function parseChoice(text, n, { multiple = false } = {}) {
+  const t = String(text ?? "").trim().toLowerCase();
+  if (!t) return null;
+  if (multiple && t === "all") return [...Array(n).keys()];
+  const picked = new Set();
+  for (const part of t.split(/[\s,]+/).filter(Boolean)) {
+    const range = /^(\d+)-(\d+)$/.exec(part);
+    const nums = range ? Array.from({ length: Number(range[2]) - Number(range[1]) + 1 }, (_, i) => Number(range[1]) + i) : [Number(part)];
+    for (const k of nums) {
+      if (!Number.isInteger(k) || k < 1 || k > n) return null;
+      picked.add(k - 1);
+    }
+  }
+  if (!picked.size || (!multiple && picked.size > 1)) return null;
+  return [...picked];
+}
+
+function runChild(real, args, { capture = false } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [real, ...args], {
+      env: { ...process.env, GBOT_WIZARD: "1", ...(args.includes("--json") ? { GBOT_JSON: "1" } : {}) },
+      stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"],
+    });
+    const out = [];
+    if (capture) child.stdout.on("data", (d) => out.push(d));
+    child.on("error", () => resolve({ code: 1, stdout: "" }));
+    child.on("exit", (code) => resolve({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8") }));
+  });
+}
+
+async function migrateWizard(real) {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const say = (text) => process.stderr.write(text + "\n");
+  const ask = async (question, n, opts) => {
+    for (;;) {
+      const answer = await rl.question(question);
+      const picked = parseChoice(answer, n, opts);
+      if (picked) return picked;
+      say(`Type ${opts?.multiple ? "numbers like 1,3 or 1-2, or all" : "one number"} between 1 and ${n}.`);
+    }
+  };
+  try {
+    say("gbot migrate — move a Grok Bot to Hermes, Muse or Your dot.\n");
+    const acc = await runChild(real, ["accounts", "--json"], { capture: true });
+    const accounts = (() => { try { return JSON.parse(acc.stdout).accounts.filter((a) => a.usable); } catch { return []; } })();
+    if (!accounts.length) { say("No usable Grok Bot login. Open the Grok Bot app and sign in, then run gbot migrate again."); return 1; }
+    let account = accounts[0];
+    if (accounts.length > 1) {
+      say("1) Source account:");
+      accounts.forEach((a, i) => say(`   ${i + 1}. ${a.email ?? a.label}${a.alias ? ` (alias ${a.alias})` : ""}${a.appActive ? " — active in the app" : ""}`));
+      account = accounts[(await ask("   Account number: ", accounts.length))[0]];
+    }
+    const selector = account.alias ?? account.id;
+    const listed = await runChild(real, ["migrate", "bots", "--account", selector, "--json"], { capture: true });
+    const bots = (() => { try { return JSON.parse(listed.stdout).bots; } catch { return []; } })();
+    if (!bots.length) { say("This login has no bots to migrate."); return 1; }
+    say(`\n2) Bots on ${account.email ?? selector}:`);
+    bots.forEach((b, i) => say(`   ${String(i + 1).padStart(2)}. ${b.name}`));
+    const chosen = (await ask("   Bot number(s), e.g. 3 or 1,4: ", bots.length, { multiple: true })).map((i) => bots[i]);
+    say("\n3) Destination:");
+    MIGRATE_TARGETS.forEach((t, i) => say(`   ${i + 1}. ${t.label}`));
+    const target = MIGRATE_TARGETS[(await ask("   Destination number: ", MIGRATE_TARGETS.length))[0]].key;
+    const results = [];
+    for (const bot of chosen) {
+      say(`\n4) Capturing "${bot.name}" from Grok Bot (read-only; all history pages, memory, skills, routines, tasks, files)…`);
+      const cap = await runChild(real, ["migrate", "capture", "--account", selector, "--bot", bot.id, "--json"], { capture: true });
+      let archive;
+      try { archive = JSON.parse(cap.stdout).archive; } catch { /* reported below */ }
+      if (!archive) { say("   Capture failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
+      say(`   Archive: ${archive}\n\n5) What will change at the destination:`);
+      await runChild(real, ["migrate", "preview", archive, "--to", target]);
+      const go = (await rl.question(`\n6) Import "${bot.name}" into ${target} now? [y/N] `)).trim().toLowerCase();
+      if (go !== "y" && go !== "yes") { say("   Skipped. Nothing was imported."); results.push({ bot: bot.name, ok: false, skipped: true }); continue; }
+      say("\n7) Importing, reading back and checking that it can continue the work…");
+      const imp = await runChild(real, ["migrate", "import", archive, "--to", target, "--yes"]);
+      results.push({ bot: bot.name, ok: imp.code === 0 });
+    }
+    say("\nSummary:");
+    for (const r of results) say(`   ${r.ok ? "✓" : r.skipped ? "–" : "✗"} ${r.bot}`);
+    // Declining an import is not a failure; a capture or import that failed is.
+    return results.some((r) => !r.ok && !r.skipped) ? 3 : 0;
+  } finally {
+    rl.close();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 
 async function main() {
   const real = fileURLToPath(new URL("../dist/bin/gbot.mjs", import.meta.url));
@@ -240,6 +345,9 @@ async function main() {
   if (leading.length > 0) argv = [...argv, ...leading];
 
   const visible = argv.slice(0, argv.indexOf("--") === -1 ? argv.length : argv.indexOf("--"));
+  if (migrateWizardRequested(argv) && process.stdin.isTTY && process.stderr.isTTY) {
+    process.exit(await migrateWizard(real));
+  }
   const env = { ...process.env };
   // Only this wrapper may name a code file or pairing directory, and only for the run it prepared.
   delete env.GBOT_PAIR_CODE_FILE;

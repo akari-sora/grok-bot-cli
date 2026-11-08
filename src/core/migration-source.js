@@ -1,8 +1,6 @@
-/** Read-only source adapter. Auth and roster selection stay with the existing gbot backend. */
-import { openBackend } from './commands.js';
+/** Read-only migration source. Auth and account selection stay with the existing gbot gateway code. */
 import { GATEWAY_TIMEOUT_MS, backendRead, connectGateway, gatewayMaxResponseBytes, hasBackend } from './gateway.js';
 import { requestHeaders } from './headers.js';
-import { normalizeTranscript } from './transcript.js';
 import { assertAllowedCredentialUrl } from './url-policy.js';
 import { MigrationError } from './migration.js';
 
@@ -51,36 +49,6 @@ export async function readMigrationWorkflows(session, agentId) {
       schedule: typeof w.trigger?.schedule === 'string' ? w.trigger.schedule : null,
     };
   });
-}
-
-/** @param {{account?: string, dir?: string, files?: boolean}} [options] */
-export async function openMigrationSource({ account, dir, files = false } = {}) {
-  const local = files || Boolean(dir);
-  if (local && account) throw new MigrationError('--account cannot be combined with --files or --dir.');
-  // A gateway override wins over --account in legacy gbot. Migration must not mislabel that account.
-  if (account && process.env.GROK_BOT_GATEWAY_URL && process.env.GROK_BOT_GATEWAY_TOKEN) {
-    throw new MigrationError('Remove gateway overrides before selecting a migration account.');
-  }
-  const backend = await openBackend({ account, root: dir, files: local, gateway: !local });
-  const records = await backend.list();
-  return {
-    mode: backend.kind, records,
-    transcript: async (agentId, limit) => {
-      const out = await backend.transcript(agentId, limit);
-      const normalized = normalizeTranscript(out);
-      if (normalized.target.id !== agentId) throw new MigrationError('Transcript owner does not match the requested agent.');
-      const entries = Array.isArray(out.transcript) ? out.transcript : out.transcript?.entries ?? out.transcript?.messages ?? out.transcript?.items;
-      return normalized.messages.map((message, i) => {
-        const raw = entries?.[i];
-        const value = raw?.timestamp ?? raw?.createdAt ?? raw?.timestampMs;
-        return { ...message, timestamp: typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)) ? String(value) : null };
-      });
-    },
-    workflows: async (agentId) => {
-      if (backend.kind !== 'gateway') throw new MigrationError('Workflow reads require the live gateway.');
-      return readMigrationWorkflows(backend.session, agentId);
-    },
-  };
 }
 
 /**

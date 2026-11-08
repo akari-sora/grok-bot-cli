@@ -1,4 +1,4 @@
-"""Run the actual pinned official Hermes importer against generated synthetic data.
+"""Run the pinned official Hermes importer against the grok-bot-export.json gbot writes.
 
 Only the test downloads code. Product migration remains offline. Pins are checked as
 Git blob IDs before importing. No installed Hermes account/runtime is touched.
@@ -30,12 +30,11 @@ def bytes_under(root: Path) -> dict[str, bytes]:
 
 
 def main() -> None:
-    generated = subprocess.run(["node", str(ROOT / "scripts/migration-hermes-fixture.mjs")],
-                               check=True, capture_output=True, text=True, encoding="utf-8", timeout=20).stdout
-    expected = json.loads(generated)["bots"][0]["skills"]
-    assert len(expected) == 4
     with tempfile.TemporaryDirectory(prefix="gbot-hermes-contract-") as directory:
         temp = Path(directory)
+        (temp / "fixture").mkdir()
+        generated = subprocess.run(["node", str(ROOT / "scripts/migration-hermes-fixture.mjs"), str(temp / "fixture")],
+                                   check=True, capture_output=True, text=True, encoding="utf-8", timeout=60).stdout
         sources = temp / "official"
         sources.mkdir()
         for name, expected_blob in BLOBS.items():
@@ -56,43 +55,47 @@ def main() -> None:
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
         importer = sys.modules[package.__name__ + ".grok_bot"]
+
+        # 1. The official parser accepts the export gbot writes, field for field.
+        source = json.loads(generated)["bots"][0]
         parsed = importer.parse_export(generated)
-        assert len(parsed) == 1 and parsed[0]["instructions"] == ""
-        assert len(parsed[0]["skills"]) == 4
-        assert len({s["name"] for s in parsed[0]["skills"]}) == 4
-        for field in ("memories", "user_facts", "routines", "apps"):
-            assert parsed[0][field] == []
-        print("PASS official parser: single-agent role/skill bundle, distinct IDs, no invented state")
+        assert len(parsed) == 1
+        bot = parsed[0]
+        assert bot["instructions"] == source["instructions"]
+        assert bot["memories"] == source["memories"] and bot["user_facts"] == source["user_facts"]
+        assert [s["name"] for s in bot["skills"]] == ["ci-fixer", "same-name"]
+        assert {r["name"]: r["schedule_cron"] for r in bot["routines"]} == {"Hourly scan": "52 9-21 * * 1-5", "On PR": ""}
+        print("PASS official parser: role, memories, user facts, skill folders and routines accepted")
+
+        # 2. The official importer applies it (routines need Hermes' cron module, so they are left out here;
+        #    gbot creates them with `hermes cron create --paused` instead).
+        without_routines = json.loads(generated)
+        without_routines["bots"][0]["routines"] = []
         export = temp / "grok-bot-export.json"
-        export.write_text(generated, encoding="utf-8")
+        export.write_text(json.dumps(without_routines), encoding="utf-8")
         home = temp / "home"
         home.mkdir()
         previous = {key: os.environ.get(key) for key in ("HOME", "USERPROFILE", "HERMES_HOME")}
-        os.environ.update(HOME=str(home), USERPROFILE=str(home), HERMES_HOME=str(temp / "target"))
+        target = temp / "target"
+        os.environ.update(HOME=str(home), USERPROFILE=str(home), HERMES_HOME=str(target))
         try:
-            target = temp / "target"
             importer.GrokBotImporter([export], target, execute=False).run()
             assert not target.exists(), "Upstream dry-run wrote target files"
             print("PASS official importer: dry-run writes nothing")
-            target.mkdir()
-            (target / "memories").mkdir()
-            protected = {"SOUL.md": b"Existing host persona\n", "config.yaml": b"operator-owned: unchanged\n",
-                         "memories/MEMORY.md": b"Existing facts\n", "memories/USER.md": b"Existing user preferences\n"}
-            for path, data in protected.items():
-                (target / path).write_bytes(data)
+            target.mkdir()  # a Hermes profile directory always exists before an import
             importer.GrokBotImporter([export], target, execute=True).run()
-            skills = list((target / "skills" / "grok-bot-imports").glob("*/SKILL.md"))
-            assert len(skills) == 4, "Upstream did not create every role/workflow skill"
-            for skill in expected:
-                installed = target / "skills" / "grok-bot-imports" / skill["name"] / "SKILL.md"
-                assert skill["instructions"].strip() in installed.read_text(encoding="utf-8")
-            for path, data in protected.items():
-                assert (target / path).read_bytes() == data, f"Changed host state: {path}"
-            print("PASS official importer: four skills written; persona, config and memory preserved")
+            soul = (target / "SOUL.md").read_text(encoding="utf-8")
+            assert source["instructions"] in soul
+            memory = (target / "memories" / "MEMORY.md").read_text(encoding="utf-8")
+            user = (target / "memories" / "USER.md").read_text(encoding="utf-8")
+            assert all(m in memory for m in source["memories"]) and all(u in user for u in source["user_facts"])
+            skill = target / "skills" / "grok-bot-imports" / "ci-fixer"
+            assert (skill / "SKILL.md").is_file() and (skill / "run.sh").read_text() == "#!/bin/sh\necho fix\n"
+            print("PASS official importer: role, memories, user facts and whole skill folders written")
             before = bytes_under(target)
             importer.GrokBotImporter([export], target, execute=True).run()
-            assert bytes_under(target) == before, "Repeated import overwrote or duplicated user files"
-            print("PASS official importer: repeated import preserves all existing bytes")
+            assert bytes_under(target) == before, "Repeated import changed files"
+            print("PASS official importer: repeated import changes nothing")
         finally:
             for key, value in previous.items():
                 if value is None:

@@ -38,6 +38,7 @@ export function resolveBot(agents, ref) {
   throw new MigrationError(`No bot named "${ref}". Run gbot migrate bots to list them.`);
 }
 
+/** @param {{account?: string}} [opts] */
 export async function listBots({ account } = {}) {
   const io = await openLiveCapture({ account });
   const roster = await io.rpc('ListGrokBotAgents', {});
@@ -49,6 +50,7 @@ export async function listBots({ account } = {}) {
 const stamp = (d = new Date()) => d.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
 const slug = (name, id) => (String(name).split(' · ')[0].normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || id.slice(0, 8)).slice(0, 40);
 
+/** @param {{account?: string, bot: string, out?: string, maxFileMb?: number, timeZone?: string, onProgress?: (t: string) => void}} opts */
 export async function captureToArchive({ account, bot, out, maxFileMb, timeZone, onProgress = progress }) {
   const io = await openLiveCapture({ account, onProgress });
   const roster = await io.rpc('ListGrokBotAgents', {});
@@ -66,16 +68,23 @@ export async function captureToArchive({ account, bot, out, maxFileMb, timeZone,
   return { archive: root, files: manifest.files.length, bot: { id: cap.bot.id, name: cap.bot.name }, coverage: cap.coverage };
 }
 
+function usageDir(archiveRoot, to, profile) {
+  const dir = join(dirname(archiveRoot), `${basename(archiveRoot)}.${to}-${profile}.usage`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
 function reportPath(archiveRoot, to, profile) {
   return join(dirname(archiveRoot), `${basename(archiveRoot)}.${to}-${profile}.report.json`);
 }
 
-async function hermesContext({ archive, profile, skills, hermes }) {
+/** @param {{archive: string, profile?: string, skills?: string, activateRoutines?: boolean, hermes?: any}} opts */
+async function hermesContext({ archive, profile, skills, activateRoutines = false, hermes }) {
   const opened = openArchive(archive);
   const h = hermes ?? new Hermes();
   const name = profile ?? buildHermesPlan(opened, { profileDir: '/', skills }).profile;
   const dest = await inspectHermes(h, { profile: name });
-  const plan = buildHermesPlan(opened, { profile: name, profileDir: dest.profileDir, skills });
+  const plan = buildHermesPlan(opened, { profile: name, profileDir: dest.profileDir, skills, activateRoutines });
   return { opened, hermes: h, dest, plan };
 }
 
@@ -89,27 +98,29 @@ function planFacts(plan) {
   };
 }
 
-export async function previewMigration({ archive, to, profile, skills = 'all' }) {
+/** @param {{archive: string, to: string, profile?: string, skills?: string, activateRoutines?: boolean}} opts */
+export async function previewMigration({ archive, to, profile, skills = 'all', activateRoutines = false }) {
   if (to !== 'hermes') {
     const { previewTrinity } = await import('./migration-trinity.js');
-    return previewTrinity({ archive, to });
+    return previewTrinity({ archive, to, activateRoutines });
   }
-  const { dest, plan } = await hermesContext({ archive, profile, skills });
+  const { dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   return { exitCode: 0, to, destination: dest, summary: summarizeHermesPlan(plan, dest), plan: planFacts(plan) };
 }
 
-export async function importMigration({ archive, to, profile, skills = 'all', yes = false, accept = true, intoExisting = false, onProgress = progress }) {
+/** @param {{archive: string, to: string, profile?: string, skills?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
+export async function importMigration({ archive, to, profile, skills = 'all', yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
   if (!yes) throw new MigrationError('Review gbot migrate preview first, then pass --yes to import.');
   if (to !== 'hermes') {
     const { importTrinity } = await import('./migration-trinity.js');
-    return importTrinity({ archive, to, accept, onProgress });
+    return importTrinity({ archive, to, accept, activateRoutines, onProgress });
   }
-  const { opened, hermes, dest, plan } = await hermesContext({ archive, profile, skills });
+  const { opened, hermes, dest, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   const applied = await applyHermes(hermes, opened, plan, { onProgress, allowExisting: intoExisting });
   onProgress('reading the destination back');
   const verified = await verifyHermes(hermes, opened, plan);
   let acceptance = null;
-  if (accept) acceptance = await acceptHermes(hermes, opened, plan, { onProgress, usageDir: dirname(opened.root) });
+  if (accept) acceptance = await acceptHermes(hermes, opened, plan, { onProgress, usageDir: usageDir(opened.root, to, plan.profile) });
   const ok = verified.ok && (!acceptance || acceptance.ok);
   const report = { exitCode: ok ? 0 : 3, to, profile: plan.profile, destination: dest.hermesVersion, archive: opened.root,
     bot: opened.capture.bot.name, steps: applied.steps, verify: verified, acceptance, plan: planFacts(plan), finishedAt: new Date().toISOString() };
@@ -118,26 +129,28 @@ export async function importMigration({ archive, to, profile, skills = 'all', ye
   return { ...report, report: path };
 }
 
-export async function checkMigration({ archive, to, profile, skills = 'all', accept = false, onProgress = progress }) {
+/** @param {{archive: string, to: string, profile?: string, skills?: string, accept?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
+export async function checkMigration({ archive, to, profile, skills = 'all', accept = false, activateRoutines = false, onProgress = progress }) {
   if (to !== 'hermes') {
     const { checkTrinity } = await import('./migration-trinity.js');
-    return checkTrinity({ archive, to, accept, onProgress });
+    return checkTrinity({ archive, to, accept, activateRoutines, onProgress });
   }
-  const { opened, hermes, plan } = await hermesContext({ archive, profile, skills });
+  const { opened, hermes, plan } = await hermesContext({ archive, profile, skills, activateRoutines });
   const verified = await verifyHermes(hermes, opened, plan);
-  const acceptance = accept ? await acceptHermes(hermes, opened, plan, { onProgress, usageDir: dirname(opened.root) }) : null;
+  const acceptance = accept ? await acceptHermes(hermes, opened, plan, { onProgress, usageDir: usageDir(opened.root, to, plan.profile) }) : null;
   const ok = verified.ok && (!acceptance || acceptance.ok);
   return { exitCode: ok ? 0 : 3, to, profile: plan.profile, verify: verified, acceptance };
 }
 
 /** Capture, preview and (with --yes) import, verify and accept, in one command. */
-export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills = 'all', yes = false, accept = true, intoExisting = false, onProgress = progress }) {
+/** @param {{account?: string, bot: string, to: string, profile?: string, out?: string, maxFileMb?: number, skills?: string, yes?: boolean, accept?: boolean, intoExisting?: boolean, activateRoutines?: boolean, onProgress?: (t: string) => void}} opts */
+export async function runMigration({ account, bot, to, profile, out, maxFileMb, skills = 'all', yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
   const captured = await captureToArchive({ account, bot, out, maxFileMb, onProgress });
-  const preview = await previewMigration({ archive: captured.archive, to, profile, skills });
+  const preview = await previewMigration({ archive: captured.archive, to, profile, skills, activateRoutines });
   if (!yes) {
     return { exitCode: 0, stage: 'preview', captured, preview,
       next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''} --yes` };
   }
-  const imported = await importMigration({ archive: captured.archive, to, profile, skills, yes, accept, intoExisting, onProgress });
+  const imported = await importMigration({ archive: captured.archive, to, profile, skills, yes, accept, intoExisting, activateRoutines, onProgress });
   return { exitCode: imported.exitCode, stage: 'imported', captured, preview: { summary: preview.summary }, imported };
 }

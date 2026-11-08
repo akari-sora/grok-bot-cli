@@ -1,5 +1,7 @@
 # Migration toolkit verification — 2026-11-08
 
+> Superseded: this records the earlier limited-snapshot toolkit, which was replaced on 2026-11-08 by the full migration flow in [docs/migration.md](../migration.md). See [2026-11-08-full-migration.md](2026-11-08-full-migration.md).
+
 Timezone: Asia/Taipei. This record separates executed tests from unverified provider/runtime behavior.
 
 ## Revision and evidence

@@ -15,6 +15,7 @@ export const config = {
       to: { description: 'Destination', enum: ['hermes', 'muse', 'dot'], type: 'string' },
       profile: { description: 'Hermes profile name (default grok-<bot>)', type: 'string' },
       skills: { description: 'Skill library: all (default) or none', enum: ['all', 'none'], type: 'string' },
+      activateRoutines: { description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)', type: 'boolean' },
     },
     required: ['archive', 'to'],
     type: 'object',
@@ -27,11 +28,14 @@ export const inputSchema = z.object({
   to: z.enum(['hermes', 'muse', 'dot']),
   profile: z.string().min(1).optional(),
   skills: z.enum(['all', 'none']).default('all'),
+  activateRoutines: z.boolean().default(false),
 }).strict();
 export const resultSchema = migrationResultSchema;
 
 export default async function preview({ input }: CliRouteProps<typeof inputSchema>) {
   const p = await previewMigration(input);
   const result = migrationResult(p);
-  return <Agent.Result value={result}><Agent.Text>{p.summary + `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''} --yes`}</Agent.Text></Agent.Result>;
+  // The guided `gbot migrate` asks for confirmation itself; plain use prints the next command.
+  const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''} --yes`;
+  return <Agent.Result value={result}><Agent.Text>{p.summary + next}</Agent.Text></Agent.Result>;
 }

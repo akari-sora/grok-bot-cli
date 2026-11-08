@@ -173,7 +173,8 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   }
   docs.set(join(base, 'grok-bot-export.json'), Buffer.from(JSON.stringify({ format: 'grok-bot-export', version: 1, bots: [{
     name: botName, title: cap.bot.title, instructions: redact(cap.bot.instructions), memories: memory, user_facts: user,
-    skills: skillPlan.map((s) => ({ name: s.slug, path: s.dir })),
+    // The archive keeps every skill folder; the official importer copies a folder given as `path`.
+    skills: skillPlan.map((s) => ({ name: s.slug, path: join(archive.root, ...dirname(s.files.find((f) => f.rel === 'SKILL.md').path).split('/')) })),
     routines: cap.automations.map((a) => ({ name: a.name, instruction: redact(a.prompt), trigger: a.trigger, schedule_cron: a.scheduleCron,
       schedule_text: a.scheduleText, timezone: a.timezone ?? '', paused: !a.enabled, skills: [], trigger_details: a.triggerDetails })),
     apps: cap.connectors.map((c) => ({ name: c.name, mcp_url: '' })),
@@ -203,6 +204,20 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   };
 }
 
+/** Collapse many files skipped for the same reason into one line for the terminal. */
+export function groupNotMigrated(items) {
+  const big = items.filter((n) => /^larger than/.test(n.reason));
+  const cred = items.filter((n) => /credential path/.test(n.reason));
+  const rest = items.filter((n) => !big.includes(n) && !cred.includes(n));
+  const out = [...rest];
+  if (big.length) {
+    const sizes = big.map((n) => Number(/\((\d+)\)/.exec(n.reason)?.[1] ?? 0));
+    out.push({ item: `${big.length} large file(s), up to ${Math.ceil(Math.max(...sizes) / 1048576)} MiB`, reason: 'over the --max-file-mb limit', alternative: big[0].alternative });
+  }
+  if (cred.length) out.push({ item: `${cred.length} credential path(s) (${[...new Set(cred.map((n) => n.item.replace(/^\/home\/box\//, '~/').split('/').slice(0, 3).join('/')))].join(', ')})`, reason: 'logins are never exported', alternative: cred[0].alternative });
+  return out;
+}
+
 /** Human summary of a plan (the "檢查差異" step). */
 export function summarizeHermesPlan(plan, destination) {
   const lines = [
@@ -218,7 +233,7 @@ export function summarizeHermesPlan(plan, destination) {
   ];
   if (plan.notMigrated.length) {
     lines.push('Not migrated (with the alternative):');
-    for (const n of plan.notMigrated) lines.push(`  - ${n.item}: ${n.reason} → ${n.alternative}`);
+    for (const n of groupNotMigrated(plan.notMigrated)) lines.push(`  - ${n.item}: ${n.reason} → ${n.alternative}`);
   }
   if (destination.hermesVersion) lines.push(`Hermes: ${destination.hermesVersion}`);
   return lines.join('\n');
@@ -452,6 +467,9 @@ function skillName(archive, s) {
 }
 
 // Words any assistant already knows; a keyword check on them proves nothing.
+/** Lowercase letters and digits only, so squash-merge matches "squash merge". */
+const norm = (t) => String(t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
 const COMMON_TOKENS = new Set(['github', 'gitlab', 'chatgpt', 'openai', 'google', 'youtube', 'linkedin', 'iphone', 'ipad', 'javascript',
   'typescript', 'whatsapp', 'ios', 'macos', 'json', 'yaml', 'http', 'https', 'url', 'api', 'pdf', 'grok', 'hermes', 'muse', 'slack', 'telegram']);
 
@@ -473,7 +491,9 @@ export function distinctiveTokens(text, max = 3) {
   };
   for (const m of cleaned.matchAll(/[!#]\d{1,6}\b/g)) add(m[0], 4);
   for (const m of cleaned.matchAll(/\b[A-Za-z][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*\b/g)) add(m[0], 3);
-  for (const m of cleaned.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/g)) add(m[0], 2);
+  // Hyphenated names count only with a digit or three or more parts (resume-skills-2, deploy-qa-scan);
+  // two plain words (built-in, squash-merge) are ordinary English and get translated in answers.
+  for (const m of cleaned.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+){1,}\b/g)) if (/\d/.test(m[0]) || m[0].split('-').length >= 3) add(m[0], 2);
   for (const m of cleaned.matchAll(/\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\b/g)) add(m[0], 1);
   const order = [...seen].map(([t, score], i) => ({ t, score, i: cleaned.indexOf(t) + i * 0 }));
   order.sort((a, b) => b.score - a.score || a.i - b.i);
@@ -541,7 +561,8 @@ export async function acceptHermes(hermes, archive, plan, { onProgress = () => {
     let answer = '', error = null;
     try { answer = await hermes.run(args, { timeoutMs: 600_000, cwd: plan.base }); } catch (e) { error = e.message; }
     const lower = answer.toLowerCase();
-    const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => lower.includes(alt.toLowerCase())));
+    const flat = norm(answer);
+    const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => lower.includes(alt.toLowerCase()) || (norm(alt) && flat.includes(norm(alt)))));
     const need = q.min ?? q.expect.length;
     results.push({ area: q.area, prompt: q.prompt, expect: q.expect, hits, ok: !error && hits.length >= need, answer: answer.trim().slice(0, 2000), error });
   }

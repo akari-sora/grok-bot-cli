@@ -27,13 +27,15 @@ export function importText(r) {
     for (const c of r.verify.checks) {
       const extra = c.missing?.length ? ` missing ${c.missing.length}` : c.issues?.length ? ` ${c.issues.join('; ')}` : '';
       const count = c.expected !== undefined ? ` (${c.expected})` : c.messages !== undefined ? ` (${c.messages} messages)` : '';
-      lines.push(`  ${c.ok ? '✓' : '✗'} ${c.area}${count}${extra}`);
+      if (c.informational) lines.push(`  – ${c.area}: ${c.found ? 'present' : 'not there (Muse keeps Memory.md short; the questions below decide)'}`);
+      else lines.push(`  ${c.ok ? '✓' : '✗'} ${c.area}${count}${extra}`);
     }
   }
   if (r.acceptance) {
-    lines.push('', 'Acceptance (questions answered by the migrated agent):');
-    for (const a of r.acceptance.results) lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? 'answered from migrated data' : (a.error ?? `expected ${JSON.stringify(a.expect)}`)}`);
+    lines.push('', `Acceptance (questions answered by the migrated agent${r.acceptance.freshChat ? ', in a new chat that cannot see the migration messages' : ''}):`);
+    for (const a of r.acceptance.results) lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? 'answered from migrated data' : (a.error ?? `expected ${JSON.stringify(a.expect)}`)}${a.note ? ` (${a.note})` : ''}`);
   }
+  if (r.chatNote) lines.push('', 'Note: ' + r.chatNote);
   if (r.deliveries) {
     lines.push('', 'Delivered:');
     for (const d of r.deliveries) lines.push(`  ${d.ok ? '✓' : '✗'} ${d.step}: ${d.state}${d.note ? ' — ' + d.note : ''}`);

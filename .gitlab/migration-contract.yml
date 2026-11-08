@@ -20,4 +20,4 @@ migration:hermes-contract:
         - src/core/migration*
         - scripts/verify-hermes-import.py
         - scripts/migration-hermes-fixture.mjs
-        - test/migration-targets*
+        - test/migration-v2*

@@ -24,7 +24,7 @@ export const resultSchema = migrationResultSchema;
 export default async function bots({ input }: CliRouteProps<typeof inputSchema>) {
   const list = await listBots(input);
   const result = migrationResult({ exitCode: 0, bots: list });
-  const text = list.map((b) => `${b.name}\n    ${b.id}${b.title ? `\n    title: ${b.title}` : ''}`).join('\n') +
+  const text = list.map((b: { id: string; name: string; title: string }) => `${b.name}\n    ${b.id}${b.title ? `\n    title: ${b.title}` : ''}`).join('\n') +
     `\n\n${list.length} bot(s). Next: gbot migrate run --bot NAME --to hermes${input.account ? ' --account ' + input.account : ''}`;
   return <Agent.Result value={result}><Agent.Text>{text}</Agent.Text></Agent.Result>;
 }

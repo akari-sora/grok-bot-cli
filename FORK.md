@@ -251,6 +251,10 @@ gbot thread Researcher --after "<cursor>" --json
 
 Bot replies often arrive as `kind: "send-message"` with `message.type: "text"`. The normalized `role` is `unknown` unless the entry says `user` or `assistant`. That is still a reply. Do not treat `unknown` as a failed send.
 
+### Move a bot to Hermes, Muse or Your dot (`gbot migrate`)
+
+Run `gbot migrate` in a terminal and follow the prompts, or use `gbot migrate bots|capture|preview|import|check|run`. It captures the whole bot read-only (every transcript page, all memory tiers, the skill library, routines, open tasks, needed files), imports it, reads the destination back and asks the migrated agent acceptance questions. Details, destination differences and limits: [docs/migration.md](docs/migration.md).
+
 ### Pair a Wear OS watch (`gbot wear pair`)
 
 The watch app is [Grok Bot Wear](https://gitlab.com/aa22396584/grok-bot-wear) (unofficial; download the APK from its [releases](https://gitlab.com/aa22396584/grok-bot-wear/-/releases), step-by-step install in its [install guide](https://gitlab.com/aa22396584/grok-bot-wear/-/blob/main/docs/install.md), in Traditional Chinese).
@@ -624,6 +628,10 @@ gbot thread Researcher --after "<cursor>" --json
 `--after` 沒有預設。`--limit` 預設 40（1–200）。結果是游標之後的項目。`entryCount: 0` 且 `gapReset: false` 表示沒有新項目。不認識的游標會回一份有界快照，且 `gapReset: true`。
 
 機器人回覆常常是 `kind: "send-message"`、`message.type: "text"`。除非項目寫明 `user` 或 `assistant`，正規化後的 `role` 會是 `unknown`。那仍然是回覆。不要把 `unknown` 當成送出失敗。
+
+### 把 bot 搬到 Hermes、Muse 或 Your dot（`gbot migrate`）
+
+在終端機跑 `gbot migrate` 照提示做，或用 `gbot migrate bots|capture|preview|import|check|run`。它只讀地完整擷取一個 bot（每一頁對話、三層記憶、Skills 庫、排程、未完成任務、必要檔案），匯入目的地、讀回比對，再問搬過去的 agent 驗收題。細節、三個目的地的差異與限制見 [docs/migration.md](docs/migration.md)。
 
 ### 配對 Wear OS 手錶（`gbot wear pair`）
 
