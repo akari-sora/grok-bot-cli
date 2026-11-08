@@ -4,6 +4,11 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
+### 0.11.2-iml1s.10
+
+- `gbot migrate import|run --move-routines` hands the routines over with no manual step: the scheduled routines that are on in Grok Bot are created active at the destination (it includes `--activate-routines`), and after the import's read-back passes (for Muse and dot, also the schedules read-back and the acceptance questions) gbot pauses exactly those routines in Grok Bot with the app's Routines toggle request, `SetGrokBotAgentAutomationEnabled` `{ agentId, automationId, isEnabled: false, timeZone }`, and reads the answer to confirm each one is off. Event-triggered routines and routines that were off are not touched. The capture stays read-only; this write uses the same backend-only session (no box describe or wake) and is opened before the import changes anything. When verification did not pass nothing is paused (`source routines left on: verification did not pass`); a pause that fails or whose effect is unknown is reported per routine with how to do it by hand and is never retried (exit 3). The report (`sourceRoutines`) and the terminal output list each paused routine (id, name, schedule); turn one back on in the Grok Bot app: Routines → toggle. `import` takes `--account` for this; `check` and `preview` accept `--move-routines` so they plan the same destination.
+- The guided `gbot migrate` asks, for a bot with scheduled routines that are on: "1. Keep them paused in <destination> (turn on later) 2. Move them: turn them on in <destination> and pause them in Grok Bot once the check passes" (default 1). The preview describes the routines for either choice.
+
 ### 0.11.2-iml1s.9
 
 - Grok Bot 0.78 hosts answer 404 to the box gateway's skill-library and root-thread methods, even with the box awake. `gbot skills list` then reads the library from the box store through the backend (as `gbot migrate` does) instead of failing; `skills add`/`remove` and `thread --root` explain what to use instead (`LIBRARY_EDIT_UNAVAILABLE`, `THREAD_ROOT_UNAVAILABLE`) rather than a bare 404. Any other gateway failure is reported as before.

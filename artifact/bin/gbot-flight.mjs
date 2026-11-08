@@ -11912,6 +11912,10 @@ var __webpack_modules__ = {
                         description: 'Same value as at import',
                         type: 'boolean'
                     },
+                    moveRoutines: {
+                        description: 'Same value as at import (plans the destination as --activate-routines does; pauses nothing)',
+                        type: 'boolean'
+                    },
                     accept: {
                         description: 'Also run the behavioral acceptance checks',
                         type: 'boolean'
@@ -11947,6 +11951,7 @@ var __webpack_modules__ = {
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
+            moveRoutines: zod__rspack_import_3.zMY().default(false),
             accept: zod__rspack_import_3.zMY().default(false)
         }).strict();
         const resultSchema = _core_migration_route_js__rspack_import_1.l;
@@ -11998,6 +12003,10 @@ var __webpack_modules__ = {
                         ],
                         type: 'string'
                     },
+                    account: {
+                        description: 'Saved Grok Bot login of the bot, for --move-routines (see gbot accounts)',
+                        type: 'string'
+                    },
                     profile: {
                         description: 'Hermes profile name (default grok-<bot>)',
                         type: 'string'
@@ -12040,6 +12049,10 @@ var __webpack_modules__ = {
                         description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
                         type: 'boolean'
                     },
+                    moveRoutines: {
+                        description: 'Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        type: 'boolean'
+                    },
                     yes: {
                         description: 'Confirm the previewed import',
                         type: 'boolean'
@@ -12070,6 +12083,7 @@ var __webpack_modules__ = {
                 'muse',
                 'dot'
             ]),
+            account: zod__rspack_import_3.YjP().min(1).optional(),
             profile: zod__rspack_import_3.YjP().min(1).optional(),
             skills: zod__rspack_import_3.YjP().regex(/^(all|index|none|[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*)$/).optional(),
             via: zod__rspack_import_3.k5n([
@@ -12084,6 +12098,7 @@ var __webpack_modules__ = {
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
+            moveRoutines: zod__rspack_import_3.zMY().default(false),
             yes: zod__rspack_import_3.zMY().default(false),
             accept: zod__rspack_import_3.zMY().default(true),
             intoExisting: zod__rspack_import_3.zMY().default(false)
@@ -12173,6 +12188,10 @@ var __webpack_modules__ = {
                     activateRoutines: {
                         description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
                         type: 'boolean'
+                    },
+                    moveRoutines: {
+                        description: 'Show the import with --move-routines: routines on in Grok Bot created active here and paused in Grok Bot after the check (changes nothing now)',
+                        type: 'boolean'
                     }
                 },
                 required: [
@@ -12204,13 +12223,15 @@ var __webpack_modules__ = {
             driveFolder: zod__rspack_import_3.YjP().regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/).optional(),
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
-            activateRoutines: zod__rspack_import_3.zMY().default(false)
+            activateRoutines: zod__rspack_import_3.zMY().default(false),
+            moveRoutines: zod__rspack_import_3.zMY().default(false)
         }).strict();
         const resultSchema = _core_migration_route_js__rspack_import_1.l;
         async function preview({ input }) {
             const p = await (0, _core_migration_flow_js__rspack_import_2.rV)(input);
             const result = (0, _core_migration_route_js__rspack_import_1.Y)(p);
-            const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''} --yes`;
+            const routines = input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '';
+            const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''}${routines} --yes`;
             return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
                 value: result,
                 children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
@@ -12310,6 +12331,10 @@ var __webpack_modules__ = {
                         description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)',
                         type: 'boolean'
                     },
+                    moveRoutines: {
+                        description: 'Move the routines that are on in Grok Bot: create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        type: 'boolean'
+                    },
                     yes: {
                         description: 'Import after showing the diff',
                         type: 'boolean'
@@ -12354,6 +12379,7 @@ var __webpack_modules__ = {
             history: zod__rspack_import_3.YjP().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
             folder: zod__rspack_import_3.YjP().min(1).optional(),
             activateRoutines: zod__rspack_import_3.zMY().default(false),
+            moveRoutines: zod__rspack_import_3.zMY().default(false),
             yes: zod__rspack_import_3.zMY().default(false),
             accept: zod__rspack_import_3.zMY().default(true),
             intoExisting: zod__rspack_import_3.zMY().default(false)
@@ -33521,6 +33547,19 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             });
         }
+        async function setAutomationEnabled(session, { agentId, automationId, isEnabled, timeZone = deviceTimeZone() }) {
+            return backendCall(session, "SetGrokBotAgentAutomationEnabled", {
+                agentId,
+                automationId,
+                isEnabled,
+                ...timeZone ? {
+                    timeZone
+                } : {}
+            }, {
+                send: true,
+                timeoutMs: 20000
+            });
+        }
         const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
         function serverRecord(agent, client) {
             const isGroup = agent.kind === ROOM_KIND;
@@ -35029,6 +35068,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             wj: ()=>createGroup,
             x4: ()=>updateAgent,
             xd: ()=>backendRead,
+            xm: ()=>setAutomationEnabled,
             zk: ()=>reconcileDelivery,
             zr: ()=>addGroupMember
         });
@@ -36641,6 +36681,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 timezone: null
             };
         }
+        const routinesOn = (automations)=>automations.filter((a)=>a.trigger === 'schedule' && a.scheduleCron && a.enabled).map((a)=>({
+                    id: a.id,
+                    name: a.name,
+                    schedule: a.scheduleCron,
+                    timezone: a.timezone ?? null
+                }));
         function normalizeAutomation(record) {
             const trigger = object(record.trigger) ? record.trigger : {};
             const schedule = str(trigger.schedule) || str(record.schedule);
@@ -37212,9 +37258,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         __webpack_require__.d(__webpack_exports__, {
             $8: ()=>fetchStoreBytes,
+            Hu: ()=>normalizeAutomation,
             Lr: ()=>readSkillLibrary,
             U8: ()=>captureBot
         }, {
+            $r: routinesOn,
             CR: DEFAULT_MAX_FILE_BYTES,
             nV: ARCHIVE_FORMAT
         });
@@ -37291,7 +37339,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     id: cap.bot.id,
                     name: cap.bot.name
                 },
-                coverage: cap.coverage
+                coverage: cap.coverage,
+                routinesOn: (0, _migration_capture_js__rspack_import_3.$r)(cap.automations)
             };
         }
         function usageDir(archiveRoot, to, profile) {
@@ -37317,7 +37366,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 driveRemote: driveRemote ?? (process.env.GBOT_DRIVE_REMOTE || undefined),
                 driveFolder
             });
-        async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, hermes }) {
+        async function hermesContext({ archive, profile, skills: wanted, activateRoutines = false, moveRoutines = false, hermes }) {
             const skills = hermesSkills(wanted);
             const opened = (0, _migration_archive_js__rspack_import_4.p_)(archive);
             const h = hermes ?? new _migration_hermes_js__rspack_import_6.$o();
@@ -37332,7 +37381,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 profile: name,
                 profileDir: dest.profileDir,
                 skills,
-                activateRoutines
+                activateRoutines,
+                moveRoutines
             });
             return {
                 opened,
@@ -37365,13 +37415,97 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 notMigrated: plan.notMigrated
             };
         }
-        async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false }) {
+        const ROUTINE_TOGGLE = 'in the Grok Bot app: Routines → toggle';
+        const DEST = {
+            hermes: 'Hermes',
+            muse: 'Muse',
+            dot: 'Your dot'
+        };
+        const routineLabel = (r)=>`"${r.name}" (${r.schedule}${r.timezone ? ' ' + r.timezone : ''})`;
+        const hermesScheduled = (plan)=>plan.cron.filter((c)=>c.sourceEnabled && !c.paused).map((c)=>({
+                    id: c.sourceId,
+                    name: c.routine,
+                    schedule: c.schedule,
+                    timezone: c.timezone ?? null,
+                    job: c.name
+                }));
+        const pauseThere = (to, profile)=>(r)=>to === 'hermes' ? `pause the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron pause <job id>)` : `ask ${DEST[to]} to pause its scheduled task "${r.name}"`;
+        function routinesPreview({ to, on, moved, activate, move }) {
+            if (!on.length) return null;
+            const where = DEST[to];
+            if (move) {
+                return `Grok Bot routines → ${moved.length} of the ${on.length} on there run in ${where} from the import (created active), and once the import check passes they are paused in Grok Bot: ` + `${moved.map(routineLabel).join(', ') || 'none'}. Turn one back on ${ROUTINE_TOGGLE}.`;
+            }
+            if (activate) return `Grok Bot routines → ${on.length} on there stay on, and their copies in ${where} are created active: both run until one is turned off (--move-routines pauses the Grok Bot copies after the check).`;
+            return `Grok Bot routines → ${on.length} on there stay on; in ${where} they are ${to === 'hermes' ? 'created paused' : 'only written to ROUTINES.md'} (--move-routines turns them on in ${where} and pauses them in Grok Bot once the import check passes).`;
+        }
+        async function pauseSourceRoutines({ routines, passed, agentId, routineSwitch, pauseHere, onProgress = ()=>{} }) {
+            if (!routines.length) return {
+                status: 'none',
+                routines: []
+            };
+            if (!passed) {
+                return {
+                    status: 'left-on',
+                    reason: 'source routines left on: verification did not pass',
+                    routines: routines.map((r)=>({
+                            ...r,
+                            result: 'left-on'
+                        })),
+                    note: 'Their copies at the destination were created active, so both copies run until one is turned off: pause the destination copy, or fix what did not verify and run the same import again.'
+                };
+            }
+            const out = [];
+            for (const r of routines){
+                const byHand = `turn "${r.name}" off ${ROUTINE_TOGGLE}, or ${pauseHere(r)}`;
+                if (!r.id) {
+                    out.push({
+                        ...r,
+                        result: 'failed',
+                        error: 'the capture has no id for this routine',
+                        byHand
+                    });
+                    continue;
+                }
+                onProgress(`pausing routine "${r.name}" in Grok Bot`);
+                try {
+                    const now = await routineSwitch.setEnabled(agentId, r.id, false);
+                    if (now?.enabled === false) out.push({
+                        ...r,
+                        result: 'paused'
+                    });
+                    else out.push({
+                        ...r,
+                        result: now ? 'failed' : 'unknown',
+                        error: now ? 'the answer still shows it on' : 'the answer does not list this routine',
+                        byHand
+                    });
+                } catch (error) {
+                    const unknown = error?.effect === 'unknown' || error?.code === 'GATEWAY_REQUEST_FAILED' || Number(error?.status) >= 500;
+                    out.push({
+                        ...r,
+                        result: unknown ? 'unknown' : 'failed',
+                        error: String(error?.message ?? error).slice(0, 300),
+                        byHand
+                    });
+                }
+            }
+            const paused = out.filter((r)=>r.result === 'paused').length;
+            return {
+                status: paused === out.length ? 'paused' : paused ? 'partial' : 'not-paused',
+                routines: out,
+                turnBackOn: `Turn one back on ${ROUTINE_TOGGLE}.`
+            };
+        }
+        const routinesDone = (s)=>!s || s.status === 'paused' || s.status === 'none';
+        async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, hermes }) {
+            const activate = activateRoutines || moveRoutines;
             if (to !== 'hermes') {
                 const { previewTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
-                return previewTrinity({
+                const p = await previewTrinity({
                     archive,
                     to,
-                    activateRoutines,
+                    activateRoutines: activate,
                     ...trinityOpts({
                         via,
                         history,
@@ -37381,32 +37515,59 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
+                const line = routinesPreview({
+                    to,
+                    on: p.routinesOn,
+                    moved: p.plan.scheduled,
+                    activate,
+                    move: moveRoutines
+                });
+                return line ? {
+                    ...p,
+                    summary: p.summary + '\n' + line
+                } : p;
             }
-            const { dest, plan } = await hermesContext({
+            const { opened, dest, plan } = await hermesContext({
                 archive,
                 profile,
                 skills,
-                activateRoutines
+                activateRoutines: activate,
+                moveRoutines,
+                hermes
+            });
+            const line = routinesPreview({
+                to,
+                on: (0, _migration_capture_js__rspack_import_3.$r)(opened.capture.automations),
+                moved: hermesScheduled(plan),
+                activate,
+                move: moveRoutines
             });
             return {
                 exitCode: 0,
                 to,
                 destination: dest,
-                summary: (0, _migration_hermes_js__rspack_import_6.FN)(plan, dest),
+                summary: (0, _migration_hermes_js__rspack_import_6.FN)(plan, dest) + (line ? '\n' + line : ''),
                 plan: planFacts(plan)
             };
         }
-        async function importMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
+        async function importMigration({ archive, to, account, profile, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, hermes, exec, routineSwitch, onProgress = progress }) {
             if (!yes) throw new _migration_js__rspack_import_7.Py('Review gbot migrate preview first, then pass --yes to import.');
+            const control = moveRoutines ? routineSwitch ?? (0, _migration_source_js__rspack_import_5.T)({
+                account
+            }) : null;
+            const activate = activateRoutines || moveRoutines;
             if (to !== 'hermes') {
                 const { importTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
-                return importTrinity({
+                const r = await importTrinity({
                     archive,
                     to,
                     accept,
-                    activateRoutines,
+                    activateRoutines: activate,
                     onProgress,
                     keepDrive,
+                    ...exec ? {
+                        exec
+                    } : {},
                     ...trinityOpts({
                         via,
                         history,
@@ -37416,27 +37577,60 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
+                if (!control) return r;
+                const passed = r.exitCode === 0 && r.acceptance?.ok === true && r.verify.checks.some((c)=>c.area === 'schedules read-back' && c.ok && !c.informational);
+                const sourceRoutines = await pauseSourceRoutines({
+                    routines: r.scheduled ?? [],
+                    passed,
+                    agentId: r.botId,
+                    routineSwitch: control,
+                    pauseHere: pauseThere(to),
+                    onProgress
+                });
+                const { report: path, ...rest } = r;
+                const report = {
+                    ...rest,
+                    exitCode: r.exitCode === 0 && routinesDone(sourceRoutines) ? 0 : 3,
+                    sourceRoutines
+                };
+                (0, node_fs__rspack_import_0.writeFileSync)(path, JSON.stringify(report, null, 2) + '\n', {
+                    mode: 384
+                });
+                return {
+                    ...report,
+                    report: path
+                };
             }
-            const { opened, hermes, dest, plan } = await hermesContext({
+            const { opened, hermes: h, dest, plan } = await hermesContext({
                 archive,
                 profile,
                 skills,
-                activateRoutines
+                activateRoutines: activate,
+                moveRoutines,
+                hermes
             });
-            const applied = await (0, _migration_hermes_js__rspack_import_6.VE)(hermes, opened, plan, {
+            const applied = await (0, _migration_hermes_js__rspack_import_6.VE)(h, opened, plan, {
                 onProgress,
                 allowExisting: intoExisting
             });
             onProgress('reading the destination back');
-            const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(hermes, opened, plan);
+            const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(h, opened, plan);
             let acceptance = null;
-            if (accept) acceptance = await (0, _migration_hermes_js__rspack_import_6.Pg)(hermes, opened, plan, {
+            if (accept) acceptance = await (0, _migration_hermes_js__rspack_import_6.Pg)(h, opened, plan, {
                 onProgress,
                 usageDir: usageDir(opened.root, to, plan.profile)
             });
             const ok = verified.ok && (!acceptance || acceptance.ok);
+            const sourceRoutines = control ? await pauseSourceRoutines({
+                routines: hermesScheduled(plan),
+                passed: ok,
+                agentId: opened.capture.bot.id,
+                routineSwitch: control,
+                pauseHere: pauseThere(to, plan.profile),
+                onProgress
+            }) : undefined;
             const report = {
-                exitCode: ok ? 0 : 3,
+                exitCode: ok && routinesDone(sourceRoutines) ? 0 : 3,
                 to,
                 profile: plan.profile,
                 destination: dest.hermesVersion,
@@ -37445,6 +37639,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 steps: applied.steps,
                 verify: verified,
                 acceptance,
+                ...sourceRoutines ? {
+                    sourceRoutines
+                } : {},
                 plan: planFacts(plan),
                 finishedAt: new Date().toISOString()
             };
@@ -37457,14 +37654,15 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 report: path
             };
         }
-        async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, onProgress = progress }) {
+        async function checkMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, accept = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
+            const activate = activateRoutines || moveRoutines;
             if (to !== 'hermes') {
                 const { checkTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
                 return checkTrinity({
                     archive,
                     to,
                     accept,
-                    activateRoutines,
+                    activateRoutines: activate,
                     onProgress,
                     ...trinityOpts({
                         via,
@@ -37480,7 +37678,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 archive,
                 profile,
                 skills,
-                activateRoutines
+                activateRoutines: activate,
+                moveRoutines
             });
             const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(hermes, opened, plan);
             const acceptance = accept ? await (0, _migration_hermes_js__rspack_import_6.Pg)(hermes, opened, plan, {
@@ -37505,7 +37704,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 report: path
             };
         }
-        async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
+        async function runMigration({ account, bot, to, profile, out, maxFileMb, skills, via, history, folder, driveRemote, driveFolder, keepDrive = false, yes = false, accept = true, intoExisting = false, activateRoutines = false, moveRoutines = false, onProgress = progress }) {
             const captured = await captureToArchive({
                 account,
                 bot,
@@ -37523,7 +37722,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 folder,
                 driveRemote,
                 driveFolder,
-                activateRoutines
+                activateRoutines,
+                moveRoutines
             });
             if (!yes) {
                 return {
@@ -37531,12 +37731,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     stage: 'preview',
                     captured,
                     preview,
-                    next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''} --yes`
+                    next: `gbot migrate import ${JSON.stringify(captured.archive)} --to ${to}${profile ? ' --profile ' + profile : ''}${via && via !== 'auto' ? ' --via ' + via : ''}${history ? ' --history ' + history : ''}${skills ? ' --skills ' + skills : ''}${folder ? ' --folder ' + folder : ''}${driveRemote ? ' --drive-remote ' + driveRemote : ''}${driveFolder ? ' --drive-folder ' + driveFolder : ''}${moveRoutines ? `${account ? ' --account ' + account : ''} --move-routines` : activateRoutines ? ' --activate-routines' : ''} --yes`
                 };
             }
             const imported = await importMigration({
                 archive: captured.archive,
                 to,
+                account,
                 profile,
                 skills,
                 via,
@@ -37549,6 +37750,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 accept,
                 intoExisting,
                 activateRoutines,
+                moveRoutines,
                 onProgress
             });
             return {
@@ -37875,7 +38077,7 @@ else:
             return path.startsWith(base.endsWith(node_path__rspack_import_3.sep) ? base : base + node_path__rspack_import_3.sep) ? path : null;
         }
         const skillName = (s)=>/^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(s.files.find((f)=>f.rel === 'SKILL.md')?.bytes.toString('utf8') ?? '')?.[1]?.trim() ?? s.slug;
-        function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, now = ()=>new Date() }) {
+        function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, now = ()=>new Date() }) {
             const cap = archive.capture;
             if (cap.bot.kind !== 'bot') throw new _migration_js__rspack_import_4.Py('Only a bot (not a group) can become a Hermes profile.');
             const notMigrated = [];
@@ -38073,7 +38275,7 @@ else:
                         schedule: a.scheduleCron,
                         timezone: a.timezone,
                         prompt: pathNote + prompt,
-                        paused: !(activateRoutines && a.enabled),
+                        paused: !((activateRoutines || moveRoutines) && a.enabled),
                         sourceEnabled: a.enabled,
                         sourceId: a.id
                     });
@@ -38094,7 +38296,7 @@ else:
             ];
             if (side) notes.push(`${side} side conversation(s) from Grok Bot are imported as Hermes sessions titled "Grok Bot · ${botName} · side conversation N"; readable copies are in ${(0, node_path__rspack_import_3.join)(base, 'history')}.`);
             for (const t of open1)notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${t.content}`);
-            if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c)=>c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c)=>`"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. Resume one only after turning it off in Grok Bot, so it does not run twice.`);
+            if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c)=>c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c)=>`"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. ${moveRoutines ? 'The active ones replace their Grok Bot copies, which the migration pauses in Grok Bot once this profile is verified.' : 'Resume one only after turning it off in Grok Bot, so it does not run twice.'}`);
             if (unscheduled.length) notes.push(`Event-triggered Grok Bot routines not scheduled in Hermes: ${unscheduled.map((a)=>`"${a.name}" (${a.trigger})`).join('; ')}. Their prompts are in ${(0, node_path__rspack_import_3.join)(base, 'routines-not-scheduled.md')}.`);
             if (zones.size > 1) notes.push('Grok routines used several time zones; Hermes cron uses one profile time zone. Check each job schedule.');
             const memoryAll = [
@@ -39288,10 +39490,11 @@ else:
     },
     "./src/core/migration-source.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var _gateway_js__rspack_import_0 = __webpack_require__("./src/core/gateway.js");
-        var _migration_js__rspack_import_1 = __webpack_require__("./src/core/migration.js");
+        var _migration_capture_js__rspack_import_1 = __webpack_require__("./src/core/migration-capture.js");
+        var _migration_js__rspack_import_2 = __webpack_require__("./src/core/migration.js");
         async function openLiveCapture({ account, onProgress } = {}) {
             if (account && process.env.GROK_BOT_GATEWAY_URL && process.env.GROK_BOT_GATEWAY_TOKEN) {
-                throw new _migration_js__rspack_import_1.Py('Remove gateway overrides before selecting a migration account.');
+                throw new _migration_js__rspack_import_2.Py('Remove gateway overrides before selecting a migration account.');
             }
             const session = (0, _gateway_js__rspack_import_0.JX)({
                 account
@@ -39313,14 +39516,42 @@ else:
                     const url = (await presignMany([
                         relPath
                     ])).get(relPath);
-                    if (!url) throw new _migration_js__rspack_import_1.Py('The store did not presign ' + relPath + '.');
+                    if (!url) throw new _migration_js__rspack_import_2.Py('The store did not presign ' + relPath + '.');
                     return url;
                 },
                 fetchImpl: fetch,
                 onProgress
             };
         }
+        function openRoutineSwitch({ account } = {}) {
+            if (account && process.env.GROK_BOT_GATEWAY_URL && process.env.GROK_BOT_GATEWAY_TOKEN) {
+                throw new _migration_js__rspack_import_2.Py('Remove gateway overrides before selecting a migration account.');
+            }
+            const session = (0, _gateway_js__rspack_import_0.JX)({
+                account
+            });
+            return {
+                setEnabled: async (agentId, automationId, isEnabled)=>{
+                    const data = await (0, _gateway_js__rspack_import_0.xm)(session, {
+                        agentId,
+                        automationId,
+                        isEnabled
+                    });
+                    for (const a of data?.automations ?? []){
+                        let record;
+                        try {
+                            record = (0, _migration_capture_js__rspack_import_1.Hu)(JSON.parse(a.recordJson));
+                        } catch  {
+                            continue;
+                        }
+                        if (record.id === automationId) return record;
+                    }
+                    return null;
+                }
+            };
+        }
         __webpack_require__.d(__webpack_exports__, {
+            T: ()=>openRoutineSwitch,
             Z: ()=>openLiveCapture
         });
     },
@@ -39382,7 +39613,22 @@ else:
                 lines.push('', 'Delivered:');
                 for (const d of r.deliveries)lines.push(`  ${d.ok ? '✓' : '✗'} ${d.step}: ${d.state}${d.note ? ' — ' + d.note : ''}`);
             }
-            lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.' : 'Result: NOT fully verified — see the items marked ✗.');
+            const sr = r.sourceRoutines;
+            const at = (x)=>`${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
+            if (sr?.status === 'none') lines.push('', 'Grok Bot routines (--move-routines): none were on; nothing to pause.');
+            else if (sr?.status === 'left-on') {
+                lines.push('', 'Grok Bot routines (--move-routines):', `  ✗ ${sr.reason}`);
+                for (const x of sr.routines)lines.push(`    - ${at(x)} is still on in Grok Bot`);
+                lines.push(`  ${sr.note}`);
+            } else if (sr) {
+                lines.push('', 'Grok Bot routines (--move-routines):');
+                for (const x of sr.routines){
+                    lines.push(x.result === 'paused' ? `  ✓ paused ${at(x)}` : `  ✗ ${at(x)}: ${x.result === 'unknown' ? 'not known whether it was paused' : 'not paused'} (${x.error}); ${x.byHand}`);
+                }
+                if (sr.routines.some((x)=>x.result === 'paused')) lines.push(`  ${sr.turnBackOn}`);
+            }
+            const verified = r.verify?.ok !== false && (!r.acceptance || r.acceptance.ok);
+            lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.' : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every Grok Bot routine was paused — see the items marked ✗.' : 'Result: NOT fully verified — see the items marked ✗.');
             if (r.report) lines.push(`Report: ${r.report}`);
             return lines.join('\n');
         }
@@ -39396,10 +39642,11 @@ else:
         var node_fs__rspack_import_1 = __webpack_require__("node:fs");
         var node_path__rspack_import_2 = __webpack_require__("node:path");
         var _migration_archive_js__rspack_import_3 = __webpack_require__("./src/core/migration-archive.js");
-        var _migration_hermes_js__rspack_import_4 = __webpack_require__("./src/core/migration-hermes.js");
-        var _migration_js__rspack_import_5 = __webpack_require__("./src/core/migration.js");
-        var _migration_redact_js__rspack_import_6 = __webpack_require__("./src/core/migration-redact.js");
-        var _migration_zip_js__rspack_import_7 = __webpack_require__("./src/core/migration-zip.js");
+        var _migration_capture_js__rspack_import_4 = __webpack_require__("./src/core/migration-capture.js");
+        var _migration_hermes_js__rspack_import_5 = __webpack_require__("./src/core/migration-hermes.js");
+        var _migration_js__rspack_import_6 = __webpack_require__("./src/core/migration.js");
+        var _migration_redact_js__rspack_import_7 = __webpack_require__("./src/core/migration-redact.js");
+        var _migration_zip_js__rspack_import_8 = __webpack_require__("./src/core/migration-zip.js");
         const LABEL = {
             muse: 'Muse',
             dot: 'Your dot'
@@ -39422,16 +39669,16 @@ else:
                 'upload',
                 'drive',
                 'chat'
-            ].includes(via)) throw new _migration_js__rspack_import_5.Py('--via is auto, upload, drive or chat.');
-            if (driveRemote !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/.test(driveRemote)) throw new _migration_js__rspack_import_5.Py('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
-            if (via === 'drive' && !driveRemote) throw new _migration_js__rspack_import_5.Py('--via drive needs --drive-remote (an rclone remote for your Google Drive).');
+            ].includes(via)) throw new _migration_js__rspack_import_6.Py('--via is auto, upload, drive or chat.');
+            if (driveRemote !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*:$/.test(driveRemote)) throw new _migration_js__rspack_import_6.Py('--drive-remote is an rclone remote name such as gdrive: (see rclone listremotes).');
+            if (via === 'drive' && !driveRemote) throw new _migration_js__rspack_import_6.Py('--via drive needs --drive-remote (an rclone remote for your Google Drive).');
             if (driveFolder !== undefined && (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(driveFolder) || driveFolder.split('/').some((p)=>p === '..' || p === '.'))) {
-                throw new _migration_js__rspack_import_5.Py('--drive-folder is a Drive folder path such as gbot-migrations.');
+                throw new _migration_js__rspack_import_6.Py('--drive-folder is a Drive folder path such as gbot-migrations.');
             }
-            if (history !== undefined && !/^(full|none|recent(:\d{1,5})?)$/.test(history)) throw new _migration_js__rspack_import_5.Py('--history is full, none, recent or recent:N.');
-            if (skills !== undefined && !/^(all|index|none|[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*)$/.test(skills)) throw new _migration_js__rspack_import_5.Py('--skills is all, index, none or a comma-separated list of skill names.');
+            if (history !== undefined && !/^(full|none|recent(:\d{1,5})?)$/.test(history)) throw new _migration_js__rspack_import_6.Py('--history is full, none, recent or recent:N.');
+            if (skills !== undefined && !/^(all|index|none|[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*)$/.test(skills)) throw new _migration_js__rspack_import_6.Py('--skills is all, index, none or a comma-separated list of skill names.');
             if (folder !== undefined && (!/^(~\/|\/)[A-Za-z0-9._\-/]+$/.test(folder) || folder.split('/').some((p)=>p === '..' || p === '.'))) {
-                throw new _migration_js__rspack_import_5.Py('--folder is a path like ~/grok-bot/Name (letters, digits, . _ - /).');
+                throw new _migration_js__rspack_import_6.Py('--folder is a path like ~/grok-bot/Name (letters, digits, . _ - /).');
             }
             return {
                 via,
@@ -39489,7 +39736,7 @@ else:
             ' print(k,"MISSING",miss) if miss else print(k,e.hexdigest()[:12],m.hexdigest()[:12])'
         ].join('\n');
         function buildTrinityPlan(archive, seat, { activateRoutines = false, via = 'auto', history, skills, folder: folderOpt, salt = (0, node_crypto__rspack_import_0.randomBytes)(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
-            if (!LABEL[seat]) throw new _migration_js__rspack_import_5.Py('Unsupported trinity seat.');
+            if (!LABEL[seat]) throw new _migration_js__rspack_import_6.Py('Unsupported trinity seat.');
             trinityOptions({
                 via,
                 history,
@@ -39529,11 +39776,11 @@ else:
             }
             throw lastError;
         }
-        class TooBig extends _migration_js__rspack_import_5.Py {
+        class TooBig extends _migration_js__rspack_import_6.Py {
         }
         function planFor(archive, seat, { mode, auto, activateRoutines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
             const cap = archive.capture;
-            const name = (0, _migration_redact_js__rspack_import_6.aj)(cap.bot.name).text;
+            const name = (0, _migration_redact_js__rspack_import_7.aj)(cap.bot.name).text;
             const short = name.split(' · ')[0];
             const base = short.normalize('NFKD').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 40) || 'bot';
             const folderName = `${base}-${cap.bot.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
@@ -39546,9 +39793,9 @@ else:
             const files = [];
             let redacted = 0;
             const addFile = (rel0, content, what)=>{
-                const rel = rel0.split('/').map((seg)=>(0, _migration_redact_js__rspack_import_6.TA)(seg) ? 'x-' + sha(seg).slice(0, 16) : seg).join('/');
-                const r = Buffer.isBuffer(content) ? (0, _migration_redact_js__rspack_import_6.vT)(content) : {
-                    ...(0, _migration_redact_js__rspack_import_6.aj)(content),
+                const rel = rel0.split('/').map((seg)=>(0, _migration_redact_js__rspack_import_7.TA)(seg) ? 'x-' + sha(seg).slice(0, 16) : seg).join('/');
+                const r = Buffer.isBuffer(content) ? (0, _migration_redact_js__rspack_import_7.vT)(content) : {
+                    ...(0, _migration_redact_js__rspack_import_7.aj)(content),
                     bytes: null
                 };
                 if (!r.clean) {
@@ -39569,7 +39816,7 @@ else:
             const user = [], memory = [];
             for (const f of cap.box.filter((b)=>b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath))){
                 const bytes = archive.read(f.path);
-                const raw = (0, _migration_redact_js__rspack_import_6.vT)(bytes);
+                const raw = (0, _migration_redact_js__rspack_import_7.vT)(bytes);
                 if (!raw.text) {
                     notMigrated.push({
                         item: f.boxPath,
@@ -39579,8 +39826,8 @@ else:
                     continue;
                 }
                 const entries = [];
-                for (const e of (0, _migration_hermes_js__rspack_import_4._X)(bytes.toString('utf8'))){
-                    const c = (0, _migration_redact_js__rspack_import_6.aj)(e);
+                for (const e of (0, _migration_hermes_js__rspack_import_5._X)(bytes.toString('utf8'))){
+                    const c = (0, _migration_redact_js__rspack_import_7.aj)(e);
                     if (!c.clean) {
                         notMigrated.push({
                             item: `a memory entry in ${f.boxPath}`,
@@ -39625,17 +39872,17 @@ else:
                     slug,
                     list,
                     name: /\nname:\s*["']?([^\n"']+)/.exec(text)?.[1]?.trim() ?? slug,
-                    desc: (0, _migration_hermes_js__rspack_import_4.mk)(text),
+                    desc: (0, _migration_hermes_js__rspack_import_5.mk)(text),
                     text
                 };
             }).sort((a, b)=>a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0);
             const wanted = skillsMode === 'all' ? new Set(skillInfo.map((s)=>s.slug)) : skillsMode === 'index' || skillsMode === 'none' ? new Set() : new Set(skillsMode.split(','));
-            for (const w of wanted)if (!skillInfo.some((s)=>s.slug === w || s.name === w)) throw new _migration_js__rspack_import_5.Py(`No skill named "${w}" in this archive.`);
+            for (const w of wanted)if (!skillInfo.some((s)=>s.slug === w || s.name === w)) throw new _migration_js__rspack_import_6.Py(`No skill named "${w}" in this archive.`);
             const fullSkills = skillInfo.filter((s)=>wanted.has(s.slug) || wanted.has(s.name));
             const recentN = historyMode === 'full' ? Infinity : historyMode === 'none' ? 0 : Number(historyMode.split(':')[1] ?? DEFAULT_RECENT);
             const line = (m, who)=>`${m.role === 'user' ? 'User' : who}${m.timestampMs ? ' (' + new Date(m.timestampMs).toISOString().slice(0, 16).replace('T', ' ') + ' UTC)' : ''}: ${m.text}`;
             const shownMain = Number.isFinite(recentN) ? main.rows.slice(main.rows.length - Math.min(recentN, main.rows.length)) : main.rows;
-            addFile('ROLE.md', `# ${name}\n${cap.bot.title ? `\nTitle: ${(0, _migration_redact_js__rspack_import_6.aj)(cap.bot.title).text}\n` : ''}\nRole and standing instructions of this Grok Bot, word for word:\n\n${cap.bot.instructions}\n`);
+            addFile('ROLE.md', `# ${name}\n${cap.bot.title ? `\nTitle: ${(0, _migration_redact_js__rspack_import_7.aj)(cap.bot.title).text}\n` : ''}\nRole and standing instructions of this Grok Bot, word for word:\n\n${cap.bot.instructions}\n`);
             addFile('MEMORY.md', [
                 `# What ${short} remembered`,
                 '',
@@ -39776,7 +40023,7 @@ else:
             if (!activateRoutines) for (const a of scheduled)notMigrated.push({
                 item: `routine "${a.name}"`,
                 reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`,
-                alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --activate-routines`
+                alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (schedules it here and pauses the Grok copy after the check)`
             });
             for (const a of events)notMigrated.push({
                 item: `routine "${a.name}"`,
@@ -39903,7 +40150,7 @@ else:
                 'remember'
             ]);
             if (upload) {
-                const zip = (0, _migration_zip_js__rspack_import_7.j)(files.map((f)=>({
+                const zip = (0, _migration_zip_js__rspack_import_8.j)(files.map((f)=>({
                         path: f.rel,
                         bytes: f.bytes
                     })));
@@ -39911,8 +40158,8 @@ else:
                 const zipName = `grok-bot-${folderName}.zip`;
                 const digest = sha(zip);
                 const path = bundlePath ?? (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(archive.root), `${(0, node_path__rspack_import_2.basename)(archive.root)}.${seat}-bundle-${digest.slice(0, 16)}.zip`);
-                if (!(0, node_fs__rspack_import_1.existsSync)(path)) (0, _migration_js__rspack_import_5.t9)(path, zip);
-                else if (sha((0, node_fs__rspack_import_1.readFileSync)(path)) !== digest) throw new _migration_js__rspack_import_5.Py(`${path} exists with other content; remove it and run again.`);
+                if (!(0, node_fs__rspack_import_1.existsSync)(path)) (0, _migration_js__rspack_import_6.t9)(path, zip);
+                else if (sha((0, node_fs__rspack_import_1.readFileSync)(path)) !== digest) throw new _migration_js__rspack_import_6.Py(`${path} exists with other content; remove it and run again.`);
                 bundle = {
                     path,
                     bytes: zip.length,
@@ -39966,7 +40213,7 @@ else:
                 const marker = `Q${questions.length + 1}:`;
                 const text = `${q.text}\nStart your reply with ${marker}`;
                 const expect = [
-                    ...new Set(q.expect.filter((t)=>t && norm(t).length >= 2 && !(0, _migration_redact_js__rspack_import_6.TA)(t) && !norm(text).includes(norm(t))))
+                    ...new Set(q.expect.filter((t)=>t && norm(t).length >= 2 && !(0, _migration_redact_js__rspack_import_7.TA)(t) && !norm(text).includes(norm(t))))
                 ];
                 if (!expect.length) return;
                 questions.push({
@@ -39979,8 +40226,8 @@ else:
                     } : {}
                 });
             };
-            const clean = (t)=>(0, _migration_redact_js__rspack_import_6.aj)(t).text.replace(/\[redacted\]/g, ' ');
-            const roleTokens = (0, _migration_hermes_js__rspack_import_4.v0)(clean(cap.bot.instructions), 4);
+            const clean = (t)=>(0, _migration_redact_js__rspack_import_7.aj)(t).text.replace(/\[redacted\]/g, ' ');
+            const roleTokens = (0, _migration_hermes_js__rspack_import_5.v0)(clean(cap.bot.instructions), 4);
             ask({
                 area: 'memory',
                 note: contextNote,
@@ -40011,10 +40258,10 @@ else:
                 area: 'open-tasks',
                 note: contextNote,
                 text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`,
-                expect: open1.flatMap((t)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(t.content), 1)).slice(0, 3)
+                expect: open1.flatMap((t)=>(0, _migration_hermes_js__rspack_import_5.v0)(clean(t.content), 1)).slice(0, 3)
             });
             const facts = [
-                ...new Set(user.map((u)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(u), 1)[0]).filter(Boolean))
+                ...new Set(user.map((u)=>(0, _migration_hermes_js__rspack_import_5.v0)(clean(u), 1)[0]).filter(Boolean))
             ].slice(0, 3);
             if (facts.length) ask({
                 area: 'memory-file',
@@ -40031,12 +40278,12 @@ else:
                 min: Math.min(2, cap.automations.length)
             });
             const opening = (t)=>clean(t.replace(/^---\n[\s\S]*?\n---\n/, '')).slice(0, 1200);
-            const skill = fullSkills.find((x)=>(0, _migration_hermes_js__rspack_import_4.v0)(opening(x.text), 1).length) ?? skillInfo.find((l)=>(0, _migration_hermes_js__rspack_import_4.v0)(clean(l.desc), 1).length);
+            const skill = fullSkills.find((x)=>(0, _migration_hermes_js__rspack_import_5.v0)(opening(x.text), 1).length) ?? skillInfo.find((l)=>(0, _migration_hermes_js__rspack_import_5.v0)(clean(l.desc), 1).length);
             if (skill && fullSkills.includes(skill)) ask({
                 area: 'skills',
                 note: contextNote,
                 text: `Open ${folder}/skills/${safeSegment(skill.slug)}/SKILL.md on your computer and quote its first steps.`,
-                expect: (0, _migration_hermes_js__rspack_import_4.v0)(opening(skill.text), 3),
+                expect: (0, _migration_hermes_js__rspack_import_5.v0)(opening(skill.text), 3),
                 min: 1
             });
             else if (skill && skillsMode !== 'none') ask({
@@ -40044,18 +40291,18 @@ else:
                 note: contextNote,
                 text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`,
                 expect: [
-                    (0, _migration_hermes_js__rspack_import_4.v0)(clean(skill.desc), 1)[0]
+                    (0, _migration_hermes_js__rspack_import_5.v0)(clean(skill.desc), 1)[0]
                 ]
             });
             const minute = (m)=>m.timestampMs ? new Date(m.timestampMs).toISOString().slice(0, 16).replace('T', ' ') : null;
             const mine = shownMain.filter((m)=>m.role === 'user');
             const once = (m)=>mine.filter((x)=>minute(x) === minute(m)).length === 1;
-            const pick = mine.find((m)=>minute(m) && once(m) && !(0, _migration_redact_js__rspack_import_6.aj)(m.text).count && (0, _migration_hermes_js__rspack_import_4.v0)(clean(m.text), 1).length);
+            const pick = mine.find((m)=>minute(m) && once(m) && !(0, _migration_redact_js__rspack_import_7.aj)(m.text).count && (0, _migration_hermes_js__rspack_import_5.v0)(clean(m.text), 1).length);
             if (pick && recentN > 0) ask({
                 area: 'history',
                 note: contextNote,
                 text: `Open ${folder}/HISTORY.md on your computer and quote the message I sent at ${minute(pick)} UTC.`,
-                expect: (0, _migration_hermes_js__rspack_import_4.v0)(clean(pick.text), 2),
+                expect: (0, _migration_hermes_js__rspack_import_5.v0)(clean(pick.text), 2),
                 min: 1
             });
             if (roleTokens.length) ask({
@@ -40083,8 +40330,8 @@ else:
                 contains: scheduled.filter((a)=>a.enabled).map((a)=>a.name)
             });
             for (const n of notMigrated){
-                n.item = (0, _migration_redact_js__rspack_import_6.aj)(n.item).text;
-                n.reason = (0, _migration_redact_js__rspack_import_6.aj)(n.reason).text;
+                n.item = (0, _migration_redact_js__rspack_import_7.aj)(n.item).text;
+                n.reason = (0, _migration_redact_js__rspack_import_7.aj)(n.reason).text;
             }
             const titles = seat === 'muse' ? {
                 chat: {
@@ -40094,9 +40341,9 @@ else:
                     title: `Grok Bot · ${short} · check`
                 }
             } : {};
-            for (const s of steps)(0, _migration_redact_js__rspack_import_6.v7)(s.text, `step ${s.id}`);
-            for (const q of questions)(0, _migration_redact_js__rspack_import_6.v7)(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
-            (0, _migration_redact_js__rspack_import_6.v7)(JSON.stringify(titles), 'the chat titles');
+            for (const s of steps)(0, _migration_redact_js__rspack_import_7.v7)(s.text, `step ${s.id}`);
+            for (const q of questions)(0, _migration_redact_js__rspack_import_7.v7)(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
+            (0, _migration_redact_js__rspack_import_7.v7)(JSON.stringify(titles), 'the chat titles');
             const id = 'gbot-' + sha(JSON.stringify([
                 cap.bot.id,
                 cap.capturedAt,
@@ -40136,7 +40383,8 @@ else:
                     folder,
                     bundle,
                     units: expected,
-                    files: files.length
+                    files: files.length,
+                    scheduled: activateRoutines ? (0, _migration_capture_js__rspack_import_4.$r)(cap.automations) : []
                 }
             };
         }
@@ -40151,7 +40399,7 @@ else:
             for (const s of plan.steps)lines.push(`  ${s.id.padEnd(14)} ${s.text.split('\n')[0].slice(0, 100)}`);
             if (plan.notMigrated.length) {
                 lines.push('Not migrated as-is (with the alternative):');
-                for (const n of (0, _migration_hermes_js__rspack_import_4.OV)(plan.notMigrated))lines.push(`  - ${n.item}: ${n.reason} → ${n.alternative}`);
+                for (const n of (0, _migration_hermes_js__rspack_import_5.OV)(plan.notMigrated))lines.push(`  - ${n.item}: ${n.reason} → ${n.alternative}`);
             }
             return lines.join('\n');
         }
@@ -40168,6 +40416,7 @@ else:
                 exitCode: 0,
                 to,
                 summary: summarizeTrinityPlan(plan),
+                routinesOn: (0, _migration_capture_js__rspack_import_4.$r)(opened.capture.automations),
                 plan: {
                     id: plan.id,
                     via: plan.delivery.via,
@@ -40177,6 +40426,7 @@ else:
                     steps: plan.steps.length,
                     checks: plan.checks,
                     questions: plan.questions.length,
+                    scheduled: plan.delivery.scheduled,
                     notMigrated: plan.notMigrated
                 }
             };
@@ -40211,7 +40461,7 @@ else:
             const target = `${remote}${folder}/${name}`;
             const bytes = (0, node_fs__rspack_import_1.readFileSync)(bundle.path);
             if ((0, node_crypto__rspack_import_0.createHash)('sha256').update(bytes).digest('hex') !== bundle.sha256) {
-                throw new _migration_js__rspack_import_5.Py(`${bundle.path} is not the bundle this plan was built from; nothing was uploaded or sent.`);
+                throw new _migration_js__rspack_import_6.Py(`${bundle.path} is not the bundle this plan was built from; nothing was uploaded or sent.`);
             }
             const md5 = (0, node_crypto__rspack_import_0.createHash)('md5').update(bytes).digest('hex');
             const remoteMd5 = async ()=>{
@@ -40237,8 +40487,8 @@ else:
                 input: bytes,
                 timeoutMs: 60 * 60000
             });
-            if (up.code !== 0) throw new _migration_js__rspack_import_5.Py(`rclone could not put the bundle in Google Drive (exit ${up.code}): ${(up.stderr || up.stdout).trim().split('\n').filter((l)=>!/NOTICE/.test(l)).slice(-2).join(' ').slice(0, 300)}`);
-            if (await remoteMd5() !== md5) throw new _migration_js__rspack_import_5.Py(`Google Drive reports other bytes for ${target}; nothing was sent to the agent.`);
+            if (up.code !== 0) throw new _migration_js__rspack_import_6.Py(`rclone could not put the bundle in Google Drive (exit ${up.code}): ${(up.stderr || up.stdout).trim().split('\n').filter((l)=>!/NOTICE/.test(l)).slice(-2).join(' ').slice(0, 300)}`);
+            if (await remoteMd5() !== md5) throw new _migration_js__rspack_import_6.Py(`Google Drive reports other bytes for ${target}; nothing was sent to the agent.`);
             return target;
         }
         async function trinityRun(exec, bin, to, path, { accept, redo = [], checkOnly = false }) {
@@ -40267,12 +40517,12 @@ else:
             try {
                 result = JSON.parse(r.stdout.trim());
             } catch  {
-                throw new _migration_js__rspack_import_5.Py(`trinity-cli migrate failed (exit ${r.code}): ${(r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`);
+                throw new _migration_js__rspack_import_6.Py(`trinity-cli migrate failed (exit ${r.code}): ${(r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`);
             }
-            if (result.error) throw new _migration_js__rspack_import_5.Py('trinity-cli: ' + result.error);
+            if (result.error) throw new _migration_js__rspack_import_6.Py('trinity-cli: ' + result.error);
             return result;
         }
-        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, onProgress, exec = _migration_hermes_js__rspack_import_4.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
+        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, onProgress, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
                 activateRoutines,
@@ -40287,7 +40537,7 @@ else:
                     code: 127,
                     stdout: ''
                 }));
-            if (help.code !== 0 || !/--check-only/.test(help.stdout ?? '')) throw new _migration_js__rspack_import_5.Py(`${bin} has no migrate --check-only (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
+            if (help.code !== 0 || !/--check-only/.test(help.stdout ?? '')) throw new _migration_js__rspack_import_6.Py(`${bin} has no migrate --check-only (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
             const path = planFile(opened.root, to);
             const { delivery, ...wire } = plan;
             (0, node_fs__rspack_import_1.writeFileSync)(path, JSON.stringify(wire, null, 2) + '\n', {
@@ -40339,12 +40589,14 @@ else:
                 to,
                 archive: opened.root,
                 bot: opened.capture.bot.name,
+                botId: opened.capture.bot.id,
                 plan: path,
                 trinityState: result.state_path,
                 driveCopy,
                 via: delivery.via,
                 folder: delivery.folder,
                 bundle: delivery.bundle,
+                scheduled: delivery.scheduled,
                 checkOnly,
                 stopped: result.stopped,
                 repaired,

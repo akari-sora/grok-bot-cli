@@ -41,7 +41,24 @@ export function importText(r) {
     lines.push('', 'Delivered:');
     for (const d of r.deliveries) lines.push(`  ${d.ok ? '✓' : '✗'} ${d.step}: ${d.state}${d.note ? ' — ' + d.note : ''}`);
   }
-  lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.' : 'Result: NOT fully verified — see the items marked ✗.');
+  const sr = r.sourceRoutines;
+  const at = (x) => `${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
+  if (sr?.status === 'none') lines.push('', 'Grok Bot routines (--move-routines): none were on; nothing to pause.');
+  else if (sr?.status === 'left-on') {
+    lines.push('', 'Grok Bot routines (--move-routines):', `  ✗ ${sr.reason}`);
+    for (const x of sr.routines) lines.push(`    - ${at(x)} is still on in Grok Bot`);
+    lines.push(`  ${sr.note}`);
+  } else if (sr) {
+    lines.push('', 'Grok Bot routines (--move-routines):');
+    for (const x of sr.routines) {
+      lines.push(x.result === 'paused' ? `  ✓ paused ${at(x)}` : `  ✗ ${at(x)}: ${x.result === 'unknown' ? 'not known whether it was paused' : 'not paused'} (${x.error}); ${x.byHand}`);
+    }
+    if (sr.routines.some((x) => x.result === 'paused')) lines.push(`  ${sr.turnBackOn}`);
+  }
+  const verified = r.verify?.ok !== false && (!r.acceptance || r.acceptance.ok);
+  lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.'
+    : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every Grok Bot routine was paused — see the items marked ✗.'
+      : 'Result: NOT fully verified — see the items marked ✗.');
   if (r.report) lines.push(`Report: ${r.report}`);
   return lines.join('\n');
 }

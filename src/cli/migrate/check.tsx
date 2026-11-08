@@ -22,6 +22,7 @@ export const config = {
       history: { description: 'Muse/dot history: full, recent:N or none (default: upload full, chat recent:30)', type: 'string' },
       folder: { description: 'Muse/dot folder on the agent\'s computer (default ~/grok-bot/<bot>)', type: 'string' },
       activateRoutines: { description: 'Same value as at import', type: 'boolean' },
+      moveRoutines: { description: 'Same value as at import (plans the destination as --activate-routines does; pauses nothing)', type: 'boolean' },
       accept: { description: 'Also run the behavioral acceptance checks', type: 'boolean' },
     },
     required: ['archive', 'to'],
@@ -41,6 +42,7 @@ export const inputSchema = z.object({
   history: z.string().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
   folder: z.string().min(1).optional(),
   activateRoutines: z.boolean().default(false),
+  moveRoutines: z.boolean().default(false),
   accept: z.boolean().default(false),
 }).strict();
 export const resultSchema = migrationResultSchema;
