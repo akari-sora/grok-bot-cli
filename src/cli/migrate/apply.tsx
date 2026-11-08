@@ -3,18 +3,19 @@ import type { CliRouteConfig, CliRouteProps } from 'agent-bundle';
 import { z } from 'zod';
 import { migrationResult, migrationResultSchema } from '../../core/migration-route.js';
 import { applyMigration } from '../../core/migration.js';
+import { MIGRATION_TARGETS } from '../../core/migration-targets.js';
 
 export const config = {
-  description: 'Stage new OpenClaw workspaces after --yes; never activates agents or changes existing state.',
+  description: 'Create a new destination package after --yes; no live agent activation or message delivery.',
   exitCode: 'result',
   inputJsonSchema: {
     additionalProperties: false,
     properties: {
       archive: { description: 'Verified gbot migration archive directory', type: 'string' },
-      to: { description: 'Offline staging target', enum: ['openclaw'], default: 'openclaw', type: 'string' },
-      includeSkills: { description: 'Explicitly stage user workflow text as loadable skills; review before activation', type: 'boolean' },
-      out: { description: 'New staging directory, not an existing OpenClaw home', type: 'string' },
-      yes: { description: 'Confirm the reviewed staging plan', type: 'boolean' },
+      to: { description: 'Destination format; see migrate targets', enum: [...MIGRATION_TARGETS], default: 'openclaw', type: 'string' },
+      includeSkills: { description: 'Include observed user workflow text in native skills or handoff packets', type: 'boolean' },
+      out: { description: 'New output directory, not an existing agent home', type: 'string' },
+      yes: { description: 'Confirm the reviewed local conversion', type: 'boolean' },
     },
     required: ['archive', 'out'],
     type: 'object',
@@ -24,7 +25,7 @@ export const config = {
 
 export const inputSchema = z.object({
   archive: z.string().min(1),
-  to: z.literal('openclaw').default('openclaw'),
+  to: z.enum(MIGRATION_TARGETS).default('openclaw'),
   includeSkills: z.boolean().default(false),
   out: z.string().min(1),
   yes: z.boolean().default(false),
