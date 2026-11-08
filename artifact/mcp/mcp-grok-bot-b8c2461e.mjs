@@ -67009,15 +67009,39 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }), ref);
         }
         async function createAgent(session, input) {
-            const data = await gatewayCall(session, "createAgent", {
+            const fields = {
                 name: input.name,
                 description: input.description || "",
                 title: input.title || "",
-                avatarShape: assertAvatar("shape", input.avatarShape, AVATAR_SHAPES),
-                avatarColor: assertAvatar("color", input.avatarColor, AVATAR_COLORS),
+                avatarShape: assertAvatar("shape", input.avatarShape, AVATAR_SHAPES) || "",
+                avatarColor: assertAvatar("color", input.avatarColor, AVATAR_COLORS) || ""
+            };
+            if (hasBackend(session)) {
+                const agentId = randomUUID();
+                let data;
+                try {
+                    data = await backendCall(session, "CreateGrokBotTemporalAgent", {
+                        agentId,
+                        ...fields,
+                        harness: "GROK_BOT_AGENT_HARNESS_KIND_TEMPORAL",
+                        kickstartRequested: false,
+                        introductionSuppressed: true
+                    }, {
+                        timeoutMs: ROOM_TIMEOUT_MS
+                    });
+                } catch (error) {
+                    if (error instanceof GatewayError && (error.code === "GATEWAY_TIMEOUT" || error.code === "GATEWAY_REQUEST_FAILED" || (error.status ?? 0) >= 500)) {
+                        error.message += " The bot may have been created; run gbot bots list before trying again.";
+                    }
+                    throw error;
+                }
+                if (data?.agent?.agentId !== agentId) throw new GatewayError("The server did not confirm the new bot's id; run gbot bots list before trying again.");
+                return serverRecord(data.agent);
+            }
+            return unwrapOne(await gatewayCall(session, "createAgent", {
+                ...fields,
                 origin: "user"
-            });
-            return unwrapOne(data);
+            }));
         }
         function profileChanges(patch) {
             if (patch.name !== undefined && !String(patch.name).trim()) {

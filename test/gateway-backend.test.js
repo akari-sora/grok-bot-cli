@@ -1430,3 +1430,18 @@ test("summarize marks a record from the box roster, and only then", () => {
   assert.equal("roster" in summarize(base), false);
   assert.equal("harness" in summarize({ ...base, harness: "temporal", serverId: "1" }), false);
 });
+
+test("bots create on 0.78 goes to the backend like the app: a client id, the temporal harness, no introduction", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { CreateGrokBotTemporalAgent: (body) => ({ agent: { ...bot(body.agentId, body.name), harness: "temporal" } }) },
+  });
+  const { createAgent } = await import("../src/core/gateway.js");
+  const rec = await run((session) => createAgent(session, { name: "Demo", description: "Plans trips.", avatarShape: "cloud", avatarColor: "blue" }));
+  const [sent] = rpcCalls(calls, "CreateGrokBotTemporalAgent");
+  assert.match(sent.body.agentId, UUID_V4);
+  assert.equal(sent.body.harness, "GROK_BOT_AGENT_HARNESS_KIND_TEMPORAL");
+  assert.equal(sent.body.introductionSuppressed, true);
+  assert.equal(sent.body.kickstartRequested, false);
+  assert.equal(rec.id, sent.body.agentId);
+  assert.equal(boxCalls(calls, "createAgent").length, 0, "the removed box gateway is not called");
+});
