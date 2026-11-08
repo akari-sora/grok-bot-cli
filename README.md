@@ -137,10 +137,12 @@ The same bot to Muse and to Your dot: one zip each (4.2 MB, 329 files, two messa
 - `--history full|recent:N|none`: how much conversation (upload `full`, chat `recent:30`).
 - `--skills all|index|none|a,b`: which skills (`index` is names and purpose only; Hermes takes `all` or `none`).
 - `--folder PATH`: the folder on the agent's computer.
+- Routines: by default nothing in Grok Bot changes (its routines keep running there; Hermes gets them paused, Muse/dot in ROUTINES.md).
 - `--activate-routines` (every destination): create the scheduled routines that are on in Grok Bot as active schedules; the Grok Bot copies keep running.
-- `--move-routines` (every destination): move them: create them active, then pause them in Grok Bot once the import check passes (`SetGrokBotAgentAutomationEnabled`, one request per routine, never retried). Give `import` the bot's login with `--account`. The guided flow asks when a bot has routines that are on.
+- `--move-routines` (every destination): move them, switched over with a short gap and never both running: created paused at the destination, paused in Grok Bot once the import check passes (`SetGrokBotAgentAutomationEnabled`, one request per routine, never retried), then turned on at the destination; one that does not turn on there is turned back on in Grok Bot (rolled back). Safe for routines with side effects. Give `import` the bot's login with `--account`. The guided flow asks when a bot has routines that are on: keep them off at the destination (default), run them in both, or move them, and for the last two which ones.
+- `--routines ID_OR_NAME,…` (every destination): limit `--activate-routines` or `--move-routines` to those routines (captured id or exact name; an unknown one stops with the list of valid ones). The others stay as by default and are never paused in Grok Bot.
 
-**What is checked.** Hermes is read back through Hermes' own code, then asked questions with `hermes -p`. Muse and dot run one read-only command on their computer that prints a salted SHA-256 for each part; then they get questions whose answers need words only the migrated data has. That is a behavioural test, not a proof. Known credential paths are not read, and known token formats are replaced with `[redacted]` before anything leaves the private local archive (a match on known formats, not every secret). Routines start paused in Hermes; after turning the Grok Bot copy off, run `hermes -p grok-<bot> cron resume <id>`, or import with `--move-routines`, which turns them on at the destination and pauses them in Grok Bot only after the import verified (nothing is paused when it did not; turn one back on in the Grok Bot app: Routines → toggle). Exit codes: 0 migrated and verified, 3 imported but something did not verify (or a routine was not paused), 2 usage or missing `--yes`, 1 other errors.
+**What is checked.** Hermes is read back through Hermes' own code, then asked questions with `hermes -p`. Muse and dot run one read-only command on their computer that prints a salted SHA-256 for each part; then they get questions whose answers need words only the migrated data has. That is a behavioural test, not a proof. Known credential paths are not read, and known token formats are replaced with `[redacted]` before anything leaves the private local archive (a match on known formats, not every secret). Routines start paused in Hermes; after turning the Grok Bot copy off, run `hermes -p grok-<bot> cron resume <id>`, or import with `--move-routines`, which switches them over only after the import verified: paused in Grok Bot first, then turned on at the destination (a short gap, never both running; nothing is paused when it did not verify; turn one back on in the Grok Bot app: Routines → toggle). Exit codes: 0 migrated and verified, 3 imported but something did not verify (or a routine was not paused), 2 usage or missing `--yes`, 1 other errors.
 
 **Without a terminal.** The **Move to Hermes** bot asks before each command and runs `gbot migrate` on your computer. Add it from its public template: <https://x.ai/bot/y2AFnYLdbz5T66loRBHar>. Create it with `gbot bots create --name "Move to Hermes" --description "$(cat templates/move-to-hermes.md)"`, or share it as a Grok Bot template: `gbot bots template "Move to Hermes"` prints the x.ai link, `--show` reviews the draft and `--publish` publishes it ([docs/move-to-hermes.md](docs/move-to-hermes.md)). It moves bots to Hermes only.
 
@@ -155,10 +157,12 @@ Guide, destination differences and limits: [docs/migration.md](docs/migration.md
 - `--history full|recent:N|none`：帶多少對話（upload 預設 `full`，chat 預設 `recent:30`）。
 - `--skills all|index|none|a,b`：帶哪些 skill（`index` 只帶名稱與用途；Hermes 只接受 `all` 或 `none`）。
 - `--folder PATH`：對方電腦上的資料夾。
+- 排程：預設 Grok Bot 那邊什麼都不改（排程照常在 Grok Bot 跑；Hermes 建成暫停的，Muse／dot 只記在 ROUTINES.md）。
 - `--activate-routines`（三個目的地都適用）：Grok Bot 裡開著的定時排程，在目的地建成啟用的；Grok Bot 那份照樣在跑。
-- `--move-routines`（三個目的地都適用）：搬排程：在目的地建成啟用的，匯入的檢查通過後再在 Grok Bot 關掉（`SetGrokBotAgentAutomationEnabled`，一個排程一個請求，不會重試）。`import` 要用 `--account` 指定這個 bot 的登入。引導模式遇到有開著排程的 bot 會問。
+- `--move-routines`（三個目的地都適用）：搬排程，中間留一小段空檔、絕不兩邊同時跑：目的地先建成暫停的，匯入的檢查通過後先在 Grok Bot 關掉（`SetGrokBotAgentAutomationEnabled`，一個排程一個請求，不會重試），再在目的地打開；目的地打不開的，會把 Grok Bot 那個打開回來（rolled back）。有副作用的排程也不會跑兩次。`import` 要用 `--account` 指定這個 bot 的登入。引導模式遇到有開著排程的 bot 會問：目的地先關著（預設）、兩邊都跑、或搬過去；選後兩個再問要哪幾個。
+- `--routines ID或名稱,…`（三個目的地都適用）：只讓 `--activate-routines` 或 `--move-routines` 作用在這幾個排程（擷取到的 id 或完整名稱；寫錯會列出可以選的並停下）。其他的照預設，也絕不會在 Grok Bot 被關掉。
 
-**怎麼驗。** Hermes 用 Hermes 自己的程式讀回，再用 `hermes -p` 問問題。Muse 和 dot 在它們的電腦上跑一行只讀指令，印出每一部分的加鹽 SHA-256；接著問只有搬過去的資料才答得出來的問題。這是行為測試，不是證明。已知的憑證路徑不讀；已知格式的 token 在離開本機私人存檔前換成 `[redacted]`（只比對已知格式，不是所有秘密都認得出來）。排程在 Hermes 預設先暫停；在 Grok Bot 關掉原本那份後，用 `hermes -p grok-<bot> cron resume <id>` 打開；或匯入時加 `--move-routines`：在目的地打開，匯入驗證通過後才在 Grok Bot 關掉（沒通過就一個都不關；要重新打開，在 Grok Bot App：Routines → 切換開關）。結束碼：0 搬完並驗證；3 搬了但有項目沒驗過（或有排程沒關掉）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。
+**怎麼驗。** Hermes 用 Hermes 自己的程式讀回，再用 `hermes -p` 問問題。Muse 和 dot 在它們的電腦上跑一行只讀指令，印出每一部分的加鹽 SHA-256；接著問只有搬過去的資料才答得出來的問題。這是行為測試，不是證明。已知的憑證路徑不讀；已知格式的 token 在離開本機私人存檔前換成 `[redacted]`（只比對已知格式，不是所有秘密都認得出來）。排程在 Hermes 預設先暫停；在 Grok Bot 關掉原本那份後，用 `hermes -p grok-<bot> cron resume <id>` 打開；或匯入時加 `--move-routines`：匯入驗證通過後才切換，先在 Grok Bot 關掉、再在目的地打開（中間一小段空檔，絕不兩邊同時跑；沒通過就一個都不關；要重新打開，在 Grok Bot App：Routines → 切換開關）。結束碼：0 搬完並驗證；3 搬了但有項目沒驗過（或有排程沒關掉）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。
 
 **不開終端機。** **Move to Hermes** bot 會在你的電腦上逐條徵求同意、替你跑 `gbot migrate`。從公開範本加入：<https://x.ai/bot/y2AFnYLdbz5T66loRBHar>。用上面的 `gbot bots create` 命令建立，或用 Grok Bot 範本分享：`gbot bots template "Move to Hermes"` 會印出 x.ai 連結，`--show` 檢查草稿，`--publish` 發布（見 [docs/move-to-hermes.md](docs/move-to-hermes.md)）。它只搬到 Hermes。
 
@@ -188,7 +192,7 @@ Grok Bot 0.78.4（2026-11-03）把每個 bot 都放到伺服器上執行。2026-
 | `bots delete`, `groups delete` | `DeleteGrokBotAgent` |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested / 照 App 對應，未實測) |
 | `thread`, the `reconcile` tail, the relay, `approvals list`, the MCP thread tool | `ListGrokBotTranscriptEntries` |
-| `migrate import`, `migrate run` with `--move-routines` | `SetGrokBotAgentAutomationEnabled` `{ agentId, automationId, isEnabled: false, timeZone }`, after the import verified / 匯入驗證通過後 |
+| `migrate import`, `migrate run` with `--move-routines` | `SetGrokBotAgentAutomationEnabled` `{ agentId, automationId, isEnabled: false, timeZone }`, after the import verified / 匯入驗證通過後; `isEnabled: true` only to roll back a routine the destination could not turn on / 目的地打不開時才打開回來 |
 
 `thread --root` and `skills` stay on the box gateway. A session without an access token (`GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`, or a descriptor login with no saved access token) keeps the gateway calls, and on 0.78.x its sends get the 502. Roster merge, name matching, delivery states and the live gateway observations: [FORK.md](FORK.md#grok-bot-078x-server-hosted-bots).
 
@@ -453,7 +457,7 @@ Sends have a 15-second deadline and reads 30 seconds, both including the respons
 | most commands / 大部分命令 | 0 done (a send can be `delivery: "unknown"` and still exit 0); 1 usage error or gateway failure (with `--json`, `send`, `wake` and the `codex` commands print the failure as a JSON document with `exitCode` on stdout); 2 unknown option, including `--account` before the subcommand |
 | `gbot wake` | 0 running, or `--check` succeeded; 2 usage; 3 could not wake; 4 timed out before the box was ready |
 | `gbot bots template` | 0 the template was seen, or `--status`, `--show` or `--publish` succeeded; 3 the message went out (or its delivery is unknown) but no template appeared within `--wait`: run `--status` later, do not send again; 1 rejected, or nothing sent |
-| `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify; 2 usage or missing `--yes`; 1 other errors |
+| `gbot migrate` | 0 migrated and verified; 3 imported but something did not verify; 2 an invalid option (nothing ran); 1 other errors, including a missing `--yes` (nothing was imported) |
 | `gbot config import` | 0 imported; 2 invalid file (nothing written); 3 imported, but some aliased logins are not signed in on this machine |
 | `gbot wear pair` | 0 paired; 1–6 and 129/130/143 as listed in [FORK.md](FORK.md#pair-a-wear-os-watch-gbot-wear-pair) |
 

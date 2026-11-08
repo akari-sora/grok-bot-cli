@@ -297,6 +297,31 @@ function parseCron(schedule) {
 export const routinesOn = (automations) => automations.filter((a) => a.trigger === 'schedule' && a.scheduleCron && a.enabled)
   .map((a) => ({ id: a.id, name: a.name, schedule: a.scheduleCron, timezone: a.timezone ?? null }));
 
+/**
+ * The captured automations `--activate-routines` / `--move-routines` turn on: every scheduled
+ * routine that is on in Grok Bot, or with `spec` (`--routines`: ids or exact names, comma-separated)
+ * only those. An entry that names none of them is a usage error listing the ones that can be chosen.
+ */
+export function selectRoutines(automations, spec) {
+  const on = automations.filter((a) => a.trigger === 'schedule' && a.scheduleCron && a.enabled);
+  if (spec === undefined || spec === null) return on;
+  const valid = () => (on.length ? on.map((a) => `${a.id || '(no id)'} "${a.name}" (${a.scheduleCron}${a.timezone ? ' ' + a.timezone : ''})`).join(', ') : 'none');
+  const wanted = String(spec).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!wanted.length) throw new MigrationError(`--routines takes routine ids or exact names, comma-separated. Routines that are on in Grok Bot: ${valid()}.`);
+  const picked = new Set();
+  for (const w of wanted) {
+    const byId = on.filter((a) => a.id && a.id === w);
+    const found = byId.length ? byId : on.filter((a) => a.name === w);
+    if (found.length > 1) throw new MigrationError(`--routines: several routines that are on are named "${w}"; use the id. Routines that are on in Grok Bot: ${valid()}.`);
+    if (!found.length) throw new MigrationError(`--routines: no routine that is on in Grok Bot has the id or name "${w}". Routines that are on in Grok Bot: ${valid()}.`);
+    picked.add(found[0]);
+  }
+  return on.filter((a) => picked.has(a));
+}
+
+/** For a report: the memory files the capture could not read (coverage.memory.missing), when there are any. */
+export const memoryNotCaptured = (cap) => (cap.coverage?.memory?.missing?.length ? { memoryNotCaptured: cap.coverage.memory.missing } : {});
+
 /** An automation record as a portable routine. Event triggers keep their listener details. */
 export function normalizeAutomation(record) {
   const trigger = object(record.trigger) ? record.trigger : {};
@@ -469,6 +494,7 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
   progress('box store manifest');
   const files = [];
   const skipped = [];
+  let memoryPaths = [];
   const store = await attempt('boxStore', () => readStoreManifest({ presign: io.presign, fetchImpl: io.fetchImpl }), null);
   if (store) {
     const texts = [bot.instructions, ...automations.map((a) => a.prompt), ...todos.map((t) => t.content),
@@ -538,6 +564,18 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
         files.push({ boxPath: '/' + p.path, reason: 'referenced-by-memory', kind: 'file', size: bytes.length, sha256: p.entry.sha, mode: p.entry.mode ?? null, bytes });
       }
     }
+    // The memory files the store lists for this bot (its own memory/, the shared user-memory/
+    // shards, the joined projects' memory): one that was not read is named, with the reason.
+    const tiers = [`home/box/sand-data/agents/${agentId}/`, 'home/box/sand-data/user-memory/', ...projects.map((slug) => `home/box/sand-data/projects/${slug}/`)];
+    memoryPaths = Object.keys(store.entries).filter((p) => tiers.some((t) => p.startsWith(t)) && /\/(memory|user-memory)\//.test('/' + p) && p.endsWith('.md') && store.entries[p]?.kind !== 'symlink')
+      .map((p) => '/' + p).sort();
+    const secretShas = new Set(Object.entries(store.entries).filter(([p, e]) => isSecretPath(p) && e?.sha).map(([, e]) => e.sha));
+    for (const boxPath of memoryPaths) {
+      if (files.some((f) => f.boxPath === boxPath) || skipped.some((x) => x.boxPath === boxPath)) continue;
+      const p = boxPath.slice(1);
+      skipped.push({ boxPath, reason: isSecretPath(p) ? 'credential path; never exported' : isUnsafeBoxPath(p) ? 'unsafe path; not exported'
+        : secretShas.has(store.entries[p]?.sha) ? 'same bytes as a credential file; never exported' : 'not captured' });
+    }
     const refs = referencedBoxPaths(texts);
     const credentialRefs = refs.filter((r) => isSecretPath(r.replace(/^\/+/, '')));
     for (const r of credentialRefs) skipped.push({ boxPath: r, reason: 'credential path; never exported (sign in again on the destination)' });
@@ -550,11 +588,16 @@ export async function captureBot(io, { agentId, timeZone = 'UTC', maxFileBytes =
   }
 
   const memory = files.filter((f) => f.kind === 'file' && /\/(memory|user-memory)\//.test(f.boxPath) && f.boxPath.endsWith('.md'));
-  note('memory', memory.length ? 'complete' : (store ? 'empty' : 'failed'), {
+  // Complete only when every memory file the store lists was read; partial names the ones left out.
+  const missing = memoryPaths.filter((p) => !memory.some((f) => f.boxPath === p)).map((boxPath) => ({ boxPath, reason: skipped.find((x) => x.boxPath === boxPath)?.reason ?? 'not captured' }));
+  const read = memoryPaths.length - missing.length;
+  note('memory', !store ? 'failed' : missing.length ? (read ? 'partial' : 'failed') : memory.length ? 'complete' : 'empty', {
     source: 'box store: own memory/, shared user-memory/ (every assistant\'s shard), joined projects',
     own: memory.filter((f) => f.boxPath.includes(`/agents/${agentId}/memory/`)).length,
     sharedUser: memory.filter((f) => f.boxPath.includes('/user-memory/')).length,
     project: memory.filter((f) => f.boxPath.includes('/projects/')).length,
+    ...(!store ? { reason: 'the box store could not be read' } : {}),
+    ...(missing.length ? { missing, reason: `${missing.length} of ${memoryPaths.length} memory file(s) not read: ${missing.map((m) => `${m.boxPath} (${m.reason})`).join('; ')}` } : {}),
   });
 
   return {

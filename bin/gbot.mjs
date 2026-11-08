@@ -241,19 +241,32 @@ export const MIGRATE_TARGETS = [
   { key: "dot", name: "Your dot", label: "Your dot (one dot, one inbox; the same handoff folder on its computer)" },
 ];
 
-/** The routines question, asked when the captured bot has scheduled routines that are on (default 1). */
+/** The routines question, asked when the captured bot has scheduled routines that are on (default 1: nothing in Grok Bot changes). */
 export function routinesQuestion(count, destination) {
   return [
     `Routines that are on in Grok Bot (${count}):`,
-    `1. Keep them paused in ${destination} (turn on later)`,
-    `2. Move them: turn them on in ${destination} and pause them in Grok Bot once the check passes`,
+    `1. Keep them off in ${destination}; Grok Bot keeps running them (nothing in Grok Bot changes)`,
+    `2. Run them in both: turn them on in ${destination} and leave Grok Bot running them (they may run twice)`,
+    `3. Move them: once the check passes, pause them in Grok Bot, then turn them on in ${destination} (a short gap; never both running)`,
   ];
 }
 
-/** Preview and import options for the routines answer (zero-based): 0 keeps them paused, 1 moves them (with the bot's login). */
-export function routineArgs(choice, account) {
-  if (choice !== 1) return { preview: [], import: [] };
-  return { preview: ["--move-routines"], import: ["--move-routines", "--account", account] };
+/** The second question, for answers 2 and 3: the routines that are on (`routinesOn` from the capture), numbered. */
+export function routinesPick(routines) {
+  return routines.map((r, i) => `${i + 1}. ${r.name} (${r.schedule}${r.timezone ? " " + r.timezone : ""})`);
+}
+
+/**
+ * Preview and import options for the routines answers (zero-based): 0 keeps them off at the destination
+ * (no option: Grok Bot is not touched), 1 runs them in both, 2 moves them (with the bot's login). `picked`
+ * (indexes into `routines`, from the second question) limits 1 and 2 with --routines; null or all of them
+ * means every routine that is on.
+ */
+export function routineArgs(choice, account, routines = [], picked = null) {
+  if (choice !== 1 && choice !== 2) return { preview: [], import: [] };
+  const some = picked && picked.length < routines.length ? ["--routines", picked.map((i) => routines[i].id || routines[i].name).join(",")] : [];
+  if (choice === 1) return { preview: ["--activate-routines", ...some], import: ["--activate-routines", ...some] };
+  return { preview: ["--move-routines", ...some], import: ["--move-routines", ...some, "--account", account] };
 }
 
 /** Partial mask, "aa22306546@hotmail.com" → "aa2…@hotmail.com": the first three characters and the domain stay visible, enough to tell logins apart. */
@@ -367,12 +380,26 @@ async function migrateWizard(real) {
       if (Array.isArray(routinesOn) && routinesOn.length) {
         say("");
         for (const line of routinesQuestion(routinesOn.length, destination.name)) say("   " + line);
+        let choice = 0;
         for (;;) {
           const answer = (await rl.question("   Routines number [1]: ")).trim();
-          const picked = answer ? parseChoice(answer, 2) : [0];
-          if (picked) { routines = routineArgs(picked[0], selector); break; }
-          say("Type 1 or 2 (Enter keeps them paused).");
+          const picked = answer ? parseChoice(answer, 3) : [0];
+          if (picked) { choice = picked[0]; break; }
+          say(`Type 1, 2 or 3 (Enter keeps them off in ${destination.name}; nothing in Grok Bot changes).`);
         }
+        let which = null;
+        if (choice !== 0) {
+          say("");
+          for (const line of routinesPick(routinesOn)) say("   " + line);
+          for (;;) {
+            const answer = (await rl.question("   Which routines? Enter for all, or numbers like 1,3: ")).trim();
+            if (!answer) break;
+            which = parseChoice(answer, routinesOn.length, { multiple: true });
+            if (which) break;
+            say(`Type numbers like 1,3 between 1 and ${routinesOn.length}, or press Enter for all.`);
+          }
+        }
+        routines = routineArgs(choice, selector, routinesOn, which);
       }
       say("\n5) What will change at the destination:");
       const preview = await runChild(real, ["migrate", "preview", archive, "--to", target, ...via, ...routines.preview]);
