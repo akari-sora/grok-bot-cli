@@ -6,7 +6,8 @@
  *   memory/profile.md       → USER.md entries   (Hermes MemoryStore: format, threat scan, limits)
  *   memory/log/*.md         → MEMORY.md entries, plus server memories, migration notes and open tasks
  *   skill library           → skills/grok-bot-imports/<slug>/ (every file of the skill)
- *   scheduled automations   → `hermes cron create --paused` jobs (Grok keeps its own copy)
+ *   scheduled automations   → `hermes cron create --paused` jobs (Grok keeps its own copy; with
+ *                             --move-routines they are active and the Grok copy is paused after verify)
  *   event automations       → workspace notes (no Hermes event trigger for GitHub/Slack listeners)
  *   main + side transcripts → Hermes sessions via SessionDB.import_foreign_history (searchable)
  *   box files               → <profile>/workspace/grok-bot/grok-box/<box path>
@@ -131,7 +132,7 @@ const skillName = (s) => /^---[\s\S]*?\nname:\s*["']?([^\n"']+)["']?\s*\n/.exec(
  * Pure plan from an opened archive. `profileDir` is where the profile lives (or will live).
  * @param {ReturnType<import('./migration-archive.js').openArchive>} archive
  */
-export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, now = () => new Date() }) {
+export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', activateRoutines = false, moveRoutines = false, now = () => new Date() }) {
   const cap = archive.capture;
   if (cap.bot.kind !== 'bot') throw new MigrationError('Only a bot (not a group) can become a Hermes profile.');
   const notMigrated = [];
@@ -273,7 +274,7 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
       // The source id in the name finds this job again on a re-run, whatever else shares its name.
       const tag = `[grok-bot ${a.id || sha256(a.name).slice(0, 12)}]`;
       cron.push({ name: `${botName}: ${routine} ${tag}`, routine, tag, schedule: a.scheduleCron, timezone: a.timezone, prompt: pathNote + prompt,
-        paused: !(activateRoutines && a.enabled), sourceEnabled: a.enabled, sourceId: a.id });
+        paused: !((activateRoutines || moveRoutines) && a.enabled), sourceEnabled: a.enabled, sourceId: a.id });
     } else unscheduled.push({ name: routine, prompt, trigger: a.trigger, enabled: a.enabled, triggerDetails: details });
   }
   const timezone = zones.size === 1 ? [...zones][0] : null;
@@ -284,7 +285,9 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   ];
   if (side) notes.push(`${side} side conversation(s) from Grok Bot are imported as Hermes sessions titled "Grok Bot · ${botName} · side conversation N"; readable copies are in ${join(base, 'history')}.`);
   for (const t of open) notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${t.content}`);
-  if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c) => c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c) => `"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. Resume one only after turning it off in Grok Bot, so it does not run twice.`);
+  if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c) => c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c) => `"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. ${moveRoutines
+    ? 'The active ones replace their Grok Bot copies, which the migration pauses in Grok Bot once this profile is verified.'
+    : 'Resume one only after turning it off in Grok Bot, so it does not run twice.'}`);
   if (unscheduled.length) notes.push(`Event-triggered Grok Bot routines not scheduled in Hermes: ${unscheduled.map((a) => `"${a.name}" (${a.trigger})`).join('; ')}. Their prompts are in ${join(base, 'routines-not-scheduled.md')}.`);
   if (zones.size > 1) notes.push('Grok routines used several time zones; Hermes cron uses one profile time zone. Check each job schedule.');
   const memoryAll = [...memory, ...notes];

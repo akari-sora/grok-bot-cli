@@ -25,7 +25,7 @@ gbot migrate run --account A --bot "Deploy QA" --to hermes --yes   # 2–4 一�
 
 `--to` 可以是 `hermes`、`muse`、`dot`。Muse 和 dot 透過 `trinity-cli migrate` 傳送（需要 trinity-cli v0.5.0 以上，加上 muse-web-cli v0.1.6 以上、chatgpt-dot-cli v0.2.6 以上：它們有 `send --attach` 與 `--attach-sha256`）。`--via drive` 另外要 [rclone](https://rclone.org) 和一個連到你 Google Drive 的 remote，以及在 Muse 或 dot 裡接好的 Google Drive 連接器。
 
-Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check` 要用和 `import` 相同的選項）：
+Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check` 要用和 `import` 相同的選項；排程那兩列三個目的地都適用）：
 
 | 選項 | 預設 | 說明 |
 | --- | --- | --- |
@@ -35,6 +35,8 @@ Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check
 | `--history full\|recent:N\|none` | upload `full`，chat `recent:30` | 要帶多少對話 |
 | `--skills all\|index\|none\|名稱,名稱` | upload `all`，chat `index` | `index` 只帶名稱與用途；Hermes 只接受 `all`、`none` |
 | `--folder PATH` | `~/grok-bot/<bot>-<id 前 8 碼>` | 對方電腦上的資料夾（同名的 bot 也不會共用） |
+| `--activate-routines` | 關 | 三個目的地都適用。Grok Bot 裡開著的定時排程，在目的地直接建成啟用的（Hermes 的 cron job 不暫停；Muse／dot 會請它建排程）。Grok Bot 那份照樣在跑，兩邊都會執行 |
+| `--move-routines` | 關 | 三個目的地都適用。搬排程：包含 `--activate-routines`，匯入的讀回與驗收通過後，再把 Grok Bot 裡對應的排程關掉（見下面的排程段落）。`import` 要加這個 bot 的登入：`--account` |
 
 ### 抓了什麼（來源端，只讀）
 
@@ -70,7 +72,14 @@ Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check
 | 讀回 | Hermes 自己的 store：SOUL、記憶、skills、cron（排程、時區、暫停狀態）、session 內容摘要、檔案雜湊 | 請 Muse 在它電腦上跑一行只讀指令，印出每一部分的加鹽 SHA-256；Memory.md 只列為參考 | 同 Muse（dot 的記憶從外面讀不到） |
 | 驗收題問在哪 | `hermes -p` 單次問答 | 新開、看不到搬家訊息的副聊天室，問完只刪這次開的那一個 | 同一個收件匣（報告會註明答案可能用到對話上下文） |
 
-排程在 Hermes 一律先暫停：Grok Bot 那份還在跑，兩邊同時開會重複執行。在 Grok Bot 關掉後，用 `hermes -p grok-<bot> cron resume <id>` 打開。Muse／dot 沒有「暫停的排程」，所以只記下內容；要它們直接建排程，用 `--activate-routines`。
+排程預設在 Hermes 先暫停：Grok Bot 那份還在跑，兩邊同時開會重複執行。在 Grok Bot 關掉後，用 `hermes -p grok-<bot> cron resume <id>` 打開。Muse／dot 沒有「暫停的排程」，所以只記下內容；要它們直接建排程，用 `--activate-routines`。
+
+要連排程一起搬、不必手動切換，用 `--move-routines`。引導模式在選好目的地、擷取完之後，如果這個 bot 有開著的定時排程，會問「1. 在目的地先暫停（之後再開）」或「2. 搬過去：在目的地打開，檢查通過後在 Grok Bot 暫停」，預設 1；預覽會寫出所選那一種的結果。選 2 時，目的地的排程建成啟用的；匯入的讀回通過後（Muse／dot 還要排程讀回與驗收題都通過），才在 Grok Bot 關掉搬過去的那幾個：只關原本開著、而且真的搬過去的定時排程，事件觸發的（GitHub、Slack…）和原本就關著的都不動。一個排程送一次請求，和 App 的排程開關相同：`SetGrokBotAgentAutomationEnabled`，內容是 `{ agentId, automationId, isEnabled: false, timeZone }`，再從回應確認它已關閉。擷取本身仍然只讀，這是驗證通過後另外的一次寫入，不喚醒雲端電腦。
+
+- 驗證沒過（或 Muse／dot 沒跑驗收題）就一個都不關，報告寫 `source routines left on: verification did not pass`。這時目的地那份已經是開著的：先在目的地暫停，或修好後重跑同一個 `gbot migrate import`。
+- 某個排程關失敗或結果不明（逾時），報告逐一列出原因和手動做法（在 Grok Bot App：Routines → 切換開關，或暫停目的地那份），不會自動重試；結束碼 3。
+- 報告（`sourceRoutines`）和終端機輸出列出每個關掉的排程：id、名稱、時間。要重新打開：在 Grok Bot App：Routines → 切換開關。
+- 從匯入建立排程到檢查通過這段時間（驗收可能要幾分鐘），兩邊的排程都可能執行一次。
 
 ### 驗收：不是只看檔案，也不信對方說「存好了」
 
@@ -98,7 +107,19 @@ Muse／dot 的傳送可中斷續跑：每一步都有 nonce 和 ledger；停了�
 
 ### 結束碼
 
-0 搬完並驗證；3 搬了但有項目沒驗過（看報告裡的 ✗）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。報告寫在存檔旁邊：`<存檔>.<目的地>….report.json`。
+0 搬完並驗證；3 搬了但有項目沒驗過，或 `--move-routines` 有排程沒在 Grok Bot 關掉（看報告裡的 ✗）；2 參數錯誤或沒有 `--yes`；1 其他錯誤。報告寫在存檔旁邊：`<存檔>.<目的地>….report.json`。
+
+### 給 agent 用（Claude Code、Codex、Cursor）
+
+`gbot-install install claude`（或 `codex`、`cursor`）裝好 gbot 外掛後，agent 會拿到 `migrate-grok-bot` skill（原文在 `src/skills/migrate-grok-bot/SKILL.md`）。它照下面的方式搬，人也可以照著做：
+
+1. `gbot --json migrate bots --account A`：列出 bot，和你確認要搬哪一個。
+2. `gbot --json migrate capture --account A --bot "<名稱或 id>"`：只讀擷取，先告訴你缺了什麼。
+3. `gbot --json migrate preview <存檔> --to hermes|muse|dot`：把預覽給你看，**等你明確同意**才往下。
+4. `gbot --json migrate import <存檔> --to <目的地> --yes`：匯入、讀回、驗收；看結束碼和報告裡的 ✗。
+5. 中斷或之後再驗：`gbot migrate check <存檔> --to <目的地> --accept`（Muse／dot 續跑用同一個 `import`，不會重送不確定的訊息）。
+
+agent 的規則：沒有你的同意不匯入；不改、不刪 Grok Bot 那邊的 bot；不把存檔內容貼到對話裡（只報數量與名稱）；送 Muse／dot 照 App 的節奏，不加速重試；`--move-routines` 只在你要求時用。
 
 ## English
 
@@ -123,6 +144,8 @@ gbot migrate run --account A --bot "Deploy QA" --to hermes --yes
 
 `--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (trinity-cli v0.5.0 or later, with muse-web-cli v0.1.6 or later and chatgpt-dot-cli v0.2.6 or later: they have `send --attach` and `--attach-sha256`). `--via drive` also needs [rclone](https://rclone.org) with a remote for your Google Drive, and the Google Drive connector set up in Muse or the dot.
 
+Routine options (every destination; same on `preview`, `import`, `check`, `run`): `--activate-routines` creates the scheduled routines that are on in Grok Bot as active schedules at the destination (the Grok Bot copies keep running, so both run); `--move-routines` moves them: it includes `--activate-routines` and, once the import check passes, pauses them in Grok Bot (see **Routines** below; give `import` the bot's login with `--account`).
+
 Muse/dot options (same on `preview`, `import`, `check`, `run`; give `check` the options of the import): `--via auto|upload|drive|chat` (default `auto`: one zip attachment the agent unzips when it fits — Muse 256 MB, dot 20 MB — else your Google Drive when a remote is set, else file by file; `drive` puts the same zip in your Google Drive with rclone, checks its MD5, asks the agent to fetch it with its Google Drive connector, and removes the Drive copy after a verified migration unless `--keep-drive`), `--drive-remote NAME:` (an rclone remote for your Google Drive; default `GBOT_DRIVE_REMOTE`; set the remote up with your own Google OAuth client, as [rclone describes](https://rclone.org/drive/#making-your-own-client-id): rclone's shared client is rate-limited and is being retired during 2026, and gbot works with any remote), `--drive-folder PATH` (default `gbot-migrations`), `--history full|recent:N|none` (default: upload `full`, chat `recent:30`), `--skills all|index|none|a,b` (default: upload `all`, chat `index`; Hermes takes `all` or `none`), `--folder PATH` (default `~/grok-bot/<bot>-<first 8 of its id>`, so bots with one name never share a folder).
 
 **Capture (read-only).** Identity from `ListGrokBotAgents`; the whole conversation through `ListGrokBotTranscriptEntries`, paged back with `beforeSeq` to the first row, omitted bodies filled from box-store blobs, server-deleted rows reported as sequence gaps; the three memory tiers from the box store (the bot's own `memory/`, every assistant's shared `user-memory/` shard, joined projects); the whole user skill library (`workflows/<name>/`, shared by all bots); automations with prompt, cron, time zone, trigger and enabled state; todos and tasks; the bot's attachments and assets plus `/home/box/…` and `/workspace/…` files named in its role, routines, memory or conversation (`--max-file-mb`, default 8). Groups, teammates, connectors and library docs are listed. Every area's status is in `REPORT.md` and `capture.json` → `coverage`. Every archived file has a SHA-256 and is re-verified when the archive is opened; extra or missing files are refused.
@@ -131,10 +154,24 @@ Known credential paths are not read (a name list, not a guarantee; the same byte
 
 **Destinations differ.** Hermes: each bot becomes its own new profile (`grok-<bot>`): role → `SOUL.md`; memory → `USER.md`/`MEMORY.md` through Hermes' MemoryStore (limits raised for the new profile when needed); the whole history, side conversations included → searchable Hermes sessions; whole skill folders → `skills/grok-bot-imports/`; scheduled routines → `hermes cron create --paused` (tagged with the source id); event routines → `routines-not-scheduled.md`; files → `workspace/grok-bot/grok-box/`. Muse is one agent with shared memory and many chats (each bot gets a side chat); a dot is one agent with one inbox. Both get a handoff folder on their own computer (`~/grok-bot/<bot>-<id>/`: README, ROLE, MEMORY, TASKS, ROUTINES, SKILLS, HISTORY, `skills/`, `history/`, `box/`, MANIFEST.txt), sent as one zip attachment by default or file by file in chat, plus one message asking them to remember a pointer to that folder long-term.
 
+**Routines.** By default the Hermes cron jobs are created paused: the Grok Bot copy keeps running, and two running copies would run twice. Turn the Grok Bot one off, then `hermes -p grok-<bot> cron resume <id>`. Muse and dot have no paused schedule, so they only get ROUTINES.md; `--activate-routines` asks them to create the schedules. `--move-routines` hands the routines over with no manual step. In the guided flow, after the capture, a bot with scheduled routines that are on gets the question "1. Keep them paused in <destination> (turn on later) 2. Move them: turn them on in <destination> and pause them in Grok Bot once the check passes" (default 1), and the preview describes the chosen one. With 2, the destination creates them active; after the import's read-back passes (for Muse and dot, also the schedules read-back and the acceptance questions), gbot pauses in Grok Bot exactly the scheduled routines that were on and were migrated. Event-triggered routines (GitHub, Slack, ...) and routines that were off are not touched. Each pause is one request, the one the app's Routines toggle makes: `SetGrokBotAgentAutomationEnabled` with `{ agentId, automationId, isEnabled: false, timeZone }`, and the answer must show the routine off. The capture stays read-only; this is a separate write after verification, and it does not wake the box. When verification did not pass (or Muse/dot ran without the acceptance questions), nothing is paused and the report says `source routines left on: verification did not pass`; the destination copies are already active, so pause them there or fix the import and run it again. A pause that fails or whose effect is unknown (a timeout) is listed per routine with how to do it by hand (in the Grok Bot app: Routines → toggle, or pause the destination copy) and is never retried; the exit code is 3. The report (`sourceRoutines`) and the terminal output list each paused routine (id, name, schedule); turn one back on in the Grok Bot app: Routines → toggle. Between the import creating the schedules and the check passing (acceptance can take minutes), both copies can run once.
+
 **Acceptance.** Saying "saved" is not proof: in real runs Muse kept MR state out of Memory.md and a dot's file write was blocked by its own review while it still replied "saved". Hermes is read back through Hermes' own code (role, memory, skills, cron schedule/time zone/state, per-session content digests, file digests), then asked questions with `hermes -p`. Muse and dot run one read-only `python3` command on their computer; the folder and a fresh random salt arrive base64-encoded, and it prints a salted SHA-256 for each part listed in MANIFEST.txt. Those values need the bytes; gbot checks the answer row by row (each part printed once, right column): exact bytes for a zip, content without whitespace and backslashes for chat delivery (agents drop escape backslashes when they write chat text to a file). That is strong evidence that the agent has those bytes on its computer and ran the check, not an independent read of the folder (Muse and dot offer no outside file read). Parts it did not print are reported as not verified and not re-sent. A missing or different part is re-sent once and checked again. The other questions go to a fresh Muse side chat that cannot see the migration (only that chat is deleted afterwards); a dot has one inbox, and the report says so. Every answer must start with its marker (`Q1:`; `Q10:` is not `Q1:`) so the agent's own alerts are not taken as answers; a failed question is asked once more and both answers are kept. An answer passes only with a keyword only the migrated data has and the question itself does not contain. This is a behavioural test, not a proof.
 
 **Pace and request style.** One message at a time, each after the previous reply, at least 20 s apart (`trinity-cli migrate --min-interval`, also across resumed runs); a failed send or a rate-limit reply stops the run without resending. A zip migration is two messages plus the questions. Requests follow the official front ends: Muse is driven in the Muse window (attach, type, Enter); the dot gets what the dot app sends (room upload, then `content{text, attachments}`, `request_id`, `timezone_offset_min`; the app's integrity attestation is not imitated); the Grok Bot source uses only read RPCs the app uses, pages transcripts at 500+1 rows and reads the store 8 requests at a time like the app, and never wakes the box.
 
 Muse/dot delivery is resumable and never resends an uncertain message: run the same `gbot migrate import` again. `gbot migrate check` sends no migration content; with `--accept` it sends the acceptance questions.
 
-Exit codes: 0 migrated and verified; 3 imported but something did not verify (see ✗ in the report); 2 usage or missing `--yes`; 1 other errors. The report is written next to the archive.
+Exit codes: 0 migrated and verified; 3 imported but something did not verify, or with `--move-routines` a routine was not paused in Grok Bot (see ✗ in the report); 2 usage or missing `--yes`; 1 other errors. The report is written next to the archive.
+
+### For agents (Claude Code, Codex, Cursor)
+
+After `gbot-install install claude` (or `codex`, `cursor`) the gbot plugin gives the agent the `migrate-grok-bot` skill (source: `src/skills/migrate-grok-bot/SKILL.md`). It works like this, and a person can follow the same steps:
+
+1. `gbot --json migrate bots --account A`: list the bots and confirm with the user which to move.
+2. `gbot --json migrate capture --account A --bot "<name or id>"`: read-only capture; say what is missing first.
+3. `gbot --json migrate preview <archive> --to hermes|muse|dot`: show the preview and **wait for an explicit yes**.
+4. `gbot --json migrate import <archive> --to <dest> --yes`: import, read back, ask; read the exit code and the ✗ items in the report.
+5. After an interruption, or later: `gbot migrate check <archive> --to <dest> --accept` (Muse/dot resume with the same `import`; an uncertain message is never sent again).
+
+Rules for agents: no import without the user's yes; never change or delete the bot in Grok Bot; never paste archive contents into a chat (report counts and names); Muse/dot sends follow the apps' pace, no faster retries; `--move-routines` only when the user asks for it.

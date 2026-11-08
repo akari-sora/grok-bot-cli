@@ -236,10 +236,25 @@ export function unknownOutcomeOutput(sent, visible) {
 // behaviour of its own: account → bot(s) → destination → diff → confirm → import + verify.
 
 export const MIGRATE_TARGETS = [
-  { key: "hermes", label: "Hermes (a new Hermes profile per bot: role, memory, skills, paused schedules, full history, files)" },
-  { key: "muse", label: "Muse (one Muse with a side chat per bot; a handoff folder on its computer: role, memory, tasks, routines, skills, history, files)" },
-  { key: "dot", label: "Your dot (one dot, one inbox; the same handoff folder on its computer)" },
+  { key: "hermes", name: "Hermes", label: "Hermes (a new Hermes profile per bot: role, memory, skills, paused schedules, full history, files)" },
+  { key: "muse", name: "Muse", label: "Muse (one Muse with a side chat per bot; a handoff folder on its computer: role, memory, tasks, routines, skills, history, files)" },
+  { key: "dot", name: "Your dot", label: "Your dot (one dot, one inbox; the same handoff folder on its computer)" },
 ];
+
+/** The routines question, asked when the captured bot has scheduled routines that are on (default 1). */
+export function routinesQuestion(count, destination) {
+  return [
+    `Routines that are on in Grok Bot (${count}):`,
+    `1. Keep them paused in ${destination} (turn on later)`,
+    `2. Move them: turn them on in ${destination} and pause them in Grok Bot once the check passes`,
+  ];
+}
+
+/** Preview and import options for the routines answer (zero-based): 0 keeps them paused, 1 moves them (with the bot's login). */
+export function routineArgs(choice, account) {
+  if (choice !== 1) return { preview: [], import: [] };
+  return { preview: ["--move-routines"], import: ["--move-routines", "--account", account] };
+}
 
 /** Partial mask, "aa22306546@hotmail.com" → "aa2…@hotmail.com": the first three characters and the domain stay visible, enough to tell logins apart. */
 export function maskEmail(email) {
@@ -326,7 +341,8 @@ async function migrateWizard(real) {
     const chosen = (await ask("   Bot number(s), e.g. 3 or 1,4: ", bots.length, { multiple: true })).map((i) => bots[i]);
     say("\n3) Destination:");
     MIGRATE_TARGETS.forEach((t, i) => say(`   ${i + 1}. ${t.label}`));
-    const target = MIGRATE_TARGETS[(await ask("   Destination number: ", MIGRATE_TARGETS.length))[0]].key;
+    const destination = MIGRATE_TARGETS[(await ask("   Destination number: ", MIGRATE_TARGETS.length))[0]];
+    const target = destination.key;
     let via = [];
     if (target !== "hermes") {
       say("\n   How to deliver it:");
@@ -343,16 +359,28 @@ async function migrateWizard(real) {
     for (const bot of chosen) {
       say(`\n4) Capturing "${bot.name}" from Grok Bot (read-only; all history pages, memory, skills, routines, tasks, files)…`);
       const cap = await runChild(real, ["migrate", "capture", "--account", selector, "--bot", bot.id, "--json"], { capture: true });
-      let archive;
-      try { archive = JSON.parse(cap.stdout).archive; } catch { /* reported below */ }
+      let archive, routinesOn = [];
+      try { ({ archive, routinesOn = [] } = JSON.parse(cap.stdout)); } catch { /* reported below */ }
       if (cap.code !== 0 || !archive) { say("   Capture failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
-      say(`   Archive: ${archive}\n\n5) What will change at the destination:`);
-      const preview = await runChild(real, ["migrate", "preview", archive, "--to", target, ...via]);
+      say(`   Archive: ${archive}`);
+      let routines = routineArgs(0, selector);
+      if (Array.isArray(routinesOn) && routinesOn.length) {
+        say("");
+        for (const line of routinesQuestion(routinesOn.length, destination.name)) say("   " + line);
+        for (;;) {
+          const answer = (await rl.question("   Routines number [1]: ")).trim();
+          const picked = answer ? parseChoice(answer, 2) : [0];
+          if (picked) { routines = routineArgs(picked[0], selector); break; }
+          say("Type 1 or 2 (Enter keeps them paused).");
+        }
+      }
+      say("\n5) What will change at the destination:");
+      const preview = await runChild(real, ["migrate", "preview", archive, "--to", target, ...via, ...routines.preview]);
       if (preview.code !== 0) { say("   The preview failed; nothing was imported for this bot."); results.push({ bot: bot.name, ok: false }); continue; }
       const go = (await rl.question(`\n6) Import "${bot.name}" into ${target} now? [y/N] `)).trim().toLowerCase();
       if (go !== "y" && go !== "yes") { say("   Skipped. Nothing was imported."); results.push({ bot: bot.name, ok: false, skipped: true }); continue; }
       say("\n7) Importing, reading back and checking that it can continue the work…");
-      const imp = await runChild(real, ["migrate", "import", archive, "--to", target, ...via, "--yes"]);
+      const imp = await runChild(real, ["migrate", "import", archive, "--to", target, ...via, ...routines.import, "--yes"]);
       results.push({ bot: bot.name, ok: imp.code === 0 });
     }
     say("\nSummary:");

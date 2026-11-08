@@ -959,7 +959,8 @@ function attachBackend(session, auth) {
 }
 
 /**
- * A backend-only session for read-only tools (migration capture). The login and its saved access
+ * A backend-only session: the migration capture reads with it, and `gbot migrate --move-routines`
+ * makes its one routine write with it after a verified import. The login and its saved access
  * token are resolved from local files only: unlike connectGateway it never describes, wakes or
  * otherwise touches the box, so reading a bot does not change the source account.
  * @param {{ account?: string }} [options]
@@ -1148,6 +1149,22 @@ export const BACKEND_READ_RPCS = Object.freeze([
 export async function backendRead(session, rpc, body = {}, { signal, timeoutMs } = {}) {
   if (!BACKEND_READ_RPCS.includes(rpc)) throw new GatewayError(rpc + " is not a read-only migration RPC.", { code: "RPC_NOT_ALLOWED" });
   return backendCall(session, rpc, body, { signal, ...(timeoutMs ? { timeoutMs } : {}) });
+}
+
+/**
+ * Turns one routine of a bot on or off, as the 0.78 app's Routines toggle does:
+ * SetGrokBotAgentAutomationEnabled { agentId, automationId, isEnabled, timeZone }, 20 s like the app.
+ * `automationId` is the id in the routine's record (`recordJson.id`); the answer lists the bot's
+ * routines (`automations[].recordJson`). A write, so it is not in BACKEND_READ_RPCS. A timeout
+ * leaves the effect unknown (`effect: "unknown"`): read the routines before trying again.
+ * @param {any} session
+ * @param {{ agentId: string, automationId: string, isEnabled: boolean, timeZone?: string }} input
+ */
+export async function setAutomationEnabled(session, { agentId, automationId, isEnabled, timeZone = deviceTimeZone() }) {
+  return backendCall(session, "SetGrokBotAgentAutomationEnabled", { agentId, automationId, isEnabled, ...(timeZone ? { timeZone } : {}) }, {
+    send: true,
+    timeoutMs: 20_000,
+  });
 }
 
 const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";

@@ -293,6 +293,10 @@ function parseCron(schedule) {
   return m ? { cron: m[2].trim(), timezone: m[1] } : { cron: s, timezone: null };
 }
 
+/** Captured routines that run on a schedule in Grok Bot now (cron trigger, on), as id, name, schedule, zone. */
+export const routinesOn = (automations) => automations.filter((a) => a.trigger === 'schedule' && a.scheduleCron && a.enabled)
+  .map((a) => ({ id: a.id, name: a.name, schedule: a.scheduleCron, timezone: a.timezone ?? null }));
+
 /** An automation record as a portable routine. Event triggers keep their listener details. */
 export function normalizeAutomation(record) {
   const trigger = object(record.trigger) ? record.trigger : {};

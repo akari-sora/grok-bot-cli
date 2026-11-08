@@ -16,6 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { openArchive } from './migration-archive.js';
+import { routinesOn } from './migration-capture.js';
 import { defaultExec, distinctiveTokens, groupNotMigrated, memoryEntries, skillDescription } from './migration-hermes.js';
 import { MigrationError, privateWrite } from './migration.js';
 import { assertNoSecrets, hasSecret, sanitize, sanitizeBytes } from './migration-redact.js';
@@ -244,7 +245,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
   addFile('MANIFEST.txt', files.map((f) => f.rel).sort().join('\n') + '\n');
 
   // --- what does not move, and why ----------------------------------------------------------
-  if (!activateRoutines) for (const a of scheduled) notMigrated.push({ item: `routine "${a.name}"`, reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`, alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --activate-routines` });
+  if (!activateRoutines) for (const a of scheduled) notMigrated.push({ item: `routine "${a.name}"`, reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`, alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (schedules it here and pauses the Grok copy after the check)` });
   for (const a of events) notMigrated.push({ item: `routine "${a.name}"`, reason: `event trigger (${a.trigger})`, alternative: `kept in ${folder}/ROUTINES.md` });
   const indexOnly = skillInfo.length - fullSkills.length;
   if (indexOnly && skillsMode !== 'none') notMigrated.push({ item: `${indexOnly} skill bodies`, reason: `--skills ${skillsMode}`, alternative: `names and descriptions in ${folder}/SKILLS.md; full SKILL.md files stay in the archive` });
@@ -375,7 +376,9 @@ function planFor(archive, seat, { mode, auto, activateRoutines, history, skills,
     source: { platform: 'grok-bot', botId: cap.bot.id, bot: name, capturedAt: cap.capturedAt, archive: archive.root, folder, via: mode, history: historyMode, skills: skillsMode, ...(auto ? { chosen: 'auto' } : {}) },
     steps, checks, questions, notMigrated,
     // gbot's own bookkeeping (not sent to trinity): what each part should digest to.
-    delivery: { via: mode, folder, bundle, units: expected, files: files.length } };
+    delivery: { via: mode, folder, bundle, units: expected, files: files.length,
+      // The routines on in Grok Bot that the agent is asked to schedule: what --move-routines pauses there.
+      scheduled: activateRoutines ? routinesOn(cap.automations) : [] } };
 }
 
 export function summarizeTrinityPlan(plan) {
@@ -401,8 +404,8 @@ function planFile(archiveRoot, seat) {
 export async function previewTrinity({ archive, to, activateRoutines = false, ...options }) {
   const opened = openArchive(archive);
   const plan = buildTrinityPlan(opened, to, { activateRoutines, ...trinityOptions(options) });
-  return { exitCode: 0, to, summary: summarizeTrinityPlan(plan),
-    plan: { id: plan.id, via: plan.delivery.via, folder: plan.delivery.folder, files: plan.delivery.files, bundle: plan.delivery.bundle, steps: plan.steps.length, checks: plan.checks, questions: plan.questions.length, notMigrated: plan.notMigrated } };
+  return { exitCode: 0, to, summary: summarizeTrinityPlan(plan), routinesOn: routinesOn(opened.capture.automations),
+    plan: { id: plan.id, via: plan.delivery.via, folder: plan.delivery.folder, files: plan.delivery.files, bundle: plan.delivery.bundle, steps: plan.steps.length, checks: plan.checks, questions: plan.questions.length, scheduled: plan.delivery.scheduled, notMigrated: plan.notMigrated } };
 }
 
 /**
@@ -508,8 +511,8 @@ async function runTrinity({ archive, to, accept, checkOnly = false, activateRout
     if (gone.code === 0) driveCopy = null;
   }
   const report = {
-    exitCode: result.ok ? 0 : 3, to, archive: opened.root, bot: opened.capture.bot.name, plan: path, trinityState: result.state_path, driveCopy,
-    via: delivery.via, folder: delivery.folder, bundle: delivery.bundle, checkOnly, stopped: result.stopped, repaired,
+    exitCode: result.ok ? 0 : 3, to, archive: opened.root, bot: opened.capture.bot.name, botId: opened.capture.bot.id, plan: path, trinityState: result.state_path, driveCopy,
+    via: delivery.via, folder: delivery.folder, bundle: delivery.bundle, scheduled: delivery.scheduled, checkOnly, stopped: result.stopped, repaired,
     deliveries: result.steps.map((s) => ({ step: s.id, state: s.state, ok: s.ok, note: s.note })),
     verify: { ok: result.checks.every((c) => c.ok !== false), checks: result.checks.map((c) => ({
       area: `${c.kind} read-back${c.informational ? ' (informational)' : ''}`, ok: c.ok !== false, informational: Boolean(c.informational), found: c.found ?? null,

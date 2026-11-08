@@ -21,6 +21,7 @@ export const config = {
       history: { description: 'Muse/dot history: full, recent:N or none (default: upload full, chat recent:30)', type: 'string' },
       folder: { description: 'Muse/dot folder on the agent\'s computer (default ~/grok-bot/<bot>)', type: 'string' },
       activateRoutines: { description: 'Create schedules that were on in Grok Bot as active (default: Hermes paused, Muse/dot notes only)', type: 'boolean' },
+      moveRoutines: { description: 'Show the import with --move-routines: routines on in Grok Bot created active here and paused in Grok Bot after the check (changes nothing now)', type: 'boolean' },
     },
     required: ['archive', 'to'],
     type: 'object',
@@ -39,6 +40,7 @@ export const inputSchema = z.object({
   history: z.string().regex(/^(full|none|recent(:\d{1,5})?)$/).optional(),
   folder: z.string().min(1).optional(),
   activateRoutines: z.boolean().default(false),
+  moveRoutines: z.boolean().default(false),
 }).strict();
 export const resultSchema = migrationResultSchema;
 
@@ -46,6 +48,7 @@ export default async function preview({ input }: CliRouteProps<typeof inputSchem
   const p = await previewMigration(input);
   const result = migrationResult(p);
   // The guided `gbot migrate` asks for confirmation itself; plain use prints the next command.
-  const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''} --yes`;
+  const routines = input.moveRoutines ? ' --move-routines' : input.activateRoutines ? ' --activate-routines' : '';
+  const next = process.env.GBOT_WIZARD ? '' : `\n\nNext: gbot migrate import ${JSON.stringify(input.archive)} --to ${input.to}${input.profile ? ' --profile ' + input.profile : ''}${routines} --yes`;
   return <Agent.Result value={result}><Agent.Text>{p.summary + next}</Agent.Text></Agent.Result>;
 }

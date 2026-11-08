@@ -26882,6 +26882,19 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             });
         }
+        async function setAutomationEnabled(session, { agentId, automationId, isEnabled, timeZone = deviceTimeZone() }) {
+            return backendCall(session, "SetGrokBotAgentAutomationEnabled", {
+                agentId,
+                automationId,
+                isEnabled,
+                ...timeZone ? {
+                    timeZone
+                } : {}
+            }, {
+                send: true,
+                timeoutMs: 20000
+            });
+        }
         const ROOM_KIND = "GROK_BOT_AGENT_KIND_ROOM";
         function serverRecord(agent, client) {
             const isGroup = agent.kind === ROOM_KIND;
@@ -29633,6 +29646,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 timezone: null
             };
         }
+        const routinesOn = (automations)=>automations.filter((a)=>a.trigger === 'schedule' && a.scheduleCron && a.enabled).map((a)=>({
+                    id: a.id,
+                    name: a.name,
+                    schedule: a.scheduleCron,
+                    timezone: a.timezone ?? null
+                }));
         function normalizeAutomation(record) {
             const trigger = object(record.trigger) ? record.trigger : {};
             const schedule = str(trigger.schedule) || str(record.schedule);
