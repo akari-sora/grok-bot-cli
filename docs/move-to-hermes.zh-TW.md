@@ -51,3 +51,4 @@ gbot bots template "Move to Hermes" --publish  # 3. 發布
 - 這個 bot 不搬到 Muse 和 Your dot（那兩個還需要 trinity-cli 和各自的工具）；要搬到那裡，直接用 `gbot migrate`。
 - 範本的每一條指示最多 500 字，超過的部分會被截掉（2026-11-08 實測），所以 bot 指示的每一步都要寫短；`--show` 會標出剛好到 500 字的項目。目前上線的是第 3 版。
 - 已經加過舊版的人會保留舊版；重新加一次範本就是最新版。
+- 每次起草都會在 bot 的對話裡留一張審核卡，最舊那張可能還顯示「發布」按鈕；在 App 裡按下去，就會把那個舊版本重新發布（2026-11-08 上線版本曾從 3 退回 1）。用 `gbot bots template "Move to Hermes" --status` 看 `activeVersion`；`--publish --template-version 3` 可以改回最新版。
