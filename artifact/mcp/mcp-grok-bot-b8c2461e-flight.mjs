@@ -33445,9 +33445,13 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return fallback;
         }
+        function untilUnreadable(entries) {
+            const held = entries.findIndex((entry)=>entry && typeof entry === "object" && entry.unreadable === true);
+            return held === -1 ? entries : entries.slice(0, held);
+        }
         function transcriptDelta(payload, { after, limit = 40 } = {}) {
             const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
-            const page = transcriptEntries(payload).slice(-bounded);
+            const page = untilUnreadable(transcriptEntries(payload).slice(-bounded));
             if (after === undefined) {
                 const gapReset = page.length > 0 && !sourceEntryId(page[page.length - 1]);
                 return {
@@ -33466,9 +33470,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     gapReset: true
                 };
             }
-            let entries = page.slice(afterIndex + 1);
-            const held = entries.findIndex((entry)=>entry && typeof entry === "object" && entry.unreadable === true);
-            if (held !== -1) entries = entries.slice(0, held);
+            const entries = page.slice(afterIndex + 1);
             if (entries.length > 0 && !sourceEntryId(entries[entries.length - 1])) {
                 return {
                     cursor: lastSourceId(page),

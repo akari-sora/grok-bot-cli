@@ -64,6 +64,9 @@ Codex (gpt-6-astra, max reasoning, read-only) reviewed all four repos in rounds 
 - Round 4 — B2, B3b and B4 closed; two left: a long UTF-16 memory file (no NUL in its first 8 KiB) passed as text, and three more ways a Muse send after Enter was recorded as not sent. Fixed in `3b89c6a`, muse-web-cli `75507b8`, trinity `f37e7a0`.
 - Round 5 — **can merge**: B1 and all four after-Enter cases closed (reproduced through the real CLI → seat → migration chain), no new blocker. Its one should-fix (a marked rate-limit reply after another message) is fixed in trinity `b95f07b`. Deferred by agreement: SHA binding inside the two senders, per-item conflicts in preview, `hermes cron create` in the automated contract.
 
+- Round 6 (on what was added after round 5: Google Drive channel, SHA binding inside the senders, backend thread tail, Hermes preview conflicts) — two blockers: the Drive upload re-read the zip instead of binding it to the plan's SHA-256, and the Hermes preview's read-back went through Hermes' repair-and-save cron loader and a writable session store. Fixed in `b9e12ec` (rcat of the hashed bytes; repair-free cron read, `SessionDB(read_only=True)`; the real-install contract now checks that no profile file changes), plus a cursor fix.
+- Round 7 — **can merge**: both closed, no new blocker. Its remaining should-fix (the first read and a gap reset also stop before an unreadable row) is fixed in `cf979b2`.
+
 ## Final self-check (after the review)
 
 With the final code, `gbot migrate check --accept` on the demo bot (nothing re-sent; questions only, paced): Hermes 7/7 read back and 6/6 questions; Muse and Your dot first showed two false negatives from the new plain-language keyword fallback (a sentence start after a line break, and a role question that asked for projects but not places). Fixed in `706be83`; re-checked: **Muse 7/7, Your dot 7/7**.

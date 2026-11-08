@@ -23,7 +23,7 @@ gbot migrate check ARCHIVE --to hermes --accept       # 之後隨時再驗一次
 gbot migrate run --account A --bot "Deploy QA" --to hermes --yes   # 2–4 一次做完
 ```
 
-`--to` 可以是 `hermes`、`muse`、`dot`。Muse 和 dot 透過 `trinity-cli migrate` 傳送（需要有 `migrate --check-only` 的 trinity-cli，加上 `muse-web-cli`、`chatgpt-dot-cli`，兩者都要有 `send --attach`）。
+`--to` 可以是 `hermes`、`muse`、`dot`。Muse 和 dot 透過 `trinity-cli migrate` 傳送（需要 trinity-cli v0.5.0 以上，加上 muse-web-cli v0.1.6 以上、chatgpt-dot-cli v0.2.6 以上：它們有 `send --attach` 與 `--attach-sha256`）。`--via drive` 另外要 [rclone](https://rclone.org) 和一個連到你 Google Drive 的 remote，以及在 Muse 或 dot 裡接好的 Google Drive 連接器。
 
 Muse／dot 的選項（`preview`、`import`、`check`、`run` 都一樣；`check` 要用和 `import` 相同的選項）：
 
@@ -121,7 +121,7 @@ gbot migrate check ARCHIVE --to hermes --accept
 gbot migrate run --account A --bot "Deploy QA" --to hermes --yes
 ```
 
-`--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (a trinity-cli with `migrate --check-only`, plus `muse-web-cli` and `chatgpt-dot-cli` with `send --attach`).
+`--to` is `hermes`, `muse` or `dot`. Muse and dot are delivered by `trinity-cli migrate` (trinity-cli v0.5.0 or later, with muse-web-cli v0.1.6 or later and chatgpt-dot-cli v0.2.6 or later: they have `send --attach` and `--attach-sha256`). `--via drive` also needs [rclone](https://rclone.org) with a remote for your Google Drive, and the Google Drive connector set up in Muse or the dot.
 
 Muse/dot options (same on `preview`, `import`, `check`, `run`; give `check` the options of the import): `--via auto|upload|drive|chat` (default `auto`: one zip attachment the agent unzips when it fits — Muse 256 MB, dot 20 MB — else your Google Drive when a remote is set, else file by file; `drive` puts the same zip in your Google Drive with rclone, checks its MD5, asks the agent to fetch it with its Google Drive connector, and removes the Drive copy after a verified migration unless `--keep-drive`), `--drive-remote NAME:` (an rclone remote for your Google Drive; default `GBOT_DRIVE_REMOTE`), `--drive-folder PATH` (default `gbot-migrations`), `--history full|recent:N|none` (default: upload `full`, chat `recent:30`), `--skills all|index|none|a,b` (default: upload `all`, chat `index`; Hermes takes `all` or `none`), `--folder PATH` (default `~/grok-bot/<bot>-<first 8 of its id>`, so bots with one name never share a folder).
 
