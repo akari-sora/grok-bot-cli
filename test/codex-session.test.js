@@ -206,8 +206,10 @@ test("resolution invalidates deferred ownership before turn adoption", async t =
 
 test("RPC timeout releases capacity while local close disposes all pending work", async t => {
   const controller = new AbortController();
-  const { client } = await connected(t, { timeoutMs: 20, signal: controller.signal });
-  await assert.rejects(client.request("wait", {}), /within 20ms/);
+  // 200 ms, not 20: the same limit covers connecting and initializing, which took longer than 20 ms
+  // on a loaded CI runner (Node 26 job, 2026-11-09: "Timed out connecting to Codex app-server").
+  const { client } = await connected(t, { timeoutMs: 200, signal: controller.signal });
+  await assert.rejects(client.request("wait", {}), /within 200ms/);
   assert.equal(client.closed, false);
   assert.equal(await client.request("echo", "still-alive"), "still-alive");
   const rejection = assert.rejects(client.request("wait", {}), /closed/);
