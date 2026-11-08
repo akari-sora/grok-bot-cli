@@ -10,7 +10,7 @@ import {
 } from '../src/core/migration-capture.js';
 import { archivePathFor, openArchive, writeArchive } from '../src/core/migration-archive.js';
 import { acceptanceQuestions, buildHermesPlan, distinctiveTokens, groupNotMigrated, memoryEntries, profileNameFor, skillDescription } from '../src/core/migration-hermes.js';
-import { buildTrinityPlan } from '../src/core/migration-trinity.js';
+import { brokenFiles, buildTrinityPlan, fingerprint } from '../src/core/migration-trinity.js';
 import { redactSecrets } from '../src/core/migration-redact.js';
 import { resolveBot } from '../src/core/migration-flow.js';
 import { BACKEND_READ_RPCS, backendRead } from '../src/core/gateway.js';
@@ -241,7 +241,7 @@ test('trinity plan differs per seat: Muse gets its own side chat and memory read
   for (const want of ['role', 'memory', 'tasks', 'routines', 'skills', 'history', 'remember']) assert.ok(ids.some((i) => i === want || i.startsWith(want + '-')), want);
   assert.ok(muse.steps.filter((s) => /Create \(or overwrite\) the file|Append to the end/.test(s.text)).every((s) => /Do not run/.test(s.text)));
   assert.match(muse.steps.find((s) => s.id === 'remember').text, /long-term/);
-  assert.ok(muse.questions.filter((q) => q.area !== 'memory').every((q) => /Open ~\/grok-bot\/Deploy-QA\//.test(q.text)));
+  assert.ok(muse.questions.filter((q) => !['memory', 'files-on-computer'].includes(q.area)).every((q) => /Open ~\/grok-bot\/Deploy-QA\//.test(q.text)));
   assert.match(dot.questions[0].note, /one inbox/);
   for (const plan of [muse, dot]) {
     assert.doesNotMatch(JSON.stringify(plan.steps), /ghp_/);
@@ -308,4 +308,17 @@ test('not-migrated lines are grouped for the terminal', () => {
   ]);
   assert.equal(grouped.length, 3);
   assert.match(grouped.find((g) => /large/.test(g.item)).item, /2 large file\(s\), up to 40 MiB/);
+});
+
+test('digest answers: only files reported missing or different are repaired', async (t) => {
+  const a = await sampleArchive(t);
+  const plan = buildTrinityPlan(a, 'dot');
+  const q = plan.questions.find((x) => x.area === 'files-on-computer');
+  assert.deepEqual(q.expect, plan.files.map((f) => f.fingerprint));
+  assert.equal(fingerprint('a b\n c'), fingerprint('abc'));
+  const [first, second] = plan.files;
+  const answer = `Q2:\n${first.rel} ${first.fingerprint}\n${second.rel} MISSING`;
+  assert.deepEqual(brokenFiles(plan, answer).map((f) => f.rel), [second.rel]);
+  assert.deepEqual(brokenFiles(plan, 'I could not run commands.'), []);
+  assert.ok(plan.questions.every((x) => x.text.includes('Start your reply with ' + x.marker)));
 });

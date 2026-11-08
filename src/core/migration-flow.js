@@ -139,7 +139,10 @@ export async function checkMigration({ archive, to, profile, skills = 'all', acc
   const verified = await verifyHermes(hermes, opened, plan);
   const acceptance = accept ? await acceptHermes(hermes, opened, plan, { onProgress, usageDir: usageDir(opened.root, to, plan.profile) }) : null;
   const ok = verified.ok && (!acceptance || acceptance.ok);
-  return { exitCode: ok ? 0 : 3, to, profile: plan.profile, verify: verified, acceptance };
+  const report = { exitCode: ok ? 0 : 3, to, profile: plan.profile, verify: verified, acceptance, checkedAt: new Date().toISOString() };
+  const path = join(dirname(opened.root), `${basename(opened.root)}.${to}-${plan.profile}.check-${report.checkedAt.replace(/[-:.]/g, '').slice(0, 15)}.json`);
+  writeFileSync(path, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+  return { ...report, report: path };
 }
 
 /** Capture, preview and (with --yes) import, verify and accept, in one command. */

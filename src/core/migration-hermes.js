@@ -555,16 +555,25 @@ export function acceptanceQuestions(archive, plan) {
 export async function acceptHermes(hermes, archive, plan, { onProgress = () => {}, usageDir } = {}) {
   const results = [];
   for (const q of acceptanceQuestions(archive, plan)) {
-    onProgress('acceptance: ' + q.area);
-    const args = ['-p', plan.profile, ...(q.toolsets ? ['-t', q.toolsets] : []), '-z', q.prompt];
-    if (usageDir) args.push('--usage-file', join(usageDir, `acceptance-${q.area}.json`));
-    let answer = '', error = null;
-    try { answer = await hermes.run(args, { timeoutMs: 600_000, cwd: plan.base }); } catch (e) { error = e.message; }
-    const lower = answer.toLowerCase();
-    const flat = norm(answer);
-    const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => lower.includes(alt.toLowerCase()) || (norm(alt) && flat.includes(norm(alt)))));
-    const need = q.min ?? q.expect.length;
-    results.push({ area: q.area, prompt: q.prompt, expect: q.expect, hits, ok: !error && hits.length >= need, answer: answer.trim().slice(0, 2000), error });
+    // Model answers vary between runs: a question that fails is asked once more, and both answers
+    // are kept in the report, so a pass on the second try is visible as such.
+    const attempts = [];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      onProgress(`acceptance: ${q.area}${attempt > 1 ? ' (asked again)' : ''}`);
+      const args = ['-p', plan.profile, ...(q.toolsets ? ['-t', q.toolsets] : []), '-z', q.prompt];
+      if (usageDir) args.push('--usage-file', join(usageDir, `acceptance-${q.area}-${attempt}.json`));
+      let answer = '', error = null;
+      try { answer = await hermes.run(args, { timeoutMs: 600_000, cwd: plan.base }); } catch (e) { error = e.message; }
+      const lower = answer.toLowerCase();
+      const flat = norm(answer);
+      const hits = q.expect.filter((t) => (Array.isArray(t) ? t : [t]).some((alt) => lower.includes(alt.toLowerCase()) || (norm(alt) && flat.includes(norm(alt)))));
+      const need = q.min ?? q.expect.length;
+      attempts.push({ answer: answer.trim().slice(0, 2000), hits, error, ok: !error && hits.length >= need });
+      if (attempts.at(-1).ok) break;
+    }
+    const last = attempts.at(-1);
+    results.push({ area: q.area, prompt: q.prompt, expect: q.expect, hits: last.hits, ok: last.ok, answer: last.answer, error: last.error,
+      attempts: attempts.length, ...(attempts.length > 1 ? { earlier: attempts.slice(0, -1) } : {}) });
   }
   return { ok: results.length > 0 && results.every((r) => r.ok), results };
 }

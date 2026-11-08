@@ -241,6 +241,12 @@ export const MIGRATE_TARGETS = [
   { key: "dot", label: "Your dot (one dot: memory, open tasks, routines as notes, recent history, files)" },
 ];
 
+/** "aa22306546@hotmail.com" → "aa2…@hotmail.com": enough to tell logins apart on a shared screen. */
+export function maskEmail(email) {
+  const m = /^([^@]{1,3})[^@]*(@.+)$/.exec(String(email ?? ""));
+  return m ? `${m[1]}…${m[2]}` : String(email ?? "");
+}
+
 /** True when argv asks for the guided flow: `migrate` alone or `migrate wizard`. */
 export function migrateWizardRequested(argv) {
   const words = argv.filter((a) => a !== "--json");
@@ -298,14 +304,14 @@ async function migrateWizard(real) {
     let account = accounts[0];
     if (accounts.length > 1) {
       say("1) Source account:");
-      accounts.forEach((a, i) => say(`   ${i + 1}. ${a.email ?? a.label}${a.alias ? ` (alias ${a.alias})` : ""}${a.appActive ? " — active in the app" : ""}`));
+      accounts.forEach((a, i) => say(`   ${i + 1}. ${a.alias ? `${a.alias} — ` : ""}${a.email ? maskEmail(a.email) : `login ${i + 1}`}${a.appActive ? " (active in the app)" : ""}`));
       account = accounts[(await ask("   Account number: ", accounts.length))[0]];
     }
     const selector = account.alias ?? account.id;
     const listed = await runChild(real, ["migrate", "bots", "--account", selector, "--json"], { capture: true });
     const bots = (() => { try { return JSON.parse(listed.stdout).bots; } catch { return []; } })();
     if (!bots.length) { say("This login has no bots to migrate."); return 1; }
-    say(`\n2) Bots on ${account.email ?? selector}:`);
+    say(`\n2) Bots on ${account.alias ?? (account.email ? maskEmail(account.email) : "this login")}:`);
     bots.forEach((b, i) => say(`   ${String(i + 1).padStart(2)}. ${b.name}`));
     const chosen = (await ask("   Bot number(s), e.g. 3 or 1,4: ", bots.length, { multiple: true })).map((i) => bots[i]);
     say("\n3) Destination:");
