@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { MIGRATION_TARGETS, destinationFiles, targetCapability } from './migration-targets.js';
 
 export const MIGRATION_VERSION = 1;
 export const MAX_MIGRATION_BYTES = 64 * 1024 * 1024;
