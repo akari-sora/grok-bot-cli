@@ -145,3 +145,27 @@ windows:hosted:
         - package.json
         - package-lock.json
       when: manual
+
+# Migration touches generated routes and offline archives: exercise the full check,
+# not only source unit tests. pipefail preserves the real test status while saving evidence.
+migration:validation:
+  tags: [$LINUX_RUNNER_TAG]
+  image: node:22-slim
+  script:
+    - apt-get update -qq && apt-get install -y -qq git
+    - node --version
+    - npm ci
+    - chown -R node:node "$CI_PROJECT_DIR"
+    - bash -o pipefail -c 'su node -s /bin/sh -c "npm run check" 2>&1 | tee migration-validation.log'
+  artifacts:
+    when: always
+    paths:
+      - migration-validation.log
+    expire_in: 7 days
+  rules:
+    - changes:
+        - .gitlab-ci.yml
+        - src/core/migration*
+        - src/cli/migrate/**/*
+        - test/migration*
+        - docs/migration*
