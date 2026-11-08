@@ -11252,6 +11252,9 @@ var __webpack_modules__ = {
         var _shared_js__rspack_import_1 = __webpack_require__("./src/cli/_shared.ts");
         const config = {
             description: 'List the skill library every bot in this Grok Bot shares.',
+            render: {
+                maxElapsedMs: 600000
+            },
             inputJsonSchema: {
                 additionalProperties: false,
                 properties: {
@@ -47225,6 +47228,9 @@ var __webpack_modules__ = {
                             "skills",
                             "list"
                         ],
+                        "render": {
+                            "maxElapsedMs": 600000
+                        },
                         "rendered": true,
                         "routeId": "cli:skills/list"
                     },
@@ -53696,10 +53702,39 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (!bot) throw new GatewayError("Skills need at least one bot. Run gbot bots create first.");
             return bot.id;
         }
+        const gatewayGone = (error)=>error instanceof GatewayError && error.status === 404;
+        const LIBRARY_EDIT_078 = "Grok Bot 0.78 no longer edits the skill library through the box gateway (it answers 404). Add or remove the skill in the Grok Bot app, or ask a bot to save it; gbot skills list still reads the library.";
+        function backendStore(session) {
+            const presignMany = async (relPaths)=>{
+                const r = await backendRead(session, "PresignSandBoxStoreReads", {
+                    relPaths
+                });
+                return new Map((r?.instructions ?? []).map((i)=>[
+                        i.relPath,
+                        i.url
+                    ]));
+            };
+            return {
+                presignMany,
+                presign: async (relPath)=>{
+                    const url = (await presignMany([
+                        relPath
+                    ])).get(relPath);
+                    if (!url) throw new GatewayError("The box store did not presign " + relPath + ".");
+                    return url;
+                }
+            };
+        }
         async function listSkills(session) {
-            return asSkills(await gatewayCall(session, "getAgentWorkflows", {
-                id: await anyBotId(session)
-            }));
+            try {
+                return asSkills(await gatewayCall(session, "getAgentWorkflows", {
+                    id: await anyBotId(session)
+                }));
+            } catch (error) {
+                if (!hasBackend(session) || !gatewayGone(error)) throw error;
+                debug("skills: the box gateway answered 404; reading the library from the box store");
+            }
+            return (await (0, _migration_capture_js__rspack_import_10.Lr)(backendStore(session))).map(({ unreadable, ...skill })=>skill);
         }
         async function addSkill(session, markdown) {
             const text = String(markdown);
@@ -53707,7 +53742,17 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             if (text.length > SKILL_MAX_BODY_LENGTH) {
                 throw new GatewayError(`Skill markdown is ${text.length} characters. Grok Bot truncates bodies over ${SKILL_MAX_BODY_LENGTH}; shorten it.`);
             }
-            const id = await anyBotId(session);
+            let id;
+            try {
+                id = await anyBotId(session);
+            } catch (error) {
+                if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, {
+                    status: 404,
+                    method: "listAgents",
+                    code: "LIBRARY_EDIT_UNAVAILABLE"
+                });
+                throw error;
+            }
             let data;
             try {
                 data = await gatewayCall(session, "importAgentWorkflowText", {
@@ -53715,6 +53760,11 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     markdown: text
                 });
             } catch (error) {
+                if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, {
+                    status: 404,
+                    method: "importAgentWorkflowText",
+                    code: "LIBRARY_EDIT_UNAVAILABLE"
+                });
                 if (error instanceof GatewayError && /response too large/.test(error.message)) {
                     throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list (raise GBOT_MAX_RESPONSE_BYTES if that is too large too).");
                 }
@@ -53728,10 +53778,20 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return asSkills(data).find((s)=>s.id === String(imported.id)) ?? asSkill(imported);
         }
         async function removeSkill(session, skillRef) {
-            const id = await anyBotId(session);
-            const skills = asSkills(await gatewayCall(session, "getAgentWorkflows", {
-                id
-            }));
+            let id, skills;
+            try {
+                id = await anyBotId(session);
+                skills = asSkills(await gatewayCall(session, "getAgentWorkflows", {
+                    id
+                }));
+            } catch (error) {
+                if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, {
+                    status: 404,
+                    method: error.method,
+                    code: "LIBRARY_EDIT_UNAVAILABLE"
+                });
+                throw error;
+            }
             const needle = String(skillRef).trim().toLowerCase();
             const matches = skills.filter((s)=>s.id.toLowerCase() === needle || s.name.toLowerCase() === needle);
             if (matches.length === 0) throw new GatewayError(`No skill "${skillRef}".`);
@@ -54415,14 +54475,25 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         async function getThread(session, ref, rootId) {
             const rec = await resolveRef(session, ref);
-            const data = await gatewayCall(session, "getAgentThread", {
-                id: rec.id,
-                rootId
-            });
-            return {
-                target: rec,
-                thread: data
-            };
+            try {
+                const data = await gatewayCall(session, "getAgentThread", {
+                    id: rec.id,
+                    rootId
+                });
+                return {
+                    target: rec,
+                    thread: data
+                };
+            } catch (error) {
+                if (gatewayGone(error)) {
+                    throw new GatewayError("Grok Bot 0.78 does not serve threads by root message (the box gateway answers 404, and the backend has no call for it). Read the conversation with gbot thread " + JSON.stringify(rec.name) + " (add --after <cursor> for new rows).", {
+                        status: 404,
+                        method: "getAgentThread",
+                        code: "THREAD_ROOT_UNAVAILABLE"
+                    });
+                }
+                throw error;
+            }
         }
         async function pendingApprovals(session, rec) {
             const { transcript } = await transcriptTail(session, rec, 200);
@@ -56047,6 +56118,65 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             throw new _migration_js__rspack_import_1.Py('The box store manifest kept changing during the read; run the capture again.');
         }
+        async function readSkillLibrary({ presign, presignMany, fetchImpl = fetch }) {
+            const store = await readStoreManifest({
+                presign,
+                fetchImpl
+            });
+            const rows = [];
+            for (const [path, entry] of Object.entries(store.entries)){
+                const m = /^home\/box\/sand-data\/workflows\/([^/.][^/]*)\/SKILL\.md$/.exec(path);
+                if (m && object(entry)) rows.push({
+                    id: m[1],
+                    entry
+                });
+            }
+            rows.sort((a, b)=>a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+            const out = [];
+            for(let i = 0; i < rows.length; i += BLOB_BATCH){
+                const batch = rows.slice(i, i + BLOB_BATCH);
+                const urls = await presignMany(batch.map((r)=>'blobs/' + r.entry.sha));
+                out.push(...await Promise.all(batch.map(async ({ id, entry })=>{
+                    const url = urls.get('blobs/' + entry.sha);
+                    let text = null;
+                    if (url && Number(entry.size) <= 1024 * 1024) {
+                        try {
+                            const { bytes } = await fetchStoreBytes(url, {
+                                cap: 1024 * 1024,
+                                fetchImpl
+                            });
+                            if (sha256(bytes) === entry.sha && bytes.length === entry.size) text = bytes.toString('utf8');
+                        } catch  {}
+                    }
+                    const front = text === null ? '' : /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+                    const field = (key)=>{
+                        const lines = front.split(/\r?\n/);
+                        const at = lines.findIndex((l)=>l.startsWith(key + ':'));
+                        if (at === -1) return '';
+                        const value = lines[at].slice(key.length + 1).trim();
+                        if (/^[>|][-+]?$/.test(value)) {
+                            const body = [];
+                            for (const l of lines.slice(at + 1)){
+                                if (l.trim() && !/^\s/.test(l)) break;
+                                body.push(l.trim());
+                            }
+                            return body.filter(Boolean).join(value.startsWith('>') ? ' ' : '\n').trim();
+                        }
+                        return value.replace(/^(["'])(.*)\1$/, '$2').trim();
+                    };
+                    return {
+                        id,
+                        name: field('name') || id,
+                        description: field("description"),
+                        source: 'workflow',
+                        ...text === null ? {
+                            unreadable: true
+                        } : {}
+                    };
+                })));
+            }
+            return out;
+        }
         const SECRET_PATH = /(^|\/)(box-secrets\.json|host-secrets\.json|turnkey-agent-credentials\.json|chrome-cookie[^/]*|teach-queue-key\.json|\.env[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn)|id_[a-z0-9]+|auth\.json|\.?credentials?[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.yarnrc(\.yml)?|\.pgpass|\.my\.cnf|\.boto|\.s3cfg|\.htpasswd|\.vault-token|\.dockercfg|kubeconfig[^/]*|[^/]*service[-_]?account[^/]*\.json|[^/]*token[^/]*|[^/]*secret[^/]*|[^/]*password[^/]*)$/i;
         const SECRET_DIR = /(^|\/)(\.ssh|\.gnupg|\.aws|\.azure|\.oci|\.secrets|\.docker|\.kube|\.config\/gh|\.config\/glab-cli|\.config\/gcloud|\.config\/rclone|\.config\/hub|\.config\/op|\.config\/doctl|\.local\/share\/keyrings|chrome-profile|\.mozilla|\.password-store)(\/|$)/i;
         const isSecretPath = (p)=>SECRET_PATH.test(p) || SECRET_DIR.test(p);
@@ -56696,6 +56826,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }
         __webpack_require__.d(__webpack_exports__, {
             $8: ()=>fetchStoreBytes,
+            Lr: ()=>readSkillLibrary,
             U8: ()=>captureBot
         }, {
             CR: DEFAULT_MAX_FILE_BYTES,

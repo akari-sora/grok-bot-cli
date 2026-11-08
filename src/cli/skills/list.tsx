@@ -6,6 +6,8 @@ import { backendFlagsSchema, openBackendFromInput, skillSchema } from '../_share
 
 export const config = {
   description: 'List the skill library every bot in this Grok Bot shares.',
+  // On Grok Bot 0.78 the library is read from the box store, whose manifest can take minutes.
+  render: { maxElapsedMs: 600000 },
   inputJsonSchema: {
     additionalProperties: false,
     properties: {

@@ -10,7 +10,7 @@ import { secretStoreOptions } from "./secret-store.js";
 import { AVATAR_COLORS, AVATAR_SHAPES, MAX_GROUP_MEMBERS } from "./store.js";
 import { assertAllowedCredentialUrl, redactKnownSecrets, redactSecrets } from "./url-policy.js";
 import { grokApproval, grokApprovalResponseSchema } from "./grok-approvals.js";
-import { fetchStoreBytes } from "./migration-capture.js";
+import { fetchStoreBytes, readSkillLibrary } from "./migration-capture.js";
 
 export class GatewayError extends Error {
   constructor(message, info = {}) {
@@ -1700,8 +1700,36 @@ async function anyBotId(session) {
   return bot.id;
 }
 
+// Grok Bot 0.78 hosts: the box gateway answers 404 to the library and thread methods (checked live on
+// 2026-11-08 with the box awake). The library itself is still the box store's workflows/ folder.
+const gatewayGone = (error) => error instanceof GatewayError && error.status === 404;
+const LIBRARY_EDIT_078 = "Grok Bot 0.78 no longer edits the skill library through the box gateway (it answers 404). Add or remove the skill in the Grok Bot app, or ask a bot to save it; gbot skills list still reads the library.";
+
+// Presigned, read-only box store reads through the backend (the reads gbot migrate uses).
+function backendStore(session) {
+  const presignMany = async (relPaths) => {
+    const r = await backendRead(session, "PresignSandBoxStoreReads", { relPaths });
+    return new Map((r?.instructions ?? []).map((i) => [i.relPath, i.url]));
+  };
+  return {
+    presignMany,
+    presign: async (relPath) => {
+      const url = (await presignMany([relPath])).get(relPath);
+      if (!url) throw new GatewayError("The box store did not presign " + relPath + ".");
+      return url;
+    },
+  };
+}
+
 export async function listSkills(session) {
-  return asSkills(await gatewayCall(session, "getAgentWorkflows", { id: await anyBotId(session) }));
+  try {
+    return asSkills(await gatewayCall(session, "getAgentWorkflows", { id: await anyBotId(session) }));
+  } catch (error) {
+    if (!hasBackend(session) || !gatewayGone(error)) throw error;
+    debug("skills: the box gateway answered 404; reading the library from the box store");
+  }
+  // Only the user's library (workflows/); team-managed and plugin skills are not in the store.
+  return (await readSkillLibrary(backendStore(session))).map(({ unreadable, ...skill }) => skill);
 }
 
 export async function addSkill(session, markdown) {
@@ -1710,11 +1738,18 @@ export async function addSkill(session, markdown) {
   if (text.length > SKILL_MAX_BODY_LENGTH) {
     throw new GatewayError(`Skill markdown is ${text.length} characters. Grok Bot truncates bodies over ${SKILL_MAX_BODY_LENGTH}; shorten it.`);
   }
-  const id = await anyBotId(session);
+  let id;
+  try {
+    id = await anyBotId(session);
+  } catch (error) {
+    if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, { status: 404, method: "listAgents", code: "LIBRARY_EDIT_UNAVAILABLE" });
+    throw error;
+  }
   let data;
   try {
     data = await gatewayCall(session, "importAgentWorkflowText", { id, markdown: text });
   } catch (error) {
+    if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, { status: 404, method: "importAgentWorkflowText", code: "LIBRARY_EDIT_UNAVAILABLE" });
     if (error instanceof GatewayError && /response too large/.test(error.message)) {
       throw new GatewayError("Grok Bot echoed a skill list too large to read; the import may still have landed. Run gbot skills list (raise GBOT_MAX_RESPONSE_BYTES if that is too large too).");
     }
@@ -1729,8 +1764,14 @@ export async function addSkill(session, markdown) {
 }
 
 export async function removeSkill(session, skillRef) {
-  const id = await anyBotId(session);
-  const skills = asSkills(await gatewayCall(session, "getAgentWorkflows", { id }));
+  let id, skills;
+  try {
+    id = await anyBotId(session);
+    skills = asSkills(await gatewayCall(session, "getAgentWorkflows", { id }));
+  } catch (error) {
+    if (gatewayGone(error)) throw new GatewayError(LIBRARY_EDIT_078, { status: 404, method: error.method, code: "LIBRARY_EDIT_UNAVAILABLE" });
+    throw error;
+  }
   const needle = String(skillRef).trim().toLowerCase();
   const matches = skills.filter((s) => s.id.toLowerCase() === needle || s.name.toLowerCase() === needle);
   if (matches.length === 0) throw new GatewayError(`No skill "${skillRef}".`);
@@ -2318,8 +2359,17 @@ export async function publishBotTemplate(session, ref, { version, signal } = {})
 
 export async function getThread(session, ref, rootId) {
   const rec = await resolveRef(session, ref);
-  const data = await gatewayCall(session, "getAgentThread", { id: rec.id, rootId });
-  return { target: rec, thread: data };
+  try {
+    const data = await gatewayCall(session, "getAgentThread", { id: rec.id, rootId });
+    return { target: rec, thread: data };
+  } catch (error) {
+    // The app has no backend call that maps a root message to its thread (ListGrokBotAgentSessions has
+    // no root entry), so a 0.78 host cannot answer --root.
+    if (gatewayGone(error)) {
+      throw new GatewayError("Grok Bot 0.78 does not serve threads by root message (the box gateway answers 404, and the backend has no call for it). Read the conversation with gbot thread " + JSON.stringify(rec.name) + " (add --after <cursor> for new rows).", { status: 404, method: "getAgentThread", code: "THREAD_ROOT_UNAVAILABLE" });
+    }
+    throw error;
+  }
 }
 
 async function pendingApprovals(session, rec) {
