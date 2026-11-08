@@ -1,7 +1,7 @@
 /** Portable, offline migration. No credentials, network, subprocesses or runtime activation. */
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 
 export const MIGRATION_VERSION = 1;
 export const MAX_MIGRATION_BYTES = 64 * 1024 * 1024;
@@ -338,6 +338,9 @@ export function planMigration(archive, { to = 'openclaw', includeSkills = false 
 export function applyMigration(archive, { out, to = 'openclaw', includeSkills = false, yes = false } = {}) {
   if (!yes) fail('Apply requires --yes after reviewing the plan.');
   if (!text(out, 8192) || !out.trim()) fail('Apply requires a new output directory.');
+  const sourceRoot = directory(archive);
+  const destination = join(directory(dirname(resolve(out))), basename(resolve(out)));
+  if (destination === sourceRoot || destination.startsWith(sourceRoot + sep)) fail('Staging output must be outside the source archive.');
   const plan = planMigration(archive, { to, includeSkills });
   if (plan.counts.failedReads) fail('Archive contains failed reads; repair the source export before apply.');
   if (!plan.counts.bots) fail('Archive has no bots to stage.');
