@@ -206,7 +206,9 @@ async function runTrinity({ archive, to, accept, activateRoutines, onProgress, e
   const help = await exec(bin, ['migrate', '--help'], { timeoutMs: 60_000 }).catch(() => ({ code: 127 }));
   if (help.code !== 0 || !/--redo/.test(help.stdout ?? '')) throw new MigrationError(`${bin} has no migrate --redo (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
   const path = planFile(opened.root, to);
-  writeFileSync(path, JSON.stringify(plan, null, 2) + '\n', { mode: 0o600 });
+  // `files` (digests and step ids per file) is gbot's own bookkeeping, not part of the plan format.
+  const { files: _files, ...wire } = plan;
+  writeFileSync(path, JSON.stringify(wire, null, 2) + '\n', { mode: 0o600 });
   onProgress(`delivering ${plan.steps.length} messages to ${LABEL[to]} with trinity-cli (resumable)`);
   let result = await trinityRun(exec, bin, to, path, { accept });
   // Failure recovery: a file the agent did not save (or saved differently) is sent again once.

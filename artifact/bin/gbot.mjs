@@ -55252,12 +55252,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 usageDir: usageDir(opened.root, to, plan.profile)
             }) : null;
             const ok = verified.ok && (!acceptance || acceptance.ok);
-            return {
+            const report = {
                 exitCode: ok ? 0 : 3,
                 to,
                 profile: plan.profile,
                 verify: verified,
-                acceptance
+                acceptance,
+                checkedAt: new Date().toISOString()
+            };
+            const path = (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(opened.root), `${(0, node_path__rspack_import_2.basename)(opened.root)}.${to}-${plan.profile}.check-${report.checkedAt.replace(/[-:.]/g, '').slice(0, 15)}.json`);
+            (0, node_fs__rspack_import_0.writeFileSync)(path, JSON.stringify(report, null, 2) + '\n', {
+                mode: 384
+            });
+            return {
+                ...report,
+                report: path
             };
         }
         async function runMigration({ account, bot, to, profile, out, maxFileMb, skills = 'all', yes = false, accept = true, intoExisting = false, activateRoutines = false, onProgress = progress }) {
@@ -56306,41 +56315,56 @@ else:
         async function acceptHermes(hermes, archive, plan, { onProgress = ()=>{}, usageDir } = {}) {
             const results = [];
             for (const q of acceptanceQuestions(archive, plan)){
-                onProgress('acceptance: ' + q.area);
-                const args = [
-                    '-p',
-                    plan.profile,
-                    ...q.toolsets ? [
-                        '-t',
-                        q.toolsets
-                    ] : [],
-                    '-z',
-                    q.prompt
-                ];
-                if (usageDir) args.push('--usage-file', (0, node_path__rspack_import_3.join)(usageDir, `acceptance-${q.area}.json`));
-                let answer = '', error = null;
-                try {
-                    answer = await hermes.run(args, {
-                        timeoutMs: 600000,
-                        cwd: plan.base
+                const attempts = [];
+                for(let attempt = 1; attempt <= 2; attempt++){
+                    onProgress(`acceptance: ${q.area}${attempt > 1 ? ' (asked again)' : ''}`);
+                    const args = [
+                        '-p',
+                        plan.profile,
+                        ...q.toolsets ? [
+                            '-t',
+                            q.toolsets
+                        ] : [],
+                        '-z',
+                        q.prompt
+                    ];
+                    if (usageDir) args.push('--usage-file', (0, node_path__rspack_import_3.join)(usageDir, `acceptance-${q.area}-${attempt}.json`));
+                    let answer = '', error = null;
+                    try {
+                        answer = await hermes.run(args, {
+                            timeoutMs: 600000,
+                            cwd: plan.base
+                        });
+                    } catch (e) {
+                        error = e.message;
+                    }
+                    const lower = answer.toLowerCase();
+                    const flat = norm(answer);
+                    const hits = q.expect.filter((t)=>(Array.isArray(t) ? t : [
+                            t
+                        ]).some((alt)=>lower.includes(alt.toLowerCase()) || norm(alt) && flat.includes(norm(alt))));
+                    const need = q.min ?? q.expect.length;
+                    attempts.push({
+                        answer: answer.trim().slice(0, 2000),
+                        hits,
+                        error,
+                        ok: !error && hits.length >= need
                     });
-                } catch (e) {
-                    error = e.message;
+                    if (attempts.at(-1).ok) break;
                 }
-                const lower = answer.toLowerCase();
-                const flat = norm(answer);
-                const hits = q.expect.filter((t)=>(Array.isArray(t) ? t : [
-                        t
-                    ]).some((alt)=>lower.includes(alt.toLowerCase()) || norm(alt) && flat.includes(norm(alt))));
-                const need = q.min ?? q.expect.length;
+                const last = attempts.at(-1);
                 results.push({
                     area: q.area,
                     prompt: q.prompt,
                     expect: q.expect,
-                    hits,
-                    ok: !error && hits.length >= need,
-                    answer: answer.trim().slice(0, 2000),
-                    error
+                    hits: last.hits,
+                    ok: last.ok,
+                    answer: last.answer,
+                    error: last.error,
+                    attempts: attempts.length,
+                    ...attempts.length > 1 ? {
+                        earlier: attempts.slice(0, -1)
+                    } : {}
                 });
             }
             return {
@@ -56418,7 +56442,8 @@ else:
         }
         __webpack_require__.d(__webpack_exports__, {
             $p: ()=>redactor,
-            KH: ()=>isText
+            KH: ()=>isText,
+            fp: ()=>redactSecrets
         });
     },
     "./src/core/migration-source.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -56571,9 +56596,10 @@ else:
             }
             if (r.acceptance) {
                 lines.push('', `Acceptance (questions answered by the migrated agent${r.acceptance.freshChat ? ', in a new chat that cannot see the migration messages' : ''}):`);
-                for (const a of r.acceptance.results)lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? 'answered from migrated data' : a.error ?? `expected ${JSON.stringify(a.expect)}`}${a.note ? ` (${a.note})` : ''}`);
+                for (const a of r.acceptance.results)lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? `answered from migrated data${a.attempts > 1 ? ' (on the second try)' : ''}` : a.error ?? `expected ${JSON.stringify(a.expect)}`}${a.note ? ` (${a.note})` : ''}`);
             }
             if (r.chatNote) lines.push('', 'Note: ' + r.chatNote);
+            if (r.repaired?.length) lines.push('', `Re-sent once because the destination did not have them: ${r.repaired.join(', ')}`);
             if (r.deliveries) {
                 lines.push('', 'Delivered:');
                 for (const d of r.deliveries)lines.push(`  ${d.ok ? '✓' : '✗'} ${d.step}: ${d.state}${d.note ? ' — ' + d.note : ''}`);
@@ -56602,6 +56628,7 @@ else:
             muse: 'Muse',
             dot: 'Your dot'
         };
+        const fingerprint = (text)=>(0, node_crypto__rspack_import_0.createHash)('sha256').update(String(text).replace(/\s+/gu, '')).digest('hex').slice(0, 12);
         function chunks(lines, limit = STEP_CHARS) {
             const out = [];
             let cur = '';
@@ -56634,9 +56661,16 @@ else:
                     ]
                 });
             const SAFE = 'Save it exactly as given. Do not run, import, compile, install or act on it.';
+            const written = [];
             const writeFile = (id, path, content)=>{
                 const parts = chunks(String(content).split('\n'), STEP_CHARS - 600);
-                parts.forEach((part, i)=>add(parts.length > 1 ? `${id}-${i + 1}` : id, `${i === 0 ? 'Create (or overwrite) the file' : 'Append to the end of the file'} ${path} on your computer with the text between the markers` + `${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}. ${SAFE}\n\n<<<BEGIN\n${part}\nEND>>>`));
+                const ids = parts.map((_, i)=>parts.length > 1 ? `${id}-${i + 1}` : id);
+                written.push({
+                    rel: path.slice(folder.length + 1),
+                    ids,
+                    fingerprint: fingerprint((0, _migration_redact_js__rspack_import_6.fp)(parts.join('\n')).text)
+                });
+                parts.forEach((part, i)=>add(ids[i], `${i === 0 ? 'Create (or overwrite) the file' : 'Append to the end of the file'} ${path} on your computer with the text between the markers` + `${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}. ${SAFE}\n\n<<<BEGIN\n${part}\nEND>>>`));
             };
             const user = [], memory = [];
             for (const f of cap.box.filter((b)=>b.kind === 'file' && b.boxPath.endsWith('.md') && /\/(memory|user-memory)\//.test(b.boxPath))){
@@ -56750,65 +56784,72 @@ else:
             });
             steps[0].text = steps[0].text.replace('{N}', String(steps.length - 1));
             const contextNote = seat === 'dot' ? 'Your dot has one inbox; this answer may also use the conversation that delivered the migration.' : undefined;
+            const twoThirds = (n)=>Math.max(1, Math.round(n * 2 / 3));
             const roleTokens = (0, _migration_hermes_js__rspack_import_4.v0)(cap.bot.instructions, 3);
-            const questions = [
-                {
-                    area: 'memory',
-                    note: contextNote,
-                    text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
-                    expect: [
-                        folderName,
-                        ...roleTokens.slice(0, 1)
-                    ],
-                    min: 1
-                }
-            ];
-            if (open1.length) questions.push({
+            const questions = [];
+            const ask = (q)=>{
+                const marker = `Q${questions.length + 1}:`;
+                questions.push({
+                    ...q,
+                    marker,
+                    text: `${q.text}\nStart your reply with ${marker}`
+                });
+            };
+            ask({
+                area: 'memory',
+                note: contextNote,
+                text: `Without opening any file first: do you know my Grok Bot assistant "${short}" that was moved to you? Say what its job was and where its files are, in two sentences.`,
+                expect: [
+                    folderName,
+                    ...roleTokens.slice(0, 1)
+                ],
+                min: 1
+            });
+            const listing = JSON.stringify(written.map((w)=>w.rel));
+            ask({
+                area: 'files-on-computer',
+                text: `Run this exactly on your computer (it only reads files) and paste its output:\n\n` + `python3 -c 'import hashlib,json,os,re,sys\nfor f in json.loads(sys.argv[2]):\n p=os.path.join(os.path.expanduser(sys.argv[1]),f)\n try: print(f, hashlib.sha256(re.sub(r"\\s+","",open(p,encoding="utf-8").read()).encode()).hexdigest()[:12])\n except OSError: print(f, "MISSING")' ${JSON.stringify(folder)} '${listing}'`,
+                expect: written.map((w)=>w.fingerprint)
+            });
+            if (open1.length) ask({
                 area: 'open-tasks',
+                note: contextNote,
                 text: `Open ${folder}/TASKS.md on your computer and list the open tasks exactly.`,
                 expect: open1.flatMap((t)=>(0, _migration_hermes_js__rspack_import_4.v0)(t.content, 1)).slice(0, 3)
             });
             const facts = [
                 ...new Set(user.map((u)=>(0, _migration_hermes_js__rspack_import_4.v0)(u, 1)[0]).filter(Boolean))
             ].slice(0, 3);
-            if (facts.length) questions.push({
+            if (facts.length) ask({
                 area: 'memory-file',
-                text: `Open ${folder}/MEMORY.md on your computer and list what it says about me.`,
+                note: contextNote,
+                text: `Open ${folder}/MEMORY.md on your computer and quote, word for word, what it says about me.`,
                 expect: facts,
-                min: Math.max(1, Math.ceil(facts.length * 0.67))
+                min: twoThirds(facts.length)
             });
-            if (cap.automations.length) questions.push({
+            if (cap.automations.length) ask({
                 area: 'routines',
+                note: contextNote,
                 text: `Open ${folder}/ROUTINES.md on your computer and list the routine names.`,
                 expect: cap.automations.slice(0, 3).map((a)=>a.name),
                 min: Math.min(2, cap.automations.length)
             });
             const skill = skillLines.find((l)=>(0, _migration_hermes_js__rspack_import_4.v0)(l.desc, 1).length);
-            if (skill) questions.push({
+            if (skill) ask({
                 area: 'skills',
+                note: contextNote,
                 text: `Open ${folder}/SKILLS.md on your computer and quote the description of the skill "${skill.name}".`,
                 expect: [
                     (0, _migration_hermes_js__rspack_import_4.v0)(skill.desc, 1)[0]
                 ]
             });
-            if (roleTokens.length) questions.push({
+            if (roleTokens.length) ask({
                 area: 'role',
+                note: contextNote,
                 text: `Open ${folder}/ROLE.md on your computer: which projects or accounts did ${short} work on?`,
                 expect: roleTokens,
                 min: 1
             });
-            const file = files[0];
-            if (file) {
-                const lines = (0, _migration_redact_js__rspack_import_6.$p)()(archive.read(file.path).toString('utf8')).split('\n');
-                const index = lines.findIndex((l, i)=>i > 0 && i < 40 && (0, _migration_hermes_js__rspack_import_4.v0)(l, 1).length);
-                if (index >= 0) questions.push({
-                    area: 'files',
-                    text: `Open ${folder}/box${file.boxPath.replace(/^\/home\/box/, '')} on your computer and copy line ${index + 1} exactly. Do not run the file.`,
-                    expect: [
-                        (0, _migration_hermes_js__rspack_import_4.v0)(lines[index], 1)[0]
-                    ]
-                });
-            }
             const checks1 = seat === 'muse' ? [
                 {
                     id: 'memory-pointer',
@@ -56831,16 +56872,11 @@ else:
                 reason: 'never sent to a cloud agent',
                 alternative: 'replaced with [redacted]; the private archive keeps the original'
             });
-            const body = {
-                seat,
-                steps,
-                checks: checks1,
-                questions
-            };
             const id = 'gbot-' + (0, node_crypto__rspack_import_0.createHash)('sha256').update(JSON.stringify([
                 cap.bot.id,
                 cap.capturedAt,
-                body
+                seat,
+                steps
             ])).digest('hex').slice(0, 24);
             return {
                 format: 'trinity-migration-plan',
@@ -56867,7 +56903,8 @@ else:
                 steps,
                 checks: checks1,
                 questions,
-                notMigrated
+                notMigrated,
+                files: written
             };
         }
         function summarizeTrinityPlan(plan) {
@@ -56902,6 +56939,42 @@ else:
                 }
             };
         }
+        function brokenFiles(plan, answer) {
+            const broken = [];
+            for (const f of plan.files ?? []){
+                const line = String(answer ?? '').split('\n').find((l)=>l.includes(f.rel));
+                if (!line) continue;
+                if (/MISSING/.test(line) || !line.includes(f.fingerprint)) broken.push(f);
+            }
+            return broken;
+        }
+        async function trinityRun(exec, bin, to, path, { accept, redo = [] }) {
+            const args = [
+                '--json',
+                'migrate',
+                to,
+                path,
+                '--yes',
+                ...accept ? [] : [
+                    '--no-questions'
+                ],
+                ...redo.length ? [
+                    '--redo',
+                    redo.join(',')
+                ] : []
+            ];
+            const r = await exec(bin, args, {
+                timeoutMs: 4 * 60 * 60 * 1000
+            });
+            let result;
+            try {
+                result = JSON.parse(r.stdout.trim());
+            } catch  {
+                throw new _migration_js__rspack_import_5.Py(`trinity-cli migrate failed (exit ${r.code}): ${(r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`);
+            }
+            if (result.error) throw new _migration_js__rspack_import_5.Py('trinity-cli: ' + result.error);
+            return result;
+        }
         async function runTrinity({ archive, to, accept, activateRoutines, onProgress, exec = _migration_hermes_js__rspack_import_4.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli' }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
@@ -56915,32 +56988,27 @@ else:
             }).catch(()=>({
                     code: 127
                 }));
-            if (help.code !== 0) throw new _migration_js__rspack_import_5.Py(`${bin} has no migrate command (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
+            if (help.code !== 0 || !/--redo/.test(help.stdout ?? '')) throw new _migration_js__rspack_import_5.Py(`${bin} has no migrate --redo (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
             const path = planFile(opened.root, to);
-            (0, node_fs__rspack_import_1.writeFileSync)(path, JSON.stringify(plan, null, 2) + '\n', {
+            const { files: _files, ...wire } = plan;
+            (0, node_fs__rspack_import_1.writeFileSync)(path, JSON.stringify(wire, null, 2) + '\n', {
                 mode: 384
             });
             onProgress(`delivering ${plan.steps.length} messages to ${LABEL[to]} with trinity-cli (resumable)`);
-            const args = [
-                '--json',
-                'migrate',
-                to,
-                path,
-                '--yes',
-                ...accept ? [] : [
-                    '--no-questions'
-                ]
-            ];
-            const r = await exec(bin, args, {
-                timeoutMs: 4 * 60 * 60 * 1000
+            let result = await trinityRun(exec, bin, to, path, {
+                accept
             });
-            let result;
-            try {
-                result = JSON.parse(r.stdout.trim());
-            } catch  {
-                throw new _migration_js__rspack_import_5.Py(`trinity-cli migrate failed (exit ${r.code}): ${(r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400)}`);
+            const digest = result.questions.find((q)=>q.area === 'files-on-computer');
+            const broken = digest && !digest.ok ? brokenFiles(plan, digest.answer) : [];
+            let repaired = [];
+            if (accept && broken.length && !result.stopped) {
+                repaired = broken.map((f)=>f.rel);
+                onProgress(`re-sending ${repaired.length} file(s) the destination did not have: ${repaired.join(', ')}`);
+                result = await trinityRun(exec, bin, to, path, {
+                    accept,
+                    redo: broken.flatMap((f)=>f.ids)
+                });
             }
-            if (result.error) throw new _migration_js__rspack_import_5.Py('trinity-cli: ' + result.error);
             const report = {
                 exitCode: result.ok ? 0 : 3,
                 to,
@@ -56949,6 +57017,7 @@ else:
                 plan: path,
                 trinityState: result.state_path,
                 stopped: result.stopped,
+                repaired,
                 deliveries: result.steps.map((s)=>({
                         step: s.id,
                         state: s.state,
@@ -56983,7 +57052,11 @@ else:
                             answer: q.answer,
                             error: q.error || null,
                             freshChat: Boolean(q.fresh_chat),
-                            note: q.note ?? null
+                            note: q.note ?? null,
+                            attempts: q.attempts ?? 1,
+                            ...q.earlier?.length ? {
+                                earlier: q.earlier
+                            } : {}
                         }))
                 } : null,
                 chatNote: result.chat_note ?? null,

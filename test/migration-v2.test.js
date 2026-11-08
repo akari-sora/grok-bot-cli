@@ -322,3 +322,11 @@ test('digest answers: only files reported missing or different are repaired', as
   assert.deepEqual(brokenFiles(plan, 'I could not run commands.'), []);
   assert.ok(plan.questions.every((x) => x.text.includes('Start your reply with ' + x.marker)));
 });
+
+test('the plan written for trinity has only trinity-migration-plan v1 fields', async (t) => {
+  const a = await sampleArchive(t);
+  const { files, ...wire } = buildTrinityPlan(a, 'muse');
+  assert.ok(files.length > 0);
+  const allowed = ['format', 'version', 'id', 'seat', 'title', 'chat', 'checkChat', 'source', 'steps', 'checks', 'questions', 'notMigrated'];
+  assert.deepEqual(Object.keys(wire).filter((k) => !allowed.includes(k)), []);
+});
