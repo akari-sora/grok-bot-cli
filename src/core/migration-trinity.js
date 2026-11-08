@@ -16,7 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { openArchive } from './migration-archive.js';
-import { routinesOn, selectRoutines } from './migration-capture.js';
+import { memoryNotCaptured, routinesOn, selectRoutines } from './migration-capture.js';
 import { defaultExec, distinctiveTokens, groupNotMigrated, memoryEntries, skillDescription } from './migration-hermes.js';
 import { MigrationError, privateWrite } from './migration.js';
 import { assertNoSecrets, hasSecret, sanitize, sanitizeBytes } from './migration-redact.js';
@@ -104,7 +104,7 @@ const CHECK_PY = [
  * Pure apart from the bundle zip it writes next to the archive. Builds the handoff folder and the
  * trinity-migration-plan for one archive and seat.
  */
-export function buildTrinityPlan(archive, seat, { activateRoutines = false, routines, via = 'auto', history, skills, folder: folderOpt, salt = randomBytes(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
+export function buildTrinityPlan(archive, seat, { activateRoutines = false, routines, switchOver = false, via = 'auto', history, skills, folder: folderOpt, salt = randomBytes(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
   if (!LABEL[seat]) throw new MigrationError('Unsupported trinity seat.');
   trinityOptions({ via, history, skills, folder: folderOpt, driveRemote, driveFolder });
   // auto: an attachment when it fits, else your Google Drive (when a remote is given), else chat.
@@ -112,7 +112,7 @@ export function buildTrinityPlan(archive, seat, { activateRoutines = false, rout
   let lastError;
   for (const mode of tryVia) {
     try {
-      return planFor(archive, seat, { mode, auto: via === 'auto', activateRoutines, routines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder });
+      return planFor(archive, seat, { mode, auto: via === 'auto', activateRoutines, routines, switchOver, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder });
     } catch (error) {
       if (!(error instanceof TooBig) || mode === tryVia.at(-1)) throw error;
       lastError = error;
@@ -123,7 +123,7 @@ export function buildTrinityPlan(archive, seat, { activateRoutines = false, rout
 
 class TooBig extends MigrationError {}
 
-function planFor(archive, seat, { mode, auto, activateRoutines, routines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
+function planFor(archive, seat, { mode, auto, activateRoutines, routines, switchOver, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
   const cap = archive.capture;
   const name = sanitize(cap.bot.name).text;
   const short = name.split(' · ')[0];
@@ -199,7 +199,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, routines, histor
     ...((cap.tasks ?? []).length ? ['', '## Background tasks in Grok Bot', ...cap.tasks.map((t) => `- ${t.title ?? t.name ?? t.id ?? 'task'}${t.status ? ` (${t.status})` : ''}`)] : []),
     '', `${cap.todos.filter((t) => t.status === 'completed').length} completed and ${cap.todos.filter((t) => t.status === 'cancelled').length} cancelled tasks are in the local archive.`, ''].join('\n'));
   if (cap.automations.length) addFile('ROUTINES.md', [`# ${short}: routines`, '',
-    ...scheduled.map((a) => `## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${active.has(a) ? 'Migrated as an active scheduled task' : 'Not scheduled here'}\n\n${a.prompt}\n`),
+    ...scheduled.map((a) => `## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${!active.has(a) ? 'Not scheduled here' : switchOver ? 'Moved here: scheduled once its Grok Bot copy is paused' : 'Migrated as an active scheduled task'}\n\n${a.prompt}\n`),
     ...events.map((a) => `## ${a.name}\n- Trigger: ${a.trigger} event (no equivalent here)\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n\n${a.prompt}\n`)].join('\n'));
   if (skillInfo.length && skillsMode !== 'none') {
     addFile('SKILLS.md', [`# Skills (saved procedures) ${short} could use`, '',
@@ -247,7 +247,7 @@ function planFor(archive, seat, { mode, auto, activateRoutines, routines, histor
   addFile('MANIFEST.txt', files.map((f) => f.rel).sort().join('\n') + '\n');
 
   // --- what does not move, and why ----------------------------------------------------------
-  for (const a of scheduled.filter((x) => !active.has(x) && (!activateRoutines || x.enabled))) notMigrated.push({ item: `routine "${a.name}"`, reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`, alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (schedules it here and pauses the Grok copy after the check)` });
+  for (const a of scheduled.filter((x) => !active.has(x) && (!activateRoutines || x.enabled))) notMigrated.push({ item: `routine "${a.name}"`, reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`, alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (after the check it pauses the Grok copy, then schedules it here)` });
   for (const a of events) notMigrated.push({ item: `routine "${a.name}"`, reason: `event trigger (${a.trigger})`, alternative: `kept in ${folder}/ROUTINES.md` });
   const indexOnly = skillInfo.length - fullSkills.length;
   if (indexOnly && skillsMode !== 'none') notMigrated.push({ item: `${indexOnly} skill bodies`, reason: `--skills ${skillsMode}`, alternative: `names and descriptions in ${folder}/SKILLS.md; full SKILL.md files stay in the archive` });
@@ -276,7 +276,8 @@ function planFor(archive, seat, { mode, auto, activateRoutines, routines, histor
   const units = new Map();
   for (const f of files) { const u = f.rel.split('/')[0]; if (!units.has(u)) units.set(u, []); units.get(u).push(f); }
   const unitIds = new Map([...units.keys()].map((u) => [u, []]));
-  const add = (id, body, extra = {}) => steps.push({ id, text: body + `\n\nReply with exactly: saved ${id}`, expectReply: ['saved'], ...extra });
+  const stepOf = (id, body, extra = {}) => ({ id, text: body + `\n\nReply with exactly: saved ${id}`, expectReply: ['saved'], ...extra });
+  const add = (id, body, extra) => steps.push(stepOf(id, body, extra));
   let bundle = null;
   const usedIds = new Set(['intro', 'bundle', 'remember']);
   if (upload) {
@@ -318,9 +319,11 @@ function planFor(archive, seat, { mode, auto, activateRoutines, routines, histor
     });
     if (steps.length > MAX_CHAT_STEPS) throw new TooBig(`Chat delivery would need ${steps.length} messages. Use --via upload, --history recent:N or --skills index.`);
   }
-  for (const a of scheduled.filter((x) => active.has(x))) {
-    add(`schedule-${safeSegment(a.id)}`.slice(0, 60), `Create a recurring scheduled task named "${a.name}" that runs on cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''} and does what ${folder}/ROUTINES.md describes under "${a.name}".`);
-  }
+  // --move-routines (switchOver): a routine is scheduled here only after its Grok Bot copy is
+  // paused, so its step and read-back are a plan of their own (see switchPlans below).
+  const scheduleSteps = scheduled.filter((x) => active.has(x)).map((a) => ({ a, step: stepOf(`schedule-${safeSegment(a.id)}`.slice(0, 60),
+    `Create a recurring scheduled task named "${a.name}" that runs on cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''} and does what ${folder}/ROUTINES.md describes under "${a.name}".`) }));
+  if (!switchOver) steps.push(...scheduleSteps.map((x) => x.step));
   add('remember', `Please remember this long-term (明確要求長期記住): my Grok Bot assistant "${short}" was moved to you. Its handoff folder is ${folder}/ (start with README.md; role in ROLE.md, memory in MEMORY.md, open tasks in TASKS.md). Read those files before doing ${short}'s work.`);
 
   // --- acceptance ---------------------------------------------------------------------------
@@ -364,23 +367,27 @@ function planFor(archive, seat, { mode, auto, activateRoutines, routines, histor
   if (roleTokens.length) ask({ area: 'role', note: contextNote, text: `Open ${folder}/ROLE.md on your computer: which projects, accounts or places does it name? Quote them.`, expect: roleTokens, min: 1 });
   // Muse keeps Memory.md short and curated: whether the pointer landed there is reported, not judged.
   const checks = seat === 'muse' ? [{ id: 'memory-pointer', kind: 'memory', contains: [short, folderName], min: 1, informational: true }] : [];
-  if (active.size) checks.push({ id: 'schedules', kind: 'schedules', contains: scheduled.filter((a) => active.has(a)).map((a) => a.name) });
+  if (active.size && !switchOver) checks.push({ id: 'schedules', kind: 'schedules', contains: scheduled.filter((a) => active.has(a)).map((a) => a.name) });
 
   for (const n of notMigrated) { n.item = sanitize(n.item).text; n.reason = sanitize(n.reason).text; }
   const titles = seat === 'muse' ? { chat: { title: `Grok Bot · ${short}` }, checkChat: { title: `Grok Bot · ${short} · check` } } : {};
-  for (const s of steps) assertNoSecrets(s.text, `step ${s.id}`);
+  for (const s of [...steps, ...(switchOver ? scheduleSteps.map((x) => x.step) : [])]) assertNoSecrets(s.text, `step ${s.id}`);
   for (const q of questions) assertNoSecrets(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
   assertNoSecrets(JSON.stringify(titles), 'the chat titles');
   // The id follows what is delivered (text and attached bytes): a changed step starts a new plan,
   // while changed questions reuse the delivered steps and only ask again.
   const id = 'gbot-' + sha(JSON.stringify([cap.bot.id, cap.capturedAt, seat, steps.map((s) => ({ ...s, attach: s.attach?.map((a) => a.sha256) }))])).slice(0, 24);
+  const source = { platform: 'grok-bot', botId: cap.bot.id, bot: name, capturedAt: cap.capturedAt, archive: archive.root, folder, via: mode, history: historyMode, skills: skillsMode, ...(auto ? { chosen: 'auto' } : {}) };
+  // One plan per moved routine, its id from the main plan and its step: a re-run resumes it, and check reads it back.
+  const switchPlans = switchOver ? scheduleSteps.map(({ a, step }) => ({ routine: routinesOn([a])[0], plan: { format: 'trinity-migration-plan', version: 1,
+    id: 'gbot-' + sha(JSON.stringify([id, step])).slice(0, 24), seat, title: `Grok Bot: ${name}`, ...titles, source,
+    steps: [step], checks: [{ id: 'schedules', kind: 'schedules', contains: [a.name] }], questions: [], notMigrated: [] } })) : [];
   return { format: 'trinity-migration-plan', version: 1, id, seat, title: `Grok Bot: ${name}`, ...titles,
-    source: { platform: 'grok-bot', botId: cap.bot.id, bot: name, capturedAt: cap.capturedAt, archive: archive.root, folder, via: mode, history: historyMode, skills: skillsMode, ...(auto ? { chosen: 'auto' } : {}) },
-    steps, checks, questions, notMigrated,
+    source, steps, checks, questions, notMigrated,
     // gbot's own bookkeeping (not sent to trinity): what each part should digest to.
     delivery: { via: mode, folder, bundle, units: expected, files: files.length,
       // The routines on in Grok Bot that the agent is asked to schedule: what --move-routines pauses there.
-      scheduled: routinesOn(scheduled.filter((a) => active.has(a))) } };
+      scheduled: routinesOn(scheduled.filter((a) => active.has(a))), switchPlans } };
 }
 
 export function summarizeTrinityPlan(plan) {
@@ -403,9 +410,9 @@ function planFile(archiveRoot, seat) {
   return join(dirname(archiveRoot), `${basename(archiveRoot)}.${seat}-plan.json`);
 }
 
-export async function previewTrinity({ archive, to, activateRoutines = false, routines, ...options }) {
+export async function previewTrinity({ archive, to, activateRoutines = false, routines, switchOver = false, ...options }) {
   const opened = openArchive(archive);
-  const plan = buildTrinityPlan(opened, to, { activateRoutines, routines, ...trinityOptions(options) });
+  const plan = buildTrinityPlan(opened, to, { activateRoutines, routines, switchOver, ...trinityOptions(options) });
   return { exitCode: 0, to, summary: summarizeTrinityPlan(plan), routinesOn: routinesOn(opened.capture.automations),
     plan: { id: plan.id, via: plan.delivery.via, folder: plan.delivery.folder, files: plan.delivery.files, bundle: plan.delivery.bundle, steps: plan.steps.length, checks: plan.checks, questions: plan.questions.length, scheduled: plan.delivery.scheduled, notMigrated: plan.notMigrated } };
 }
@@ -475,9 +482,9 @@ async function trinityRun(exec, bin, to, path, { accept, redo = [], checkOnly = 
   return result;
 }
 
-async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, routines, onProgress, exec = defaultExec, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
+async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, routines, switchOver = false, onProgress, exec = defaultExec, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
   const opened = openArchive(archive);
-  const plan = buildTrinityPlan(opened, to, { activateRoutines, routines, ...trinityOptions(options) });
+  const plan = buildTrinityPlan(opened, to, { activateRoutines, routines, switchOver, ...trinityOptions(options) });
   const help = await exec(bin, ['migrate', '--help'], { timeoutMs: 60_000 }).catch(() => ({ code: 127, stdout: '' }));
   if (help.code !== 0 || !/--check-only/.test(help.stdout ?? '')) throw new MigrationError(`${bin} has no migrate --check-only (exit ${help.code}). Install a trinity-cli that has the migrate command (gitlab.com/aa22396584/trinity-cli).`);
   const path = planFile(opened.root, to);
@@ -523,12 +530,30 @@ async function runTrinity({ archive, to, accept, checkOnly = false, activateRout
       digest: delivery.via === 'chat' ? 'content ignoring whitespace and backslashes' : 'exact bytes',
       results: result.questions.map((q) => ({ area: q.area, ok: q.ok, expect: q.expect, hits: q.hits, answer: q.answer, error: q.error || null, freshChat: Boolean(q.fresh_chat), note: q.note ?? null, attempts: q.attempts ?? 1, ...(q.earlier?.length ? { earlier: q.earlier } : {}) })) } : null,
     chatNote: result.chat_note ?? null,
-    notMigrated: plan.notMigrated, finishedAt: new Date().toISOString(),
+    notMigrated: plan.notMigrated, ...memoryNotCaptured(opened.capture), finishedAt: new Date().toISOString(),
   };
   const stamp = report.finishedAt.replace(/[-:.]/g, '').slice(0, 15);
   const out = join(dirname(opened.root), `${basename(opened.root)}.${to}${checkOnly ? '.check-' + stamp : ''}.report.json`);
   writeFileSync(out, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
-  return { ...report, report: out };
+  // switchPlans (--move-routines) are gbot's bookkeeping for the switch-over, not part of the report.
+  return { ...report, report: out, switchPlans: delivery.switchPlans };
+}
+
+/**
+ * --move-routines, once the Grok Bot copy of `entry.routine` is confirmed off (or with checkOnly, to
+ * read it back later): send its one schedule message with trinity-cli and read the schedules back.
+ * Resolves `on` (the read-back shows it), `off` (the read-back does not: not running there) or
+ * `unknown` (no read-back: the delivery stopped or trinity-cli failed), with the error.
+ */
+export async function runSwitchPlan({ archive, to, entry, checkOnly = false, exec = defaultExec, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli' }) {
+  const path = join(dirname(archive), `${basename(archive)}.${to}-switch-${safeSegment(entry.routine.id || sha(entry.routine.name).slice(0, 16))}.json`);
+  writeFileSync(path, JSON.stringify(entry.plan, null, 2) + '\n', { mode: 0o600 });
+  let result;
+  try { result = await trinityRun(exec, bin, to, path, { accept: false, checkOnly }); } catch (error) { return { state: 'unknown', error: String(error?.message ?? error).slice(0, 300), plan: path }; }
+  const check = (result.checks ?? []).find((c) => c.kind === 'schedules');
+  if (check?.ok === true) return { state: 'on', plan: path };
+  if (check?.ok === false && !result.stopped) return { state: 'off', error: check.note ?? 'the schedules read-back does not show it', plan: path };
+  return { state: 'unknown', error: result.stopped ? `delivery stopped: ${result.stopped}` : 'no schedules read-back', plan: path };
 }
 
 export const importTrinity = (opts) => runTrinity({ accept: true, onProgress: () => {}, ...opts });

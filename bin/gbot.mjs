@@ -247,7 +247,7 @@ export function routinesQuestion(count, destination) {
     `Routines that are on in Grok Bot (${count}):`,
     `1. Keep them off in ${destination}; Grok Bot keeps running them (nothing in Grok Bot changes)`,
     `2. Run them in both: turn them on in ${destination} and leave Grok Bot running them (they may run twice)`,
-    `3. Move them: turn them on in ${destination} and pause them in Grok Bot once the check passes`,
+    `3. Move them: once the check passes, pause them in Grok Bot, then turn them on in ${destination} (a short gap; never both running)`,
   ];
 }
 

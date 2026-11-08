@@ -7,7 +7,8 @@
  *   memory/log/*.md         → MEMORY.md entries, plus server memories, migration notes and open tasks
  *   skill library           → skills/grok-bot-imports/<slug>/ (every file of the skill)
  *   scheduled automations   → `hermes cron create --paused` jobs (Grok keeps its own copy; with
- *                             --move-routines they are active and the Grok copy is paused after verify)
+ *                             --move-routines they are switched over after verify: the Grok copy is
+ *                             paused first, then the job is resumed, so they never run in both places)
  *   event automations       → workspace notes (no Hermes event trigger for GitHub/Slack listeners)
  *   main + side transcripts → Hermes sessions via SessionDB.import_foreign_history (searchable)
  *   box files               → <profile>/workspace/grok-bot/grok-box/<box path>
@@ -277,7 +278,8 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
       // The source id in the name finds this job again on a re-run, whatever else shares its name.
       const tag = `[grok-bot ${a.id || sha256(a.name).slice(0, 12)}]`;
       cron.push({ name: `${botName}: ${routine} ${tag}`, routine, tag, schedule: a.scheduleCron, timezone: a.timezone, prompt: pathNote + prompt,
-        paused: !active.has(a), sourceEnabled: a.enabled, sourceId: a.id });
+        // switchOver (--move-routines): created paused, resumed only once the Grok Bot copy is off.
+        paused: !active.has(a), switchOver: moveRoutines && active.has(a), sourceEnabled: a.enabled, sourceId: a.id });
     } else unscheduled.push({ name: routine, prompt, trigger: a.trigger, enabled: a.enabled, triggerDetails: details });
   }
   const timezone = zones.size === 1 ? [...zones][0] : null;
@@ -289,7 +291,7 @@ export function buildHermesPlan(archive, { profile, profileDir, skills = 'all', 
   if (side) notes.push(`${side} side conversation(s) from Grok Bot are imported as Hermes sessions titled "Grok Bot · ${botName} · side conversation N"; readable copies are in ${join(base, 'history')}.`);
   for (const t of open) notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${t.content}`);
   if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c) => c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c) => `"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. ${moveRoutines
-    ? 'The active ones replace their Grok Bot copies, which the migration pauses in Grok Bot once this profile is verified.'
+    ? 'The active ones are switched over once this profile is verified: the migration pauses the Grok Bot copy first, then resumes the job here, so they never run in both places.'
     : 'Resume one only after turning it off in Grok Bot, so it does not run twice.'}`);
   if (unscheduled.length) notes.push(`Event-triggered Grok Bot routines not scheduled in Hermes: ${unscheduled.map((a) => `"${a.name}" (${a.trigger})`).join('; ')}. Their prompts are in ${join(base, 'routines-not-scheduled.md')}.`);
   if (zones.size > 1) notes.push('Grok routines used several time zones; Hermes cron uses one profile time zone. Check each job schedule.');
@@ -590,10 +592,29 @@ function previewHermes(plan, dest) {
   };
 }
 
+/**
+ * --move-routines, once the Grok Bot copy of `job`'s routine is confirmed off: resume its paused job
+ * (`hermes -p PROFILE cron resume <job id>`, once) and read it back. Resolves `on` (read back active),
+ * `off` (paused or missing: not running here) or `unknown` (the read-back failed), with the error.
+ */
+export async function resumeHermesJob(hermes, plan, job) {
+  const message = (e) => String(e?.message ?? e).slice(0, 300);
+  let profileDir, found, error = null;
+  const read = async () => (await hermes.helper('readback', { foreign_ids: [] }, { home: profileDir })).cron.filter((j) => String(j.name ?? '').endsWith(job.tag));
+  try { profileDir = await hermes.profileDir(plan.profile); found = await read(); } catch (e) { return { state: 'unknown', error: message(e) }; }
+  if (found.length !== 1) return { state: 'off', error: found.length ? `${found.length} jobs for one routine` : 'the job is missing' };
+  if (found[0].state !== 'scheduled') {
+    try { await hermes.run(['-p', plan.profile, 'cron', 'resume', String(found[0].id)], { timeoutMs: 120_000 }); } catch (e) { error = message(e); }
+    try { found = await read(); } catch (e) { return { state: 'unknown', error: message(e) }; }
+  }
+  return found.length === 1 && found[0].state === 'scheduled' ? { state: 'on' } : { state: 'off', error: error ?? `still ${found[0]?.state ?? 'missing'} after cron resume` };
+}
+
 /** `hermes -p PROFILE cron create …` for one planned job, paused unless --activate-routines. */
 export function cronCreateArgs(plan, job) {
   const args = ['-p', plan.profile, 'cron', 'create', '--name', job.name, '--workdir', plan.base];
-  if (job.paused) args.push('--paused', '--paused-reason', job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
+  if (job.paused) args.push('--paused', '--paused-reason', job.switchOver ? 'Moved from Grok Bot: resumed once its Grok Bot copy is paused.'
+    : job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
   return [...args, job.schedule, job.prompt];
 }
 
@@ -826,7 +847,8 @@ export async function verifyHermes(hermes, archive, plan) {
     if (expr !== job.schedule) cronIssues.push(`${job.routine}: schedule is ${typeof expr === 'string' ? expr : JSON.stringify(expr)}, expected ${job.schedule}`);
     if (job.timezone && rb.timezone !== job.timezone) cronIssues.push(`${job.routine}: profile time zone is ${rb.timezone || 'server local'}, expected ${job.timezone}`);
     const want = job.paused ? 'paused' : 'scheduled';
-    if (j.state !== want) cronIssues.push(`${job.routine}: ${j.state}, expected ${want}`);
+    // Before a switch-over a moved job is paused; one an earlier run already switched over is active.
+    if (j.state !== want && !(job.switchOver && job.paused && j.state === 'scheduled')) cronIssues.push(`${job.routine}: ${j.state}, expected ${want}`);
     if (j.prompt !== job.prompt) cronIssues.push(`${job.routine}: prompt differs`);
   }
   check('schedules', !cronIssues.length, { expected: plan.cron.length, issues: cronIssues });

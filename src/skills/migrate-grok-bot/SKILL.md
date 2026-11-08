@@ -41,17 +41,20 @@ Options for Muse/dot: `--via auto|upload|drive|chat`, `--history full|recent:N|n
 `--skills all|index|none|a,b`, `--folder PATH`, `--drive-remote NAME:`. Hermes: `--profile NAME`,
 `--into-existing`. Routines: by default nothing in Grok Bot changes and the user's Grok Bot
 routines keep running there (Hermes gets them paused, Muse/dot in ROUTINES.md). Never pause them
-unless the user asks: `--activate-routines` creates them active at the destination too (both run);
-`--move-routines`, only when the user asks for it, turns them on in the destination and pauses those
-same routines in Grok Bot once the check passes. When the user names only some routines, add
+unless the user asks: `--activate-routines` creates them active at the destination too (both run,
+so each may run twice); `--move-routines`, only when the user asks for it, switches them over once
+the check passes: paused in Grok Bot first, then turned on at the destination (a short gap, never
+both running, so routines with side effects are not run twice; one that does not turn on there is
+turned back on in Grok Bot and reported as rolled back). When the user names only some routines, add
 `--routines <id or exact name>,…` (ids from the preview's routine list); the others are left as by
 default and never paused. Give `preview`, `import` and `check` the same routine options.
 
 ## Reading the result
 
 - Exit 0: migrated and verified. Exit 3: imported, something did not verify — read the ✗ items
-  (`verify`, `acceptance.results[].ok`, `notMigrated`) and report them. Exit 2: usage or missing
-  `--yes`. Exit 1: other errors.
+  (`verify`, `acceptance.results[].ok`, `notMigrated`, `routines`/`switchOver` for a move,
+  `memoryNotCaptured`) and report them. A switch-over line saying ROUTINE MAY RUN NOWHERE is
+  urgent: report it first, with its manual fix. Exit 2: usage or missing `--yes`. Exit 1: other errors.
 - The report JSON is also written next to the archive (`<archive>.<dest>.report.json`).
 
 ## Rules

@@ -10320,7 +10320,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Same value as at import (plans the destination as --activate-routines does; pauses nothing)',
+                        description: 'Same value as at import (expects the moved routines switched over: on at the destination; pauses nothing)',
                         type: 'boolean'
                     },
                     routines: {
@@ -10462,7 +10462,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        description: 'Move the routines that are on in Grok Bot (or only those --routines names), with a short gap and never both running: created paused at the destination, then once the import check passes paused in Grok Bot (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account), then turned on at the destination; a routine that cannot be turned on there is turned back on in Grok Bot',
                         type: 'boolean'
                     },
                     routines: {
@@ -10607,7 +10607,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) created active here and paused in Grok Bot after the check (changes nothing now)',
+                        description: 'Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) switched over after the check, paused in Grok Bot first and then turned on here (changes nothing now)',
                         type: 'boolean'
                     },
                     routines: {
@@ -10754,7 +10754,7 @@ var __webpack_modules__ = {
                         type: 'boolean'
                     },
                     moveRoutines: {
-                        description: 'Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account)',
+                        description: 'Move the routines that are on in Grok Bot (or only those --routines names), with a short gap and never both running: created paused at the destination, then once the import check passes paused in Grok Bot (SetGrokBotAgentAutomationEnabled; needs the bot\'s login, see --account), then turned on at the destination; a routine that cannot be turned on there is turned back on in Grok Bot',
                         type: 'boolean'
                     },
                     routines: {
@@ -46538,7 +46538,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Same value as at import (plans the destination as --activate-routines does; pauses nothing)",
+                                "description": "Same value as at import (expects the moved routines switched over: on at the destination; pauses nothing)",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46694,7 +46694,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
+                                "description": "Move the routines that are on in Grok Bot (or only those --routines names), with a short gap and never both running: created paused at the destination, then once the import check passes paused in Grok Bot (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account), then turned on at the destination; a routine that cannot be turned on there is turned back on in Grok Bot",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46826,7 +46826,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) created active here and paused in Grok Bot after the check (changes nothing now)",
+                                "description": "Show the import with --move-routines: routines on in Grok Bot (or only those --routines names) switched over after the check, paused in Grok Bot first and then turned on here (changes nothing now)",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -46989,7 +46989,7 @@ var __webpack_modules__ = {
                                 "required": false
                             },
                             {
-                                "description": "Move the routines that are on in Grok Bot (or only those --routines names): create them active at the destination (implies --activate-routines), then pause them in Grok Bot once the import check passes (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account)",
+                                "description": "Move the routines that are on in Grok Bot (or only those --routines names), with a short gap and never both running: created paused at the destination, then once the import check passes paused in Grok Bot (SetGrokBotAgentAutomationEnabled; needs the bot's login, see --account), then turned on at the destination; a routine that cannot be turned on there is turned back on in Grok Bot",
                                 "key": "moveRoutines",
                                 "kind": "boolean",
                                 "option": "move-routines",
@@ -56491,6 +56491,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return on.filter((a)=>picked.has(a));
         }
+        const memoryNotCaptured = (cap)=>cap.coverage?.memory?.missing?.length ? {
+                memoryNotCaptured: cap.coverage.memory.missing
+            } : {};
         function normalizeAutomation(record) {
             const trigger = object(record.trigger) ? record.trigger : {};
             const schedule = str(trigger.schedule) || str(record.schedule);
@@ -56816,6 +56819,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             progress('box store manifest');
             const files = [];
             const skipped = [];
+            let memoryPaths = [];
             const store = await attempt('boxStore', ()=>readStoreManifest({
                     presign: io.presign,
                     fetchImpl: io.fetchImpl
@@ -57008,6 +57012,21 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         });
                     }
                 }
+                const tiers = [
+                    `home/box/sand-data/agents/${agentId}/`,
+                    'home/box/sand-data/user-memory/',
+                    ...projects.map((slug)=>`home/box/sand-data/projects/${slug}/`)
+                ];
+                memoryPaths = Object.keys(store.entries).filter((p)=>tiers.some((t)=>p.startsWith(t)) && /\/(memory|user-memory)\//.test('/' + p) && p.endsWith('.md') && store.entries[p]?.kind !== 'symlink').map((p)=>'/' + p).sort();
+                const secretShas = new Set(Object.entries(store.entries).filter(([p, e])=>isSecretPath(p) && e?.sha).map(([, e])=>e.sha));
+                for (const boxPath of memoryPaths){
+                    if (files.some((f)=>f.boxPath === boxPath) || skipped.some((x)=>x.boxPath === boxPath)) continue;
+                    const p = boxPath.slice(1);
+                    skipped.push({
+                        boxPath,
+                        reason: isSecretPath(p) ? 'credential path; never exported' : isUnsafeBoxPath(p) ? 'unsafe path; not exported' : secretShas.has(store.entries[p]?.sha) ? 'same bytes as a credential file; never exported' : 'not captured'
+                    });
+                }
                 const refs = referencedBoxPaths(texts);
                 const credentialRefs = refs.filter((r)=>isSecretPath(r.replace(/^\/+/, '')));
                 for (const r of credentialRefs)skipped.push({
@@ -57028,11 +57047,23 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 });
             }
             const memory = files.filter((f)=>f.kind === 'file' && /\/(memory|user-memory)\//.test(f.boxPath) && f.boxPath.endsWith('.md'));
-            note('memory', memory.length ? 'complete' : store ? 'empty' : 'failed', {
+            const missing = memoryPaths.filter((p)=>!memory.some((f)=>f.boxPath === p)).map((boxPath)=>({
+                    boxPath,
+                    reason: skipped.find((x)=>x.boxPath === boxPath)?.reason ?? 'not captured'
+                }));
+            const read = memoryPaths.length - missing.length;
+            note('memory', !store ? 'failed' : missing.length ? read ? 'partial' : 'failed' : memory.length ? 'complete' : 'empty', {
                 source: 'box store: own memory/, shared user-memory/ (every assistant\'s shard), joined projects',
                 own: memory.filter((f)=>f.boxPath.includes(`/agents/${agentId}/memory/`)).length,
                 sharedUser: memory.filter((f)=>f.boxPath.includes('/user-memory/')).length,
-                project: memory.filter((f)=>f.boxPath.includes('/projects/')).length
+                project: memory.filter((f)=>f.boxPath.includes('/projects/')).length,
+                ...!store ? {
+                    reason: 'the box store could not be read'
+                } : {},
+                ...missing.length ? {
+                    missing,
+                    reason: `${missing.length} of ${memoryPaths.length} memory file(s) not read: ${missing.map((m)=>`${m.boxPath} (${m.reason})`).join('; ')}`
+                } : {}
             });
             return {
                 format: ARCHIVE_FORMAT,
@@ -57069,6 +57100,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         }, {
             $r: routinesOn,
             CR: DEFAULT_MAX_FILE_BYTES,
+            Dd: memoryNotCaptured,
             nV: ARCHIVE_FORMAT
         });
     },
@@ -57213,7 +57245,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         name: c.name,
                         schedule: c.schedule,
                         timezone: c.timezone,
-                        paused: c.paused
+                        paused: c.paused,
+                        switchOver: Boolean(c.switchOver)
                     })),
                 unscheduledRoutines: plan.unscheduled,
                 historyMessages: plan.history.reduce((n, s)=>n + s.messages.length, 0),
@@ -57249,29 +57282,30 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 return {
                     ...r,
                     atDestination,
-                    inGrokBot: move && atDestination === 'on' ? 'paused after the check' : 'unchanged'
+                    inGrokBot: move && atDestination === 'on' ? 'paused after the check' : 'unchanged',
+                    rolledBack: false
                 };
             });
         }
-        const RESULT = {
-            paused: 'paused',
-            'left-on': 'left on',
-            failed: 'not paused',
-            unknown: 'unknown'
-        };
-        function routineOutcome(rows, sourceRoutines) {
-            if (!sourceRoutines) return rows;
-            const result = new Map(sourceRoutines.routines.map((x)=>[
+        function routineOutcome(rows, switched) {
+            if (!switched) return rows;
+            const result = new Map(switched.map((x)=>[
                     routineKey(x),
-                    RESULT[x.result] ?? 'unknown'
+                    x
                 ]));
-            return rows.map((r)=>result.has(routineKey(r)) ? {
+            return rows.map((r)=>{
+                const x = result.get(routineKey(r));
+                return x ? {
                     ...r,
-                    inGrokBot: result.get(routineKey(r))
-                } : r);
+                    atDestination: x.destination,
+                    inGrokBot: x.source,
+                    rolledBack: x.rolledBack
+                } : r;
+            });
         }
-        const pauseThere = (to, profile)=>(r)=>to === 'hermes' ? `pause the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron pause <job id>)` : `ask ${DEST[to]} to pause its scheduled task "${r.name}"`;
-        async function pauseSourceRoutines({ routines, passed, agentId, routineSwitch, pauseHere, onProgress = ()=>{} }) {
+        const stays = (where)=>where === 'Hermes' || !Object.values(DEST).includes(where) ? 'paused' : 'unscheduled';
+        const finishThere = (to, profile)=>(r)=>to === 'hermes' ? `resume the Hermes job "${r.job}" (hermes -p ${profile} cron list, then hermes -p ${profile} cron resume <job id>)` : `ask ${DEST[to]} to create its scheduled task "${r.name}" as ROUTINES.md describes`;
+        async function pauseSourceRoutines({ routines, passed, agentId, routineSwitch, finishThere: finish, where, onProgress = ()=>{} }) {
             if (!routines.length) return {
                 status: 'none',
                 routines: []
@@ -57284,12 +57318,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                             ...r,
                             result: 'left-on'
                         })),
-                    note: 'Their copies at the destination were created active, so both copies run until one is turned off: pause the destination copy, or fix what did not verify and run the same import again.'
+                    note: `Their copies in ${where} stay ${stays(where)}, so nothing runs twice: fix what did not verify and run the same import again.`
                 };
             }
             const out = [];
             for (const r of routines){
-                const byHand = `turn "${r.name}" off ${_migration_text_js__rspack_import_8.Om}, or ${pauseHere(r)}`;
+                const byHand = `the copy in ${where} stays ${stays(where)}; to finish the move: turn "${r.name}" off ${_migration_text_js__rspack_import_8.Om}, then ${finish(r)}`;
                 if (!r.id) {
                     out.push({
                         ...r,
@@ -57329,7 +57363,118 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 turnBackOn: `Turn one back on ${_migration_text_js__rspack_import_8.Om}.`
             };
         }
-        const routinesDone = (s)=>!s || s.status === 'paused' || s.status === 'none';
+        const SOURCE = {
+            'left-on': 'left on',
+            failed: 'not paused',
+            unknown: 'unknown'
+        };
+        const message = (e)=>String(e?.message ?? e).slice(0, 300);
+        async function switchOverRoutines({ routines, passed, agentId, routineSwitch, turnOn, finishThere: finish, where, onProgress = ()=>{} }) {
+            const sourceRoutines = await pauseSourceRoutines({
+                routines,
+                passed,
+                agentId,
+                routineSwitch,
+                finishThere: finish,
+                where,
+                onProgress
+            });
+            const switched = [];
+            for (const p of sourceRoutines.routines){
+                const { result, error, byHand, ...r } = p;
+                if (result !== 'paused') {
+                    switched.push({
+                        ...r,
+                        destination: 'off',
+                        source: SOURCE[result] ?? 'unknown',
+                        rolledBack: false,
+                        ...error ? {
+                            error
+                        } : {},
+                        ...byHand ? {
+                            byHand
+                        } : {}
+                    });
+                    continue;
+                }
+                onProgress(`turning "${r.name}" on in ${where}`);
+                let on;
+                try {
+                    on = await turnOn(p);
+                } catch (e) {
+                    on = {
+                        state: 'unknown',
+                        error: message(e)
+                    };
+                }
+                const plan = on.plan ? {
+                    plan: on.plan
+                } : {};
+                if (on.state === 'on') {
+                    switched.push({
+                        ...r,
+                        ...plan,
+                        destination: 'on',
+                        source: 'paused',
+                        rolledBack: false
+                    });
+                    continue;
+                }
+                if (on.state !== 'off') {
+                    switched.push({
+                        ...r,
+                        ...plan,
+                        destination: 'unknown',
+                        source: 'paused',
+                        rolledBack: false,
+                        error: on.error,
+                        byHand: `check whether "${r.name}" runs in ${where}: if it does not, ${finish(p)}, or turn it back on ${_migration_text_js__rspack_import_8.Om}`
+                    });
+                    continue;
+                }
+                onProgress(`turning "${r.name}" back on in Grok Bot (it could not be turned on in ${where})`);
+                let rollback, rollbackError = null;
+                try {
+                    const now = await routineSwitch.setEnabled(agentId, r.id, true);
+                    rollback = now?.enabled === true ? 'done' : now ? 'failed' : 'unknown';
+                    if (rollback !== 'done') rollbackError = now ? 'the answer still shows it off' : 'the answer does not list this routine';
+                } catch (e) {
+                    rollback = e?.effect === 'unknown' || e?.code === 'GATEWAY_REQUEST_FAILED' || Number(e?.status) >= 500 ? 'unknown' : 'failed';
+                    rollbackError = message(e);
+                }
+                if (rollback === 'done') switched.push({
+                    ...r,
+                    ...plan,
+                    destination: 'off',
+                    source: 'on again',
+                    rolledBack: true,
+                    error: on.error
+                });
+                else switched.push({
+                    ...r,
+                    ...plan,
+                    destination: 'off',
+                    source: 'paused',
+                    rolledBack: false,
+                    rollback,
+                    error: on.error,
+                    rollbackError,
+                    byHand: `turn "${r.name}" back on ${_migration_text_js__rspack_import_8.Om}, or ${finish(p)}`
+                });
+            }
+            return {
+                sourceRoutines,
+                switchOver: switched
+            };
+        }
+        const stagedPlan = (plan)=>({
+                ...plan,
+                cron: plan.cron.map((c)=>c.switchOver ? {
+                        ...c,
+                        paused: true
+                    } : c)
+            });
+        const switchedOver = (switched)=>!switched || switched.every((x)=>x.destination === 'on' && x.source === 'paused');
         async function previewMigration({ archive, to, profile, skills, via, history, folder, driveRemote, driveFolder, activateRoutines = false, moveRoutines = false, routines, hermes }) {
             const activate = routineFlags({
                 activateRoutines,
@@ -57351,6 +57496,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                     to,
                     activateRoutines: activate,
                     routines,
+                    switchOver: moveRoutines,
                     ...trinityOpts({
                         via,
                         history,
@@ -57388,7 +57534,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 exitCode: 0,
                 to,
                 destination: dest,
-                summary: (0, _migration_hermes_js__rspack_import_6.FN)(plan, dest),
+                summary: (0, _migration_hermes_js__rspack_import_6.FN)(stagedPlan(plan), dest),
                 plan: planFacts(plan)
             }, rows);
         }
@@ -57403,13 +57549,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 account
             }) : null;
             if (to !== 'hermes') {
-                const { importTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
+                const { importTrinity, runSwitchPlan } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
                 const r = await importTrinity({
                     archive,
                     to,
                     accept,
                     activateRoutines: activate,
                     routines,
+                    switchOver: moveRoutines,
                     onProgress,
                     keepDrive,
                     ...exec ? {
@@ -57424,30 +57571,41 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
-                const passed = r.exitCode === 0 && r.acceptance?.ok === true && r.verify.checks.some((c)=>c.area === 'schedules read-back' && c.ok && !c.informational);
-                const sourceRoutines = control ? await pauseSourceRoutines({
+                const { report: path, switchPlans = [], ...rest } = r;
+                const passed = r.exitCode === 0 && r.acceptance?.ok === true;
+                const plans = new Map(switchPlans.map((e)=>[
+                        routineKey(e.routine),
+                        e
+                    ]));
+                const moved = control ? await switchOverRoutines({
                     routines: r.scheduled ?? [],
                     passed,
                     agentId: r.botId,
                     routineSwitch: control,
-                    pauseHere: pauseThere(to),
-                    onProgress
-                }) : undefined;
-                const { report: path, ...rest } = r;
+                    where: DEST[to],
+                    finishThere: finishThere(to),
+                    onProgress,
+                    turnOn: (x)=>runSwitchPlan({
+                            archive: r.archive,
+                            to,
+                            entry: plans.get(routineKey(x)),
+                            ...exec ? {
+                                exec
+                            } : {}
+                        })
+                }) : null;
                 const rows = routineOutcome(routineRows({
                     on: r.routinesOn ?? [],
                     active: r.scheduled ?? [],
                     move: moveRoutines
-                }), sourceRoutines);
+                }), moved?.switchOver);
                 const report = {
                     ...rest,
-                    exitCode: r.exitCode === 0 && routinesDone(sourceRoutines) ? 0 : 3,
+                    exitCode: r.exitCode === 0 && switchedOver(moved?.switchOver) ? 0 : 3,
                     ...rows.length ? {
                         routines: rows
                     } : {},
-                    ...sourceRoutines ? {
-                        sourceRoutines
-                    } : {}
+                    ...moved ?? {}
                 };
                 (0, node_fs__rspack_import_0.writeFileSync)(path, JSON.stringify(report, null, 2) + '\n', {
                     mode: 384
@@ -57466,26 +57624,36 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 routines,
                 hermes
             });
-            const applied = await (0, _migration_hermes_js__rspack_import_6.VE)(h, opened, plan, {
+            const staged = stagedPlan(plan);
+            const applied = await (0, _migration_hermes_js__rspack_import_6.VE)(h, opened, staged, {
                 onProgress,
                 allowExisting: intoExisting
             });
             onProgress('reading the destination back');
-            const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(h, opened, plan);
+            const verified = await (0, _migration_hermes_js__rspack_import_6.GD)(h, opened, staged);
             let acceptance = null;
-            if (accept) acceptance = await (0, _migration_hermes_js__rspack_import_6.Pg)(h, opened, plan, {
+            if (accept) acceptance = await (0, _migration_hermes_js__rspack_import_6.Pg)(h, opened, staged, {
                 onProgress,
                 usageDir: usageDir(opened.root, to, plan.profile)
             });
             const ok = verified.ok && (!acceptance || acceptance.ok);
-            const sourceRoutines = control ? await pauseSourceRoutines({
+            const jobs = new Map(plan.cron.map((c)=>[
+                    routineKey({
+                        id: c.sourceId,
+                        name: c.routine
+                    }),
+                    c
+                ]));
+            const moved = control ? await switchOverRoutines({
                 routines: hermesScheduled(plan),
                 passed: ok,
                 agentId: opened.capture.bot.id,
                 routineSwitch: control,
-                pauseHere: pauseThere(to, plan.profile),
-                onProgress
-            }) : undefined;
+                where: 'Hermes',
+                finishThere: finishThere(to, plan.profile),
+                onProgress,
+                turnOn: (x)=>(0, _migration_hermes_js__rspack_import_6.tH)(h, plan, jobs.get(routineKey(x)))
+            }) : null;
             const rows = routineOutcome(routineRows({
                 on: (0, _migration_capture_js__rspack_import_3.$r)(opened.capture.automations),
                 active: hermesScheduled(plan),
@@ -57494,9 +57662,9 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         name: c.routine
                     })),
                 move: moveRoutines
-            }), sourceRoutines);
+            }), moved?.switchOver);
             const report = {
-                exitCode: ok && routinesDone(sourceRoutines) ? 0 : 3,
+                exitCode: ok && switchedOver(moved?.switchOver) ? 0 : 3,
                 to,
                 profile: plan.profile,
                 destination: dest.hermesVersion,
@@ -57508,9 +57676,8 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 ...rows.length ? {
                     routines: rows
                 } : {},
-                ...sourceRoutines ? {
-                    sourceRoutines
-                } : {},
+                ...moved ?? {},
+                ...(0, _migration_capture_js__rspack_import_3.Dd)(opened.capture),
                 plan: planFacts(plan),
                 finishedAt: new Date().toISOString()
             };
@@ -57530,13 +57697,14 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 routines
             });
             if (to !== 'hermes') {
-                const { checkTrinity } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
-                return checkTrinity({
+                const { checkTrinity, runSwitchPlan } = await Promise.resolve().then(__webpack_require__.bind(__webpack_require__, "./src/core/migration-trinity.js"));
+                const { switchPlans = [], ...r } = await checkTrinity({
                     archive,
                     to,
                     accept,
                     activateRoutines: activate,
                     routines,
+                    switchOver: moveRoutines,
                     onProgress,
                     ...exec ? {
                         exec
@@ -57550,6 +57718,41 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                         driveFolder
                     })
                 });
+                if (!switchPlans.length) return r;
+                for (const entry of switchPlans){
+                    const s = await runSwitchPlan({
+                        archive: r.archive,
+                        to,
+                        entry,
+                        checkOnly: true,
+                        ...exec ? {
+                            exec
+                        } : {}
+                    });
+                    r.verify.checks.push({
+                        area: `schedule "${entry.routine.name}" read-back`,
+                        ok: s.state === 'on',
+                        informational: false,
+                        ...s.error ? {
+                            issues: [
+                                s.error
+                            ]
+                        } : {}
+                    });
+                }
+                r.verify.ok = r.verify.checks.every((c)=>c.ok !== false);
+                const { report: path, ...rest } = r;
+                const report = {
+                    ...rest,
+                    exitCode: r.exitCode === 0 && r.verify.ok ? 0 : 3
+                };
+                (0, node_fs__rspack_import_0.writeFileSync)(path, JSON.stringify(report, null, 2) + '\n', {
+                    mode: 384
+                });
+                return {
+                    ...report,
+                    report: path
+                };
             }
             const { opened, hermes, plan } = await hermesContext({
                 archive,
@@ -57572,6 +57775,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 profile: plan.profile,
                 verify: verified,
                 acceptance,
+                ...(0, _migration_capture_js__rspack_import_3.Dd)(opened.capture),
                 checkedAt: new Date().toISOString()
             };
             const path = (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(opened.root), `${(0, node_path__rspack_import_2.basename)(opened.root)}.${to}-${plan.profile}.check-${report.checkedAt.replace(/[-:.]/g, '').slice(0, 15)}.json`);
@@ -58164,6 +58368,7 @@ else:
                         timezone: a.timezone,
                         prompt: pathNote + prompt,
                         paused: !active.has(a),
+                        switchOver: moveRoutines && active.has(a),
                         sourceEnabled: a.enabled,
                         sourceId: a.id
                     });
@@ -58184,7 +58389,7 @@ else:
             ];
             if (side) notes.push(`${side} side conversation(s) from Grok Bot are imported as Hermes sessions titled "Grok Bot · ${botName} · side conversation N"; readable copies are in ${(0, node_path__rspack_import_3.join)(base, 'history')}.`);
             for (const t of open1)notes.push(`Open task carried over from Grok Bot (${t.status}, id ${t.id}): ${t.content}`);
-            if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c)=>c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c)=>`"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. ${moveRoutines ? 'The active ones replace their Grok Bot copies, which the migration pauses in Grok Bot once this profile is verified.' : 'Resume one only after turning it off in Grok Bot, so it does not run twice.'}`);
+            if (cron.length) notes.push(`Grok Bot routines migrated as Hermes cron jobs (${cron.every((c)=>c.paused) ? 'all created paused' : 'see hermes cron list'}): ${cron.map((c)=>`"${c.routine}" (${c.schedule}${c.timezone ? ' ' + c.timezone : ''}, ${c.paused ? 'paused' : 'active'})`).join('; ')}. ${moveRoutines ? 'The active ones are switched over once this profile is verified: the migration pauses the Grok Bot copy first, then resumes the job here, so they never run in both places.' : 'Resume one only after turning it off in Grok Bot, so it does not run twice.'}`);
             if (unscheduled.length) notes.push(`Event-triggered Grok Bot routines not scheduled in Hermes: ${unscheduled.map((a)=>`"${a.name}" (${a.trigger})`).join('; ')}. Their prompts are in ${(0, node_path__rspack_import_3.join)(base, 'routines-not-scheduled.md')}.`);
             if (zones.size > 1) notes.push('Grok routines used several time zones; Hermes cron uses one profile time zone. Check each job schedule.');
             const memoryAll = [
@@ -58611,6 +58816,57 @@ else:
                 }
             };
         }
+        async function resumeHermesJob(hermes, plan, job) {
+            const message = (e)=>String(e?.message ?? e).slice(0, 300);
+            let profileDir, found, error = null;
+            const read = async ()=>(await hermes.helper('readback', {
+                    foreign_ids: []
+                }, {
+                    home: profileDir
+                })).cron.filter((j)=>String(j.name ?? '').endsWith(job.tag));
+            try {
+                profileDir = await hermes.profileDir(plan.profile);
+                found = await read();
+            } catch (e) {
+                return {
+                    state: 'unknown',
+                    error: message(e)
+                };
+            }
+            if (found.length !== 1) return {
+                state: 'off',
+                error: found.length ? `${found.length} jobs for one routine` : 'the job is missing'
+            };
+            if (found[0].state !== 'scheduled') {
+                try {
+                    await hermes.run([
+                        '-p',
+                        plan.profile,
+                        'cron',
+                        'resume',
+                        String(found[0].id)
+                    ], {
+                        timeoutMs: 120000
+                    });
+                } catch (e) {
+                    error = message(e);
+                }
+                try {
+                    found = await read();
+                } catch (e) {
+                    return {
+                        state: 'unknown',
+                        error: message(e)
+                    };
+                }
+            }
+            return found.length === 1 && found[0].state === 'scheduled' ? {
+                state: 'on'
+            } : {
+                state: 'off',
+                error: error ?? `still ${found[0]?.state ?? 'missing'} after cron resume`
+            };
+        }
         function cronCreateArgs(plan, job) {
             const args = [
                 '-p',
@@ -58622,7 +58878,7 @@ else:
                 '--workdir',
                 plan.base
             ];
-            if (job.paused) args.push('--paused', '--paused-reason', job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
+            if (job.paused) args.push('--paused', '--paused-reason', job.switchOver ? 'Moved from Grok Bot: resumed once its Grok Bot copy is paused.' : job.sourceEnabled ? 'Migrated from Grok Bot; the Grok copy still runs. Resume after turning it off there.' : 'Migrated from Grok Bot, where it was turned off.');
             return [
                 ...args,
                 job.schedule,
@@ -58998,7 +59254,7 @@ else:
                 if (expr !== job.schedule) cronIssues.push(`${job.routine}: schedule is ${typeof expr === 'string' ? expr : JSON.stringify(expr)}, expected ${job.schedule}`);
                 if (job.timezone && rb.timezone !== job.timezone) cronIssues.push(`${job.routine}: profile time zone is ${rb.timezone || 'server local'}, expected ${job.timezone}`);
                 const want = job.paused ? 'paused' : 'scheduled';
-                if (j.state !== want) cronIssues.push(`${job.routine}: ${j.state}, expected ${want}`);
+                if (j.state !== want && !(job.switchOver && job.paused && j.state === 'scheduled')) cronIssues.push(`${job.routine}: ${j.state}, expected ${want}`);
                 if (j.prompt !== job.prompt) cronIssues.push(`${job.routine}: prompt differs`);
             }
             check('schedules', !cronIssues.length, {
@@ -59275,6 +59531,7 @@ else:
             dQ: ()=>inspectHermes,
             hp: ()=>defaultExec,
             mk: ()=>skillDescription,
+            tH: ()=>resumeHermesJob,
             v0: ()=>distinctiveTokens
         });
     },
@@ -59462,16 +59719,17 @@ else:
         const routineAt = (x)=>`${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
         const IN_GROK_BOT = {
             unchanged: 'Grok Bot keeps running it',
-            'paused after the check': 'paused in Grok Bot once the import check passes',
             paused: 'paused in Grok Bot',
             'left on': 'still on in Grok Bot (the check did not pass)',
-            'not paused': 'not paused in Grok Bot (see below)',
-            unknown: 'not known whether it was paused in Grok Bot (see below)'
+            'not paused': 'still on in Grok Bot (the pause failed; see below)',
+            unknown: 'not known whether it was paused in Grok Bot (see below)',
+            'on again': 'on again in Grok Bot (rolled back)'
         };
         function routinesText(to, rows, { activate = false, move = false, done = false } = {}) {
             const where = DEST[to] ?? to;
-            const there = (x)=>x.atDestination === 'on' ? `on in ${where}` : x.atDestination === 'not migrated' ? 'not migrated (see "Not migrated")' : to === 'hermes' ? 'off in Hermes (created paused)' : `not scheduled in ${where} (kept in ROUTINES.md)`;
-            const here = (x)=>x.atDestination === 'on' && x.inGrokBot === 'unchanged' ? 'Grok Bot keeps running it too, so it runs in both' : IN_GROK_BOT[x.inGrokBot] ?? x.inGrokBot;
+            const there = (x)=>x.atDestination === 'on' ? `on in ${where}` : x.atDestination === 'not migrated' ? 'not migrated (see "Not migrated")' : x.atDestination === 'unknown' ? `not known whether it is on in ${where}` : to === 'hermes' ? 'off in Hermes (created paused)' : `not scheduled in ${where} (kept in ROUTINES.md)`;
+            const here = (x)=>x.atDestination === 'on' && x.inGrokBot === 'unchanged' ? 'Grok Bot keeps running it too, so it may run twice' : IN_GROK_BOT[x.inGrokBot] ?? x.inGrokBot;
+            const line = (x)=>x.inGrokBot === 'paused after the check' ? `moved: once the import check passes it is paused in Grok Bot, then turned on in ${where} (a short gap; never both running)` : `${there(x)}; ${here(x)}`;
             const untouched = rows.every((x)=>[
                     'unchanged',
                     'left on',
@@ -59479,13 +59737,23 @@ else:
                 ].includes(x.inGrokBot));
             const lines = [
                 `Grok Bot routines that ${done ? 'were' : 'are'} on (${rows.length})${untouched ? `; nothing in Grok Bot ${done ? 'was changed' : 'changes'}` : ''}:`,
-                ...rows.map((x)=>`  - ${routineAt(x)}: ${there(x)}; ${here(x)}`)
+                ...rows.map((x)=>`  - ${routineAt(x)}: ${line(x)}`)
             ];
             if (done) return lines.join('\n');
             if (rows.some((x)=>x.inGrokBot === 'paused after the check')) lines.push(`  Turn one back on ${ROUTINE_TOGGLE}.`);
-            if (!activate) lines.push(`  To run them in ${where} too: --activate-routines. To move them (on in ${where}, paused in Grok Bot once the import check passes): --move-routines. Add --routines id,id to do either for only some.`);
-            else if (!move && rows.some((x)=>x.atDestination === 'on')) lines.push(`  Both copies run until one is turned off; --move-routines pauses the Grok Bot copies once the import check passes.`);
+            if (!activate) lines.push(`  To run them in ${where} too: --activate-routines (they may run twice). To move them (switched over once the import check passes; never both running): --move-routines. Add --routines id,id to do either for only some.`);
+            else if (!move && rows.some((x)=>x.atDestination === 'on')) lines.push('  Both copies run until one is turned off, so each may run twice; --move-routines switches them over instead (never both running).');
             return lines.join('\n');
+        }
+        function switchOverText(r) {
+            const where = DEST[r.to] ?? r.to;
+            const tried = (r.switchOver ?? []).filter((x)=>x.source === 'paused' || x.source === 'on again');
+            if (!tried.length) return [];
+            return [
+                '',
+                `Switch-over (--move-routines: paused in Grok Bot first, then turned on in ${where}; never both running):`,
+                ...tried.map((x)=>x.destination === 'on' ? `  ✓ ${routineAt(x)}: paused in Grok Bot, then on in ${where}` : x.rolledBack ? `  ✗ ${routineAt(x)}: paused in Grok Bot, but not turned on in ${where} (${x.error}); rolled back: it runs in Grok Bot again` : x.destination === 'unknown' ? `  ✗ ${routineAt(x)}: paused in Grok Bot; not known whether it is on in ${where} (${x.error}); ${x.byHand}` : `  ✗ ${routineAt(x)}: ROUTINE MAY RUN NOWHERE: paused in Grok Bot, not turned on in ${where}, and turning it back on in Grok Bot ${x.rollback === 'unknown' ? 'is not confirmed' : 'failed'} (${x.rollbackError}). Fix by hand: ${x.byHand}.`)
+            ];
         }
         function coverageText(coverage) {
             const lines = [
@@ -59529,6 +59797,9 @@ else:
                 lines.push('', `Acceptance (questions answered by the migrated agent${r.acceptance.freshChat ? ', in a new chat that cannot see the migration messages' : ''}):`);
                 for (const a of r.acceptance.results)lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? `answered from migrated data${a.attempts > 1 ? ' (on the second try)' : ''}` : a.error ?? `expected ${JSON.stringify(a.expect)}`}${a.note ? ` (${a.note})` : ''}`);
             }
+            if (r.memoryNotCaptured?.length) {
+                lines.push('', `Memory files not captured, so not migrated (${r.memoryNotCaptured.length}):`, ...r.memoryNotCaptured.map((m)=>`  - ${m.boxPath}: ${m.reason}`));
+            }
             if (r.chatNote) lines.push('', 'Note: ' + r.chatNote);
             if (r.repaired?.length) lines.push('', `Re-sent once because the destination did not have them: ${r.repaired.join(', ')}`);
             if (r.deliveries) {
@@ -59552,8 +59823,9 @@ else:
                 }
                 if (sr.routines.some((x)=>x.result === 'paused')) lines.push(`  ${sr.turnBackOn}`);
             }
+            lines.push(...switchOverText(r));
             const verified = r.verify?.ok !== false && (!r.acceptance || r.acceptance.ok);
-            lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.' : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every Grok Bot routine was paused — see the items marked ✗.' : 'Result: NOT fully verified — see the items marked ✗.');
+            lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.' : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every routine was switched over — see the items marked ✗.' : 'Result: NOT fully verified — see the items marked ✗.');
             if (r.report) lines.push(`Report: ${r.report}`);
             return lines.join('\n');
         }
@@ -59663,7 +59935,7 @@ else:
             '  e.update((n+"\\n"+hashlib.sha256(b).hexdigest()+"\\n").encode());m.update((n+"\\n"+hashlib.sha256(re.sub(rb"[ \\t\\n\\v\\f\\r\\\\]+",b"",b)).hexdigest()+"\\n").encode())',
             ' print(k,"MISSING",miss) if miss else print(k,e.hexdigest()[:12],m.hexdigest()[:12])'
         ].join('\n');
-        function buildTrinityPlan(archive, seat, { activateRoutines = false, routines, via = 'auto', history, skills, folder: folderOpt, salt = (0, node_crypto__rspack_import_0.randomBytes)(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
+        function buildTrinityPlan(archive, seat, { activateRoutines = false, routines, switchOver = false, via = 'auto', history, skills, folder: folderOpt, salt = (0, node_crypto__rspack_import_0.randomBytes)(8).toString('hex'), bundlePath, driveRemote, driveFolder = DRIVE_FOLDER } = {}) {
             if (!LABEL[seat]) throw new _migration_js__rspack_import_6.Py('Unsupported trinity seat.');
             trinityOptions({
                 via,
@@ -59690,6 +59962,7 @@ else:
                         auto: via === 'auto',
                         activateRoutines,
                         routines,
+                        switchOver,
                         history,
                         skills,
                         folderOpt,
@@ -59707,7 +59980,7 @@ else:
         }
         class TooBig extends _migration_js__rspack_import_6.Py {
         }
-        function planFor(archive, seat, { mode, auto, activateRoutines, routines, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
+        function planFor(archive, seat, { mode, auto, activateRoutines, routines, switchOver, history, skills, folderOpt, salt, bundlePath, driveRemote, driveFolder }) {
             const cap = archive.capture;
             const name = (0, _migration_redact_js__rspack_import_7.aj)(cap.bot.name).text;
             const short = name.split(' · ')[0];
@@ -59846,7 +60119,7 @@ else:
             if (cap.automations.length) addFile('ROUTINES.md', [
                 `# ${short}: routines`,
                 '',
-                ...scheduled.map((a)=>`## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${active.has(a) ? 'Migrated as an active scheduled task' : 'Not scheduled here'}\n\n${a.prompt}\n`),
+                ...scheduled.map((a)=>`## ${a.name}\n- Schedule: cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''}${a.scheduleText ? ` (${a.scheduleText})` : ''}\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n- ${!active.has(a) ? 'Not scheduled here' : switchOver ? 'Moved here: scheduled once its Grok Bot copy is paused' : 'Migrated as an active scheduled task'}\n\n${a.prompt}\n`),
                 ...events.map((a)=>`## ${a.name}\n- Trigger: ${a.trigger} event (no equivalent here)\n- In Grok Bot: ${a.enabled ? 'on' : 'off'}\n\n${a.prompt}\n`)
             ].join('\n'));
             if (skillInfo.length && skillsMode !== 'none') {
@@ -59953,7 +60226,7 @@ else:
             for (const a of scheduled.filter((x)=>!active.has(x) && (!activateRoutines || x.enabled)))notMigrated.push({
                 item: `routine "${a.name}"`,
                 reason: `${LABEL[seat]} has no paused schedule; it was ${a.enabled ? 'on' : 'off'} in Grok Bot`,
-                alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (schedules it here and pauses the Grok copy after the check)`
+                alternative: `kept in ${folder}/ROUTINES.md; ask it to schedule the routine once the Grok copy is off, or use --move-routines (after the check it pauses the Grok copy, then schedules it here)`
             });
             for (const a of events)notMigrated.push({
                 item: `routine "${a.name}"`,
@@ -60065,7 +60338,7 @@ else:
                     u,
                     []
                 ]));
-            const add = (id, body, extra = {})=>steps.push({
+            const stepOf = (id, body, extra = {})=>({
                     id,
                     text: body + `\n\nReply with exactly: saved ${id}`,
                     expectReply: [
@@ -60073,6 +60346,7 @@ else:
                     ],
                     ...extra
                 });
+            const add = (id, body, extra)=>steps.push(stepOf(id, body, extra));
             let bundle = null;
             const usedIds = new Set([
                 'intro',
@@ -60132,9 +60406,11 @@ else:
                 });
                 if (steps.length > MAX_CHAT_STEPS) throw new TooBig(`Chat delivery would need ${steps.length} messages. Use --via upload, --history recent:N or --skills index.`);
             }
-            for (const a of scheduled.filter((x)=>active.has(x))){
-                add(`schedule-${safeSegment(a.id)}`.slice(0, 60), `Create a recurring scheduled task named "${a.name}" that runs on cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''} and does what ${folder}/ROUTINES.md describes under "${a.name}".`);
-            }
+            const scheduleSteps = scheduled.filter((x)=>active.has(x)).map((a)=>({
+                    a,
+                    step: stepOf(`schedule-${safeSegment(a.id)}`.slice(0, 60), `Create a recurring scheduled task named "${a.name}" that runs on cron "${a.scheduleCron}"${a.timezone ? ' in ' + a.timezone : ''} and does what ${folder}/ROUTINES.md describes under "${a.name}".`)
+                }));
+            if (!switchOver) steps.push(...scheduleSteps.map((x)=>x.step));
             add('remember', `Please remember this long-term (明確要求長期記住): my Grok Bot assistant "${short}" was moved to you. Its handoff folder is ${folder}/ (start with README.md; role in ROLE.md, memory in MEMORY.md, open tasks in TASKS.md). Read those files before doing ${short}'s work.`);
             const contextNote = seat === 'dot' ? 'Your dot has one inbox; this answer may also use the conversation that delivered the migration.' : undefined;
             const twoThirds = (n)=>Math.max(1, Math.round(n * 2 / 3));
@@ -60254,7 +60530,7 @@ else:
                     informational: true
                 }
             ] : [];
-            if (active.size) checks1.push({
+            if (active.size && !switchOver) checks1.push({
                 id: 'schedules',
                 kind: 'schedules',
                 contains: scheduled.filter((a)=>active.has(a)).map((a)=>a.name)
@@ -60271,7 +60547,10 @@ else:
                     title: `Grok Bot · ${short} · check`
                 }
             } : {};
-            for (const s of steps)(0, _migration_redact_js__rspack_import_7.v7)(s.text, `step ${s.id}`);
+            for (const s of [
+                ...steps,
+                ...switchOver ? scheduleSteps.map((x)=>x.step) : []
+            ])(0, _migration_redact_js__rspack_import_7.v7)(s.text, `step ${s.id}`);
             for (const q of questions)(0, _migration_redact_js__rspack_import_7.v7)(q.text + '\n' + q.expect.join('\n'), `question ${q.area}`);
             (0, _migration_redact_js__rspack_import_7.v7)(JSON.stringify(titles), 'the chat titles');
             const id = 'gbot-' + sha(JSON.stringify([
@@ -60283,6 +60562,51 @@ else:
                         attach: s.attach?.map((a)=>a.sha256)
                     }))
             ])).slice(0, 24);
+            const source = {
+                platform: 'grok-bot',
+                botId: cap.bot.id,
+                bot: name,
+                capturedAt: cap.capturedAt,
+                archive: archive.root,
+                folder,
+                via: mode,
+                history: historyMode,
+                skills: skillsMode,
+                ...auto ? {
+                    chosen: 'auto'
+                } : {}
+            };
+            const switchPlans = switchOver ? scheduleSteps.map(({ a, step })=>({
+                    routine: (0, _migration_capture_js__rspack_import_4.$r)([
+                        a
+                    ])[0],
+                    plan: {
+                        format: 'trinity-migration-plan',
+                        version: 1,
+                        id: 'gbot-' + sha(JSON.stringify([
+                            id,
+                            step
+                        ])).slice(0, 24),
+                        seat,
+                        title: `Grok Bot: ${name}`,
+                        ...titles,
+                        source,
+                        steps: [
+                            step
+                        ],
+                        checks: [
+                            {
+                                id: 'schedules',
+                                kind: 'schedules',
+                                contains: [
+                                    a.name
+                                ]
+                            }
+                        ],
+                        questions: [],
+                        notMigrated: []
+                    }
+                })) : [];
             return {
                 format: 'trinity-migration-plan',
                 version: 1,
@@ -60290,20 +60614,7 @@ else:
                 seat,
                 title: `Grok Bot: ${name}`,
                 ...titles,
-                source: {
-                    platform: 'grok-bot',
-                    botId: cap.bot.id,
-                    bot: name,
-                    capturedAt: cap.capturedAt,
-                    archive: archive.root,
-                    folder,
-                    via: mode,
-                    history: historyMode,
-                    skills: skillsMode,
-                    ...auto ? {
-                        chosen: 'auto'
-                    } : {}
-                },
+                source,
                 steps,
                 checks: checks1,
                 questions,
@@ -60314,7 +60625,8 @@ else:
                     bundle,
                     units: expected,
                     files: files.length,
-                    scheduled: (0, _migration_capture_js__rspack_import_4.$r)(scheduled.filter((a)=>active.has(a)))
+                    scheduled: (0, _migration_capture_js__rspack_import_4.$r)(scheduled.filter((a)=>active.has(a))),
+                    switchPlans
                 }
             };
         }
@@ -60336,11 +60648,12 @@ else:
         function planFile(archiveRoot, seat) {
             return (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(archiveRoot), `${(0, node_path__rspack_import_2.basename)(archiveRoot)}.${seat}-plan.json`);
         }
-        async function previewTrinity({ archive, to, activateRoutines = false, routines, ...options }) {
+        async function previewTrinity({ archive, to, activateRoutines = false, routines, switchOver = false, ...options }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
                 activateRoutines,
                 routines,
+                switchOver,
                 ...trinityOptions(options)
             });
             return {
@@ -60453,11 +60766,12 @@ else:
             if (result.error) throw new _migration_js__rspack_import_6.Py('trinity-cli: ' + result.error);
             return result;
         }
-        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, routines, onProgress, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
+        async function runTrinity({ archive, to, accept, checkOnly = false, activateRoutines, routines, switchOver = false, onProgress, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli', keepDrive = false, ...options }) {
             const opened = (0, _migration_archive_js__rspack_import_3.p_)(archive);
             const plan = buildTrinityPlan(opened, to, {
                 activateRoutines,
                 routines,
+                switchOver,
                 ...trinityOptions(options)
             });
             const help = await exec(bin, [
@@ -60577,6 +60891,7 @@ else:
                 } : null,
                 chatNote: result.chat_note ?? null,
                 notMigrated: plan.notMigrated,
+                ...(0, _migration_capture_js__rspack_import_4.Dd)(opened.capture),
                 finishedAt: new Date().toISOString()
             };
             const stamp = report.finishedAt.replace(/[-:.]/g, '').slice(0, 15);
@@ -60586,7 +60901,42 @@ else:
             });
             return {
                 ...report,
-                report: out
+                report: out,
+                switchPlans: delivery.switchPlans
+            };
+        }
+        async function runSwitchPlan({ archive, to, entry, checkOnly = false, exec = _migration_hermes_js__rspack_import_5.hp, bin = process.env.GBOT_TRINITY_BIN || 'trinity-cli' }) {
+            const path = (0, node_path__rspack_import_2.join)((0, node_path__rspack_import_2.dirname)(archive), `${(0, node_path__rspack_import_2.basename)(archive)}.${to}-switch-${safeSegment(entry.routine.id || sha(entry.routine.name).slice(0, 16))}.json`);
+            (0, node_fs__rspack_import_1.writeFileSync)(path, JSON.stringify(entry.plan, null, 2) + '\n', {
+                mode: 384
+            });
+            let result;
+            try {
+                result = await trinityRun(exec, bin, to, path, {
+                    accept: false,
+                    checkOnly
+                });
+            } catch (error) {
+                return {
+                    state: 'unknown',
+                    error: String(error?.message ?? error).slice(0, 300),
+                    plan: path
+                };
+            }
+            const check = (result.checks ?? []).find((c)=>c.kind === 'schedules');
+            if (check?.ok === true) return {
+                state: 'on',
+                plan: path
+            };
+            if (check?.ok === false && !result.stopped) return {
+                state: 'off',
+                error: check.note ?? 'the schedules read-back does not show it',
+                plan: path
+            };
+            return {
+                state: 'unknown',
+                error: result.stopped ? `delivery stopped: ${result.stopped}` : 'no schedules read-back',
+                plan: path
             };
         }
         const importTrinity = (opts)=>runTrinity({
@@ -60600,7 +60950,8 @@ else:
                 checkOnly: true
             });
         __webpack_require__.d(__webpack_exports__, {
-            previewTrinity: ()=>previewTrinity
+            previewTrinity: ()=>previewTrinity,
+            runSwitchPlan: ()=>runSwitchPlan
         }, {
             checkTrinity: checkTrinity,
             importTrinity: importTrinity

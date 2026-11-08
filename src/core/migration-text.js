@@ -6,9 +6,9 @@ export const ROUTINE_TOGGLE = 'in the Grok Bot app: Routines → toggle';
 const DEST = { hermes: 'Hermes', muse: 'Muse', dot: 'Your dot' };
 const routineAt = (x) => `${x.id || '(no id)'} "${x.name}" (${x.schedule}${x.timezone ? ' ' + x.timezone : ''})`;
 const IN_GROK_BOT = {
-  unchanged: 'Grok Bot keeps running it', 'paused after the check': 'paused in Grok Bot once the import check passes',
-  paused: 'paused in Grok Bot', 'left on': 'still on in Grok Bot (the check did not pass)',
-  'not paused': 'not paused in Grok Bot (see below)', unknown: 'not known whether it was paused in Grok Bot (see below)',
+  unchanged: 'Grok Bot keeps running it', paused: 'paused in Grok Bot', 'left on': 'still on in Grok Bot (the check did not pass)',
+  'not paused': 'still on in Grok Bot (the pause failed; see below)', unknown: 'not known whether it was paused in Grok Bot (see below)',
+  'on again': 'on again in Grok Bot (rolled back)',
 };
 
 /**
@@ -19,16 +19,31 @@ const IN_GROK_BOT = {
 export function routinesText(to, rows, { activate = false, move = false, done = false } = {}) {
   const where = DEST[to] ?? to;
   const there = (x) => (x.atDestination === 'on' ? `on in ${where}` : x.atDestination === 'not migrated' ? 'not migrated (see "Not migrated")'
-    : to === 'hermes' ? 'off in Hermes (created paused)' : `not scheduled in ${where} (kept in ROUTINES.md)`);
-  const here = (x) => (x.atDestination === 'on' && x.inGrokBot === 'unchanged' ? 'Grok Bot keeps running it too, so it runs in both' : IN_GROK_BOT[x.inGrokBot] ?? x.inGrokBot);
+    : x.atDestination === 'unknown' ? `not known whether it is on in ${where}`
+      : to === 'hermes' ? 'off in Hermes (created paused)' : `not scheduled in ${where} (kept in ROUTINES.md)`);
+  const here = (x) => (x.atDestination === 'on' && x.inGrokBot === 'unchanged' ? 'Grok Bot keeps running it too, so it may run twice' : IN_GROK_BOT[x.inGrokBot] ?? x.inGrokBot);
+  const line = (x) => (x.inGrokBot === 'paused after the check'
+    ? `moved: once the import check passes it is paused in Grok Bot, then turned on in ${where} (a short gap; never both running)` : `${there(x)}; ${here(x)}`);
   const untouched = rows.every((x) => ['unchanged', 'left on', 'not paused'].includes(x.inGrokBot));
   const lines = [`Grok Bot routines that ${done ? 'were' : 'are'} on (${rows.length})${untouched ? `; nothing in Grok Bot ${done ? 'was changed' : 'changes'}` : ''}:`,
-    ...rows.map((x) => `  - ${routineAt(x)}: ${there(x)}; ${here(x)}`)];
+    ...rows.map((x) => `  - ${routineAt(x)}: ${line(x)}`)];
   if (done) return lines.join('\n');
   if (rows.some((x) => x.inGrokBot === 'paused after the check')) lines.push(`  Turn one back on ${ROUTINE_TOGGLE}.`);
-  if (!activate) lines.push(`  To run them in ${where} too: --activate-routines. To move them (on in ${where}, paused in Grok Bot once the import check passes): --move-routines. Add --routines id,id to do either for only some.`);
-  else if (!move && rows.some((x) => x.atDestination === 'on')) lines.push(`  Both copies run until one is turned off; --move-routines pauses the Grok Bot copies once the import check passes.`);
+  if (!activate) lines.push(`  To run them in ${where} too: --activate-routines (they may run twice). To move them (switched over once the import check passes; never both running): --move-routines. Add --routines id,id to do either for only some.`);
+  else if (!move && rows.some((x) => x.atDestination === 'on')) lines.push('  Both copies run until one is turned off, so each may run twice; --move-routines switches them over instead (never both running).');
   return lines.join('\n');
+}
+
+/** The switch-over of each moved routine whose Grok Bot copy was paused: on at the destination, rolled back, or not. */
+function switchOverText(r) {
+  const where = DEST[r.to] ?? r.to;
+  const tried = (r.switchOver ?? []).filter((x) => x.source === 'paused' || x.source === 'on again');
+  if (!tried.length) return [];
+  return ['', `Switch-over (--move-routines: paused in Grok Bot first, then turned on in ${where}; never both running):`, ...tried.map((x) => (
+    x.destination === 'on' ? `  ✓ ${routineAt(x)}: paused in Grok Bot, then on in ${where}`
+      : x.rolledBack ? `  ✗ ${routineAt(x)}: paused in Grok Bot, but not turned on in ${where} (${x.error}); rolled back: it runs in Grok Bot again`
+        : x.destination === 'unknown' ? `  ✗ ${routineAt(x)}: paused in Grok Bot; not known whether it is on in ${where} (${x.error}); ${x.byHand}`
+          : `  ✗ ${routineAt(x)}: ROUTINE MAY RUN NOWHERE: paused in Grok Bot, not turned on in ${where}, and turning it back on in Grok Bot ${x.rollback === 'unknown' ? 'is not confirmed' : 'failed'} (${x.rollbackError}). Fix by hand: ${x.byHand}.`))];
 }
 
 export function coverageText(coverage) {
@@ -64,6 +79,9 @@ export function importText(r) {
     lines.push('', `Acceptance (questions answered by the migrated agent${r.acceptance.freshChat ? ', in a new chat that cannot see the migration messages' : ''}):`);
     for (const a of r.acceptance.results) lines.push(`  ${a.ok ? '✓' : '✗'} ${a.area}: ${a.ok ? `answered from migrated data${a.attempts > 1 ? ' (on the second try)' : ''}` : (a.error ?? `expected ${JSON.stringify(a.expect)}`)}${a.note ? ` (${a.note})` : ''}`);
   }
+  if (r.memoryNotCaptured?.length) {
+    lines.push('', `Memory files not captured, so not migrated (${r.memoryNotCaptured.length}):`, ...r.memoryNotCaptured.map((m) => `  - ${m.boxPath}: ${m.reason}`));
+  }
   if (r.chatNote) lines.push('', 'Note: ' + r.chatNote);
   if (r.repaired?.length) lines.push('', `Re-sent once because the destination did not have them: ${r.repaired.join(', ')}`);
   if (r.deliveries) {
@@ -85,9 +103,10 @@ export function importText(r) {
     }
     if (sr.routines.some((x) => x.result === 'paused')) lines.push(`  ${sr.turnBackOn}`);
   }
+  lines.push(...switchOverText(r));
   const verified = r.verify?.ok !== false && (!r.acceptance || r.acceptance.ok);
   lines.push('', r.exitCode === 0 ? 'Result: migrated and verified.'
-    : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every Grok Bot routine was paused — see the items marked ✗.'
+    : verified && sr && sr.status !== 'left-on' ? 'Result: migrated and verified, but not every routine was switched over — see the items marked ✗.'
       : 'Result: NOT fully verified — see the items marked ✗.');
   if (r.report) lines.push(`Report: ${r.report}`);
   return lines.join('\n');

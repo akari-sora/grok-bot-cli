@@ -22,7 +22,7 @@ export const config = {
       history: { description: 'Muse/dot history: full, recent:N or none (default: upload full, chat recent:30)', type: 'string' },
       folder: { description: 'Muse/dot folder on the agent\'s computer (default ~/grok-bot/<bot>)', type: 'string' },
       activateRoutines: { description: 'Same value as at import', type: 'boolean' },
-      moveRoutines: { description: 'Same value as at import (plans the destination as --activate-routines does; pauses nothing)', type: 'boolean' },
+      moveRoutines: { description: 'Same value as at import (expects the moved routines switched over: on at the destination; pauses nothing)', type: 'boolean' },
       routines: { description: 'With --activate-routines or --move-routines, only these routines: comma-separated ids or exact names of routines that are on in Grok Bot. The others stay as by default (Hermes: created paused; Muse/dot: notes only) and are never paused in Grok Bot', type: 'string' },
       accept: { description: 'Also run the behavioral acceptance checks', type: 'boolean' },
     },

@@ -15,7 +15,7 @@ import { inflateRawSync } from 'node:zlib';
 import { hasSecret } from '../src/core/migration-redact.js';
 import { redactSecrets } from '../src/core/migration-redact.js';
 import { checkMigration, importMigration, previewMigration, resolveBot } from '../src/core/migration-flow.js';
-import { importText } from '../src/core/migration-text.js';
+import { coverageText, importText } from '../src/core/migration-text.js';
 import { BACKEND_READ_RPCS, backendRead } from '../src/core/gateway.js';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -24,7 +24,7 @@ const BOT = 'bbbbbbbb-1111-2222-3333-444444444444';
 const FAKE_PAT = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
 
 // --- a fake Grok Bot backend + box store -------------------------------------------------------
-function world({ rows = 1203, omitEvery = 0, changeGenerationAt = 0 } = {}) {
+function world({ rows = 1203, omitEvery = 0, changeGenerationAt = 0, unreadable = [] } = {}) {
   const blobs = new Map();
   const put = (bytes) => { const h = sha(bytes); blobs.set(h, bytes); return h; };
   const entries = [];
@@ -50,7 +50,10 @@ function world({ rows = 1203, omitEvery = 0, changeGenerationAt = 0 } = {}) {
   const manifest = { version: 2, updatedAtMs: 1794000000000, entries: {} };
   for (const [p, text] of Object.entries(box)) {
     const bytes = Buffer.from(text);
-    manifest.entries[p] = { kind: 'file', sha: put(bytes), size: bytes.length, mode: p.includes('/bin/') || p.endsWith('.sh') ? 493 : 420 };
+    // An `unreadable` path is listed in the manifest, but its blob does not match the digest.
+    const digest = unreadable.includes(p) ? sha(bytes) : put(bytes);
+    if (unreadable.includes(p)) blobs.set(digest, Buffer.from('not these bytes'));
+    manifest.entries[p] = { kind: 'file', sha: digest, size: bytes.length, mode: p.includes('/bin/') || p.endsWith('.sh') ? 493 : 420 };
   }
   manifest.entries['home/box/link'] = { kind: 'symlink', target: '/elsewhere' };
   const manifestBytes = Buffer.from(JSON.stringify(manifest));
@@ -524,79 +527,118 @@ async function routinesArchive(t, more = []) {
   return openArchive(writeArchive(cap, join(dir, 'a')).root);
 }
 
-/** trinity-cli migrate as JSON: every step replied; the schedules read-back and the questions as asked. */
-function fakeTrinity({ schedulesOk = true, questionsOk = true } = {}) {
+/**
+ * trinity-cli migrate as JSON: every step replied; the schedules read-back and the questions as asked.
+ * `schedulesOk(names)` decides a schedules read-back; `log` records each run in order with the switch.
+ */
+function fakeTrinity({ schedulesOk = true, questionsOk = true, log = [] } = {}) {
   const calls = [];
+  const okFor = typeof schedulesOk === 'function' ? schedulesOk : () => schedulesOk;
   const exec = async (bin, args) => {
     calls.push(args);
     if (args[0] === 'migrate' && args[1] === '--help') return { code: 0, stdout: '--check-only --redo', stderr: '' };
     const plan = JSON.parse(readFileSync(args[3], 'utf8'));
-    const checks = plan.checks.map((c) => ({ id: c.id, kind: c.kind, state: 'ok', ok: c.informational ? null : c.kind !== 'schedules' || schedulesOk,
-      informational: Boolean(c.informational), found: true, expected: c.contains, hits: c.kind === 'schedules' && !schedulesOk ? [] : c.contains }));
+    log.push(`trinity ${args.includes('--check-only') ? 'check' : 'send'} ${plan.steps.map((x) => x.id).join(',')}`);
+    const checks = plan.checks.map((c) => {
+      const ok = c.informational ? null : c.kind !== 'schedules' || okFor(c.contains);
+      return { id: c.id, kind: c.kind, state: 'ok', ok, informational: Boolean(c.informational), found: true, expected: c.contains, hits: ok === false ? [] : c.contains };
+    });
     const questions = args.includes('--no-questions') ? [] : [{ area: 'memory', ok: questionsOk, expect: ['grok-bot'], hits: questionsOk ? ['grok-bot'] : [], answer: 'Q1: ~/grok-bot/...' }];
     const ok = checks.every((c) => c.ok !== false) && questions.every((q) => q.ok);
     return { code: 0, stdout: JSON.stringify({ ok, steps: plan.steps.map((x) => ({ id: x.id, state: 'replied', ok: true })), checks, questions, state_path: '/tmp/x', stopped: null }), stderr: '' };
   };
-  return { calls, exec };
+  return { calls, exec, log };
 }
 
-function fakeSwitch(onCall = () => {}) {
+function fakeSwitch(onCall = () => {}, log = []) {
   const calls = [];
-  return { calls, setEnabled: async (agentId, id, isEnabled) => { calls.push([agentId, id, isEnabled]); onCall(); return { id, enabled: false }; } };
+  return { calls, setEnabled: async (agentId, id, isEnabled) => { calls.push([agentId, id, isEnabled]); log.push(`grok ${id} ${isEnabled ? 'on' : 'off'}`); onCall(id, isEnabled); return { id, enabled: isEnabled }; } };
 }
 
-test('move to Your dot: the agent schedules the routine that is on; after read-back and acceptance it is paused in Grok Bot', async (t) => {
+test('move to Your dot: switched over with a gap: the schedule is asked for only after the Grok Bot copy is paused', async (t) => {
   const a = await routinesArchive(t);
-  const tri = fakeTrinity();
-  const control = fakeSwitch(() => assert.ok(tri.calls.some((c) => c[0] === '--json' && c.includes('--yes')), 'paused only after the delivery and its checks'));
+  const log = [];
+  const tri = fakeTrinity({ log });
+  const control = fakeSwitch(() => {}, log);
   const r = await importMigration({ archive: a.root, to: 'dot', yes: true, moveRoutines: true, exec: tri.exec, routineSwitch: control, onProgress: () => {} });
   const plan = JSON.parse(readFileSync(r.plan, 'utf8'));
-  assert.deepEqual(plan.steps.map((x) => x.id), ['bundle', 'schedule-a1', 'remember'], 'only the scheduled routine that is on is created');
-  assert.deepEqual(plan.checks.find((c) => c.kind === 'schedules').contains, ['Hourly scan']);
+  assert.deepEqual(plan.steps.map((x) => x.id), ['bundle', 'remember'], 'the folder first, without any schedule');
+  assert.ok(!plan.checks.some((c) => c.kind === 'schedules'));
+  assert.deepEqual(log, ['trinity send bundle,remember', 'grok a1 off', 'trinity send schedule-a1'], 'Grok Bot copy paused, then the schedule created: never both running');
   assert.deepEqual(control.calls, [[BOT, 'a1', false]], 'not the event trigger, not the routine that is off');
   assert.equal(r.exitCode, 0);
   assert.equal(r.sourceRoutines.status, 'paused');
-  assert.deepEqual(r.sourceRoutines.routines.map((x) => [x.id, x.name, x.schedule, x.timezone, x.result]), [['a1', 'Hourly scan', '52 9-21 * * 1-5', 'Asia/Taipei', 'paused']]);
-  assert.deepEqual(JSON.parse(readFileSync(r.report, 'utf8')).sourceRoutines, r.sourceRoutines, 'the report file has it too');
+  assert.deepEqual(r.switchOver.map((x) => [x.id, x.destination, x.source, x.rolledBack]), [['a1', 'on', 'paused', false]]);
+  assert.deepEqual(r.routines.map((x) => [x.id, x.atDestination, x.inGrokBot, x.rolledBack]), [['a1', 'on', 'paused', false]]);
+  const switchPlan = JSON.parse(readFileSync(r.switchOver[0].plan, 'utf8'));
+  assert.deepEqual([switchPlan.steps.map((x) => x.id), switchPlan.checks], [['schedule-a1'], [{ id: 'schedules', kind: 'schedules', contains: ['Hourly scan'] }]]);
+  assert.match(switchPlan.steps[0].text, /^Create a recurring scheduled task named "Hourly scan" that runs on cron "52 9-21 \* \* 1-5" in Asia\/Taipei/);
+  assert.deepEqual(JSON.parse(readFileSync(r.report, 'utf8')).switchOver, r.switchOver, 'the report file has it too');
+  assert.equal(JSON.parse(readFileSync(r.report, 'utf8')).switchPlans, undefined, 'gbot bookkeeping stays out of the report');
   assert.match(importText(r), /✓ paused a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\)\n {2}Turn one back on in the Grok Bot app: Routines → toggle\./);
+  assert.match(importText(r), /\n {2}✓ a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): paused in Grok Bot, then on in Your dot\n/);
+
+  // check plans the same destination: the folder and, for the moved routine, its schedule.
+  const checkLog = [];
+  const checked = await checkMigration({ archive: a.root, to: 'dot', moveRoutines: true, exec: fakeTrinity({ log: checkLog }).exec, onProgress: () => {} });
+  assert.deepEqual(checkLog, ['trinity check bundle,remember', 'trinity check schedule-a1']);
+  assert.equal(checked.exitCode, 0);
+  assert.ok(checked.verify.checks.some((c) => c.area === 'schedule "Hourly scan" read-back' && c.ok));
+  assert.equal(control.calls.length, 1, 'check never touches Grok Bot');
 });
 
-test('move to Muse or Your dot: nothing is paused unless the schedules read back and the acceptance passed', async (t) => {
+test('move to Your dot: a schedule that does not read back is rolled back in Grok Bot', async (t) => {
   const a = await routinesArchive(t);
-  for (const [to, knobs, accept] of [['muse', { questionsOk: false }, true], ['dot', { schedulesOk: false }, true], ['dot', {}, false]]) {
-    const tri = fakeTrinity(knobs);
-    const control = fakeSwitch();
+  const log = [];
+  const tri = fakeTrinity({ log, schedulesOk: () => false });
+  const control = fakeSwitch(() => {}, log);
+  const r = await importMigration({ archive: a.root, to: 'dot', yes: true, moveRoutines: true, exec: tri.exec, routineSwitch: control, onProgress: () => {} });
+  assert.deepEqual(log, ['trinity send bundle,remember', 'grok a1 off', 'trinity send schedule-a1', 'grok a1 on']);
+  assert.equal(r.exitCode, 3);
+  assert.deepEqual(r.switchOver.map((x) => [x.id, x.destination, x.source, x.rolledBack]), [['a1', 'off', 'on again', true]]);
+  assert.match(importText(r), /✗ a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): paused in Grok Bot, but not turned on in Your dot \(the schedules read-back does not show it\); rolled back: it runs in Grok Bot again/);
+});
+
+test('move to Muse or Your dot: nothing is paused or scheduled unless the folder read back and the acceptance passed', async (t) => {
+  const a = await routinesArchive(t);
+  for (const [to, knobs, accept] of [['muse', { questionsOk: false }, true], ['dot', {}, false]]) {
+    const log = [];
+    const tri = fakeTrinity({ ...knobs, log });
+    const control = fakeSwitch(() => {}, log);
     const r = await importMigration({ archive: a.root, to, yes: true, accept, moveRoutines: true, exec: tri.exec, routineSwitch: control, onProgress: () => {} });
     assert.deepEqual(control.calls, [], `${to} ${JSON.stringify(knobs)} accept=${accept}: no write to Grok Bot`);
+    assert.ok(!log.some((x) => /schedule-/.test(x)), 'no schedule is created at the destination');
     assert.equal(r.exitCode, 3);
     assert.equal(r.sourceRoutines.reason, 'source routines left on: verification did not pass');
     assert.deepEqual(r.sourceRoutines.routines.map((x) => [x.id, x.result]), [['a1', 'left-on']]);
+    assert.deepEqual(r.routines.map((x) => [x.id, x.atDestination, x.inGrokBot]), [['a1', 'off', 'left on']]);
     assert.match(importText(r), /✗ source routines left on: verification did not pass/);
   }
 });
 
-test('move to Muse or Your dot: the preview for each choice, and check plans the same destination as the import', async (t) => {
+test('move to Muse or Your dot: the preview for each choice', async (t) => {
   const a = await routinesArchive(t);
   const kept = await previewMigration({ archive: a.root, to: 'dot' });
-  assert.match(kept.summary, /\nGrok Bot routines that are on \(1\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): not scheduled in Your dot \(kept in ROUTINES\.md\); Grok Bot keeps running it\n {2}To run them in Your dot too: --activate-routines\. To move them \(on in Your dot, paused in Grok Bot once the import check passes\): --move-routines\. Add --routines id,id to do either for only some\.$/);
+  assert.match(kept.summary, /\nGrok Bot routines that are on \(1\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): not scheduled in Your dot \(kept in ROUTINES\.md\); Grok Bot keeps running it\n {2}To run them in Your dot too: --activate-routines \(they may run twice\)\. To move them \(switched over once the import check passes; never both running\): --move-routines\. Add --routines id,id to do either for only some\.$/);
   assert.deepEqual(kept.plan.scheduled, []);
   const both = await previewMigration({ archive: a.root, to: 'dot', activateRoutines: true });
-  assert.match(both.summary, /\nGrok Bot routines that are on \(1\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): on in Your dot; Grok Bot keeps running it too, so it runs in both\n {2}Both copies run until one is turned off; --move-routines pauses the Grok Bot copies once the import check passes\.$/);
+  assert.match(both.summary, /\nGrok Bot routines that are on \(1\); nothing in Grok Bot changes:\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): on in Your dot; Grok Bot keeps running it too, so it may run twice\n {2}Both copies run until one is turned off, so each may run twice; --move-routines switches them over instead \(never both running\)\.$/);
   const moved = await previewMigration({ archive: a.root, to: 'dot', moveRoutines: true });
-  assert.match(moved.summary, /\nGrok Bot routines that are on \(1\):\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): on in Your dot; paused in Grok Bot once the import check passes\n {2}Turn one back on in the Grok Bot app: Routines → toggle\.$/);
+  assert.match(moved.summary, /\nGrok Bot routines that are on \(1\):\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): moved: once the import check passes it is paused in Grok Bot, then turned on in Your dot \(a short gap; never both running\)\n {2}Turn one back on in the Grok Bot app: Routines → toggle\.$/);
   assert.deepEqual(moved.plan.scheduled.map((x) => x.id), ['a1']);
-  assert.equal(moved.plan.id, both.plan.id, 'the same plan as --activate-routines');
+  assert.notEqual(moved.plan.id, both.plan.id, 'a move sends the schedule later: another plan than --activate-routines');
   assert.notEqual(moved.plan.id, kept.plan.id);
 });
 
 test('routines to Your dot: --routines limits what is scheduled there and paused in Grok Bot; the selection is part of the plan id', async (t) => {
   const a = await routinesArchive(t, [{ id: 'a4', name: 'Morning digest', scheduleCron: '0 8 * * *', enabled: true }]);
-  const tri = fakeTrinity();
-  const control = fakeSwitch();
+  const log = [];
+  const tri = fakeTrinity({ log });
+  const control = fakeSwitch(() => {}, log);
   const r = await importMigration({ archive: a.root, to: 'dot', yes: true, moveRoutines: true, routines: 'a4', exec: tri.exec, routineSwitch: control, onProgress: () => {} });
   const plan = JSON.parse(readFileSync(r.plan, 'utf8'));
-  assert.deepEqual(plan.steps.map((x) => x.id), ['bundle', 'schedule-a4', 'remember'], 'only the routine named with --routines is scheduled');
-  assert.deepEqual(plan.checks.find((c) => c.kind === 'schedules').contains, ['Morning digest']);
+  assert.deepEqual(plan.steps.map((x) => x.id), ['bundle', 'remember']);
+  assert.deepEqual(log, ['trinity send bundle,remember', 'grok a4 off', 'trinity send schedule-a4'], 'only the routine named with --routines');
   assert.deepEqual(control.calls, [[BOT, 'a4', false]], '"Hourly scan" is on but not named: never paused');
   assert.equal(r.exitCode, 0);
   assert.deepEqual(r.routines.map((x) => [x.id, x.atDestination, x.inGrokBot]), [['a1', 'off', 'unchanged'], ['a4', 'on', 'paused']]);
@@ -606,16 +648,17 @@ test('routines to Your dot: --routines limits what is scheduled there and paused
   const text = importText(r);
   assert.match(text, /\nGrok Bot routines that were on \(2\):\n {2}- a1 "Hourly scan" \(52 9-21 \* \* 1-5 Asia\/Taipei\): not scheduled in Your dot \(kept in ROUTINES\.md\); Grok Bot keeps running it\n {2}- a4 "Morning digest" \(0 8 \* \* \* Asia\/Taipei\): on in Your dot; paused in Grok Bot\n/);
 
-  // Plan identity: the selection changes the plan; --activate-routines and --move-routines with the same selection agree.
+  // Plan identity: the selection changes the plan; an id and a name for the same routine agree.
   const id = async (opts) => (await previewMigration({ archive: a.root, to: 'dot', ...opts })).plan.id;
-  const some = await id({ moveRoutines: true, routines: 'a4' });
+  const some = await id({ activateRoutines: true, routines: 'a4' });
   assert.equal(some, await id({ activateRoutines: true, routines: 'Morning digest' }));
-  assert.notEqual(some, await id({ moveRoutines: true }));
-  assert.notEqual(some, await id({ moveRoutines: true, routines: 'a1' }));
+  assert.notEqual(some, await id({ activateRoutines: true }));
+  assert.notEqual(some, await id({ activateRoutines: true, routines: 'a1' }));
   assert.notEqual(some, await id({}));
-  assert.equal(await id({ moveRoutines: true }), await id({ moveRoutines: true, routines: 'a1,a4' }), 'naming every routine that is on is the same plan as naming none');
+  assert.equal(await id({ activateRoutines: true }), await id({ activateRoutines: true, routines: 'a1,a4' }), 'naming every routine that is on is the same plan as naming none');
+  assert.notEqual(await id({ moveRoutines: true, routines: 'a4' }), await id({ moveRoutines: true }));
 
-  // check (--check-only) with the same selection hands trinity the same plan as the import, and pauses nothing.
+  // check with the same selection hands trinity the same plan as the import, and pauses nothing.
   const checkTri = fakeTrinity();
   const checked = await checkMigration({ archive: a.root, to: 'dot', moveRoutines: true, routines: 'a4', exec: checkTri.exec, onProgress: () => {} });
   assert.ok(checkTri.calls.some((c) => c.includes('--check-only')), 'only the fake trinity-cli is run');
@@ -645,7 +688,7 @@ test('wizard: three routine choices, default 1 changes nothing in Grok Bot; 2 an
     'Routines that are on in Grok Bot (2):',
     '1. Keep them off in Your dot; Grok Bot keeps running them (nothing in Grok Bot changes)',
     '2. Run them in both: turn them on in Your dot and leave Grok Bot running them (they may run twice)',
-    '3. Move them: turn them on in Your dot and pause them in Grok Bot once the check passes',
+    '3. Move them: once the check passes, pause them in Grok Bot, then turn them on in Your dot (a short gap; never both running)',
   ]);
   const on = [{ id: 'a1', name: 'Hourly scan', schedule: '52 9-21 * * 1-5', timezone: 'Asia/Taipei' }, { id: 'a4', name: 'Morning digest', schedule: '0 8 * * *', timezone: null },
     { id: 'a7', name: 'Weekly', schedule: '0 9 * * 1', timezone: 'UTC' }];
@@ -663,4 +706,39 @@ test('wizard: three routine choices, default 1 changes nothing in Grok Bot; 2 an
   assert.deepEqual(routineArgs(2, 'work', on, picked), { preview: ['--move-routines', '--routines', 'a1,a7'], import: ['--move-routines', '--routines', 'a1,a7', '--account', 'work'] });
   assert.equal(parseChoice('4', 3), null, 'the first question has three choices');
   assert.equal(parseChoice('1,5', 3, { multiple: true }), null);
+});
+
+// --- memory coverage -------------------------------------------------------------------------------
+const OWN_LOG = `home/box/sand-data/agents/${BOT}/memory/log/2026-10.md`;
+const MEMORY_FILES = [`home/box/sand-data/agents/${BOT}/memory/profile.md`, OWN_LOG, 'home/box/sand-data/user-memory/by-agent/other-bot/profile.md'];
+const captureNow = (unreadable) => captureBot(world({ rows: 40, unreadable }).io, { agentId: BOT, now: () => new Date('2026-11-08T00:00:00Z') });
+
+test('memory coverage: complete only when every memory file the store lists was read', async () => {
+  const all = await captureNow([]);
+  assert.equal(all.coverage.memory.status, 'complete');
+  assert.equal(all.coverage.memory.missing, undefined);
+  assert.deepEqual([all.coverage.memory.own, all.coverage.memory.sharedUser], [2, 1]);
+
+  const one = await captureNow([OWN_LOG]);
+  assert.equal(one.coverage.memory.status, 'partial', 'one memory file read, one left out');
+  assert.deepEqual(one.coverage.memory.missing, [{ boxPath: '/' + OWN_LOG, reason: 'blob unreadable or digest mismatch' }]);
+  assert.match(coverageText(one.coverage), new RegExp(`~ memory +partial — .*1 of 3 memory file\\(s\\) not read: /${OWN_LOG.replace(/[.]/g, '\\.')} \\(blob unreadable or digest mismatch\\)`));
+
+  const none = await captureNow(MEMORY_FILES);
+  assert.equal(none.coverage.memory.status, 'failed', 'no memory file read');
+  assert.deepEqual(none.coverage.memory.missing.map((m) => m.boxPath), MEMORY_FILES.map((f) => '/' + f).sort());
+});
+
+test('memory coverage: a memory file left out is named in the preview, notMigrated and the import report', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'gbot-v2-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const a = openArchive(writeArchive(await captureNow([OWN_LOG]), join(dir, 'a')).root);
+  const left = (n) => n.item === '/' + OWN_LOG && n.reason === 'blob unreadable or digest mismatch';
+  assert.ok(buildHermesPlan(a, { profile: 'grok-qa', profileDir: join(dir, 'p') }).notMigrated.some(left), 'Hermes');
+  assert.ok(buildTrinityPlan(a, 'dot', { bundlePath: join(dir, 'b.zip') }).notMigrated.some(left), 'Your dot');
+  const preview = await previewMigration({ archive: a.root, to: 'dot' });
+  assert.match(preview.summary, new RegExp(`- /${OWN_LOG.replace(/[.]/g, '\\.')}: blob unreadable or digest mismatch`));
+  const r = await importMigration({ archive: a.root, to: 'dot', yes: true, exec: fakeTrinity().exec, onProgress: () => {} });
+  assert.deepEqual(r.memoryNotCaptured, [{ boxPath: '/' + OWN_LOG, reason: 'blob unreadable or digest mismatch' }]);
+  assert.match(importText(r), new RegExp(`\nMemory files not captured, so not migrated \\(1\\):\n {2}- /${OWN_LOG.replace(/[.]/g, '\\.')}: blob unreadable or digest mismatch\n`));
 });
