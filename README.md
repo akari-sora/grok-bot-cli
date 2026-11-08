@@ -2,7 +2,7 @@
 
 English | [繁體中文](README.zh-TW.md)
 
-Manage Grok Bot bots, groups and messages from your terminal, and move a bot to Hermes, Muse or Your dot.
+**Move your Grok Bot bots to Hermes, Muse or Your dot**: role, memory, skills, routines, open tasks, the whole conversation and the files. `gbot migrate` imports them, reads them back, and checks the moved bot can carry on the work. It only reads from Grok Bot and never messages your bot, so the move does not spend Grok Bot usage. The same CLI also manages Grok Bot bots, groups and messages from your terminal.
 
 > Canonical repository and issues: <https://gitlab.com/aa22396584/grok-bot-cli>. Releases and downloads: <https://gitlab.com/aa22396584/grok-bot-cli/-/releases>. GitHub mirror: <https://github.com/akari-sora/grok-bot-cli> (open issues and merge requests on GitLab).
 
@@ -14,9 +14,12 @@ Manage Grok Bot bots, groups and messages from your terminal, and move a bot to 
 
 `gbot migrate` asks for the login, the bot and the destination, shows what will change, and after you confirm it imports, reads the destination back and asks the migrated bot questions only the migrated data answers. Recorded live on 2026-11-08 with a real demo bot ("Demo · Trip Planner"): Hermes gets a new profile with the bot's role, memory, skill folders, its routine (paused), the whole conversation and its files; every part is read back through Hermes (7/7); then the bot, now in Hermes, says what is still open for the Kyoto trip. [MP4](demo/gbot-migrate-hermes.mp4) · tape: [demo/gbot-migrate-hermes.tape](demo/gbot-migrate-hermes.tape)
 
-**On a phone (66 s, vertical):** the whole flow with the released package, then Hermes, Muse and Your dot each doing the trip's next step from the migrated data, the Move to Hermes template, and the agent route.
+**Videos (vertical, for phones):**
 
-<a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="Phone video: gbot migrate end to end" width="270"></a>
+| `gbot migrate` in a terminal (66 s) | Move to Hermes inside Grok Bot (51 s) |
+| --- | --- |
+| <a href="demo/gbot-migrate-phone.mp4"><img src="demo/gbot-migrate-phone.png" alt="Phone video: gbot migrate end to end" width="270"></a> | <a href="demo/move-to-hermes-phone.mp4"><img src="demo/move-to-hermes-phone.png" alt="Phone video: the Move to Hermes bot moving a bot" width="270"></a> |
+| The whole flow with the released package, then Hermes, Muse and Your dot each doing the trip's next step from the migrated data. | A real conversation (2026-11-09): ask, checks, preview, the routine choice, yes, imported and checked. |
 
 ## What this fork adds
 
@@ -86,7 +89,7 @@ Options, destinations, routines, checks and limits: [docs/migration.md](docs/mig
 
 ## Move to Hermes without a terminal
 
-The **Move to Hermes** bot runs `gbot migrate` on your computer and asks before each command. It moves bots to Hermes only. Add it from its public template: <https://x.ai/bot/y2AFnYLdbz5T66loRBHar>. To create your own copy or share it as a template: [docs/move-to-hermes.md](docs/move-to-hermes.md).
+The **Move to Hermes** bot runs `gbot migrate` on your computer and asks before each command. It moves bots to Hermes only. Add it from its public template: <https://x.ai/bot/y2AFnYLdbz5T66loRBHar>. To create your own copy or share it as a template: [docs/move-to-hermes.md](docs/move-to-hermes.md). Each step is a turn of that bot, so it uses some Grok Bot usage; with none left, use `gbot migrate` or an agent (below), which use none. Video of a real run: [demo/move-to-hermes-phone.mp4](demo/move-to-hermes-phone.mp4).
 
 ## For agents
 
