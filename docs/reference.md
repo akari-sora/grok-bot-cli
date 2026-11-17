@@ -121,7 +121,7 @@ Grok Bot 0.78.4 (2026-11-03) hosts every bot on the server. On 2026-11-05 its bo
 | `bots update`, `groups update` | `UpdateGrokBotAgent`; `--notify` and `--hidden` with `SetGrokBotAgentClientState` |
 | `bots delete`, `groups delete` | `DeleteGrokBotAgent` |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` or `ResolveGrokBotLocalToolPermission` (mapped from the app, not live-tested) |
-| `thread`, the `reconcile` tail, the relay, `approvals list`, the MCP thread tool | `ListGrokBotTranscriptEntries` |
+| `thread`, the `reconcile` tail, the relay, `approvals list`, the MCP thread tool | Box `getAgentTranscriptTail`, then `ListGrokBotTranscriptEntries` on an unroutable 404 (access token required) |
 | `migrate import`, `migrate run` with `--move-routines` | `SetGrokBotAgentAutomationEnabled` `{ agentId, automationId, isEnabled: false, timeZone }`, after the import verified; `isEnabled: true` only to roll back a routine the destination could not turn on |
 
 `thread --root` and `skills` use the box gateway; on a 0.78 host it answers 404, and `skills list` then reads the library through the backend. A session without an access token (`GROK_BOT_GATEWAY_URL` plus `GROK_BOT_GATEWAY_TOKEN`, or a descriptor login with no saved access token) keeps the gateway calls, and on 0.78.x its sends get the 502. The `bots template` RPCs, roster merge, name matching, delivery states and the live gateway observations: [FORK.md](../FORK.md#grok-bot-078x-server-hosted-bots).

@@ -141,7 +141,11 @@ function mockApi(t, { rpcs = {}, box = {}, store = {} } = {}) {
     ListGrokBotAgentStatuses: () => ({ statuses: [] }),
     ...rpcs,
   };
-  const boxRoutes = { listAgents: () => ({ agents: [] }), ...box };
+  const boxRoutes = {
+    listAgents: () => ({ agents: [] }),
+    getAgentTranscriptTail: () => new Response("The request could not be routed", { status: 404, headers: { "content-type": "text/plain" } }),
+    ...box,
+  };
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const target = String(url);
     const body = init?.body ? JSON.parse(init.body) : {};
@@ -886,6 +890,7 @@ for (const [label, caps] of [
       box: {
         listAgents: () => ({ agents: [{ id: "bot-1", name: "General", harness: "temporal" }, { id: "bot-2", name: "Scout" }] }),
         sendPrompt: () => ({ accepted: true }),
+        getAgentTranscriptTail: () => ({ entries: [] }),
         createGroup: (body) => ({ id: "grp-1", name: body.name, isGroup: true, memberIds: body.memberAgentIds }),
       },
     });
@@ -1494,7 +1499,85 @@ const tailUser = { kind: "message", id: "t3u", role: "user", content: "Plan a tr
 const tailReply = { kind: "send-message", id: "t3s0", message: { type: "text", content: "Here is the plan." }, timestampMs: 1794120043786, requestId: "req-1", seq: 12 };
 const tailEvent = { kind: "event", id: "event-1", event: { type: "automation", action: "created" }, timestampMs: 1794120051474, seq: 13 };
 
-test("a server bot's thread tail comes from ListGrokBotTranscriptEntries, oldest first, never the box", async (t) => {
+test("a working box tail wins even when the server roster is enabled", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    box: { getAgentTranscriptTail: () => ({ entries: [tailUser, tailReply] }) },
+  });
+  const out = await run((session) => getTranscriptTail(session, "General", 2));
+  assert.deepEqual(out.transcript.entries, [tailUser, tailReply]);
+  assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
+  assert.deepEqual(transcriptDelta(out.transcript, { after: tailReply.id }), {
+    cursor: tailReply.id, entries: [], entryCount: 0, gapReset: false,
+  });
+});
+
+for (const [label, response] of [
+  ["auth", () => json({ message: "Unauthorized" }, 401)],
+  ["ordinary 404", () => json({ message: "Not found" }, 404)],
+  ["server error", () => json({ message: "Down" }, 503)],
+]) {
+  test(`a box tail ${label} does not fall back to the backend`, async (t) => {
+    const { calls, run } = await backendSession(t, { box: { getAgentTranscriptTail: response } });
+    await assert.rejects(run((session) => getTranscriptTail(session, "General")));
+    assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 0);
+  });
+}
+
+test("an unroutable box tail without an access token keeps its original error", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    box: { listAgents: () => ({ agents: [{ id: "bot-1", name: "General" }] }) },
+  }, { GROK_BOT_GATEWAY_URL: BOX, GROK_BOT_GATEWAY_TOKEN: GATEWAY });
+  await assert.rejects(run((session) => getTranscriptTail(session, "General")), (error) => error.kind === "routing");
+  assert.equal(calls.filter((call) => call.rpc).length, 0);
+});
+
+test("box-only records also fall back on an unroutable tail; backend failures are not retried", async (t) => {
+  let broken = false;
+  const { calls, run } = await backendSession(t, {
+    box: { listAgents: () => ({ agents: [{ id: "box-only", name: "Local Box", harness: "box" }] }) },
+    rpcs: { ListGrokBotTranscriptEntries: () => broken ? connectError("unavailable", "Down", 503) : tailPage([tailUser, tailReply]) },
+  });
+  const out = await run((session) => getTranscriptTail(session, "box-only", 2));
+  assert.deepEqual(out.transcript.entries, [tailUser, tailReply]);
+  assert.deepEqual(transcriptDelta(out.transcript, { after: tailReply.id }).entries, []);
+  broken = true;
+  const start = calls.length;
+  await assert.rejects(run((session) => getTranscriptTail(session, "box-only")), (error) => error.method === "ListGrokBotTranscriptEntries");
+  assert.deepEqual(calls.slice(start).filter((call) => call.method === "getAgentTranscriptTail" || call.rpc === "ListGrokBotTranscriptEntries").map((call) => call.method || call.rpc), ["getAgentTranscriptTail", "ListGrokBotTranscriptEntries"]);
+});
+
+test("box send receipt lookup uses the shared backend tail fallback without resending", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { ListGrokBotTranscriptEntries: () => tailPage([tailUser, tailReply]) },
+    box: {
+      listAgents: () => ({ agents: [{ id: "box-only", name: "Local Box", harness: "box" }] }),
+      sendPrompt: () => ({ accepted: true }),
+    },
+  });
+  const out = await run((session) => sendPrompt(session, "box-only", "Synthetic test", { clientNonce: tailUser.clientNonce }));
+  assert.equal(out.messageId, tailUser.id);
+  assert.equal(out.delivery, "accepted");
+  assert.equal(boxCalls(calls, "sendPrompt").length, 1);
+  assert.equal(rpcCalls(calls, "ListGrokBotTranscriptEntries").length, 1);
+  assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0);
+});
+
+test("best-effort send receipts skip blob downloads and keep acceptance", async (t) => {
+  const { calls, run } = await backendSession(t, {
+    rpcs: { ListGrokBotTranscriptEntries: () => ({ entries: [{ entryId: "held", seq: "1", blobHash: "a".repeat(64) }] }) },
+    box: {
+      listAgents: () => ({ agents: [{ id: "box-only", name: "Local Box", harness: "box" }] }),
+      sendPrompt: () => ({ accepted: true }),
+    },
+  });
+  const out = await run((session) => sendPrompt(session, "box-only", "Synthetic test", { clientNonce: "nonce-held" }));
+  assert.equal(out.delivery, "accepted");
+  assert.equal(out.messageId, undefined);
+  assert.equal(rpcCalls(calls, "PresignSandBoxStoreReads").length, 0);
+  assert.equal(boxCalls(calls, "sendPrompt").length, 1);
+});
+
+test("an unroutable box tail falls back to ListGrokBotTranscriptEntries, oldest first", async (t) => {
   const older = { kind: "message", id: "t2u", role: "user", content: "Earlier.", clientNonce: "nonce-old", requestId: "req-0", seq: 10 };
   const { calls, run } = await backendSession(t, {
     rpcs: { ListGrokBotTranscriptEntries: () => tailPage([older, tailUser, tailReply, tailEvent]) },
@@ -1508,7 +1591,8 @@ test("a server bot's thread tail comes from ListGrokBotTranscriptEntries, oldest
   assert.deepEqual(listed.map((call) => call.body), [{ agentId: "bot-1", limit: 4 }]);
   assert.equal(listed[0].headers.authorization, "Bearer " + ACCESS);
   assert.equal(listed[0].headers["x-cursor-client-type"], "sand");
-  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 1);
+  assert.ok(calls.findIndex((call) => call.method === "getAgentTranscriptTail") < calls.findIndex((call) => call.rpc === "ListGrokBotTranscriptEntries"));
   // What gbot thread prints and what --after, the relay and the MCP tool page through.
   assert.match(formatTranscript(out), /\[user t3u\] Plan a trip\.\n\[send-message t3s0\] Here is the plan\.\n\[event event-1\] /);
   assert.deepEqual(transcriptDelta(out.transcript, { after: "t3u" }).entries.map((entry) => entry.id), ["t3s0", "event-1"]);
@@ -1570,7 +1654,7 @@ test("reconcile finds a send whose delivery was unknown in the backend tail by i
     target: "bot-1", clientNonce: "nonce-live", status: "delivered", entryId: "t3u", seq: 11, sendStatus: "NOT_FOUND",
   });
   assert.deepEqual(rpcCalls(calls, "ListGrokBotTranscriptEntries").map((call) => call.body), [{ agentId: "bot-1", limit: 201 }]);
-  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 0);
+  assert.equal(boxCalls(calls, "getAgentTranscriptTail").length, 1);
   assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 1, "reconcile never sends");
 });
 
@@ -1695,7 +1779,7 @@ test("getBotTemplate reads the template and its link, and sends nothing", async 
   assert.equal("exportPolicy" in none, false);
   assert.deepEqual(rpcCalls(calls, "GetGrokBotTemplateForSourceAgent").map((call) => call.body), [{ sourceAgentId: "bot-1" }, { sourceAgentId: "bot-1" }]);
   assert.equal(rpcCalls(calls, "SendGrokBotUserMessage").length, 0);
-  assert.equal(calls.filter((call) => call.method && call.method !== "listAgents").length, 0, "no box call but the roster");
+  assert.equal(calls.filter((call) => call.method && !["listAgents", "getAgentTranscriptTail"].includes(call.method)).length, 0, "only read-only roster and tail box calls");
 });
 
 test("bots template refuses a box-only bot, a group, and a session without the backend, before any template call", async (t) => {

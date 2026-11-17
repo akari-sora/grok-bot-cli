@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { grokBotGatewayDescriptorPath, loadGrokBotGatewaySelection } from "../src/core/app-session.js";
 import { outcomeFromError } from "../src/core/codex/contract.js";
-import { connectGateway, hasBackend, listSkills, resolveRef, sendPrompt } from "../src/core/gateway.js";
+import { connectGateway, getTranscriptTail, hasBackend, listSkills, resolveRef, sendPrompt } from "../src/core/gateway.js";
 import {
   importAccountConfig,
   readGbotConfig,
@@ -941,6 +941,57 @@ function savedLoginHome(sub, email) {
   }, process.platform);
 }
 
+test("an ordinary transcript read refreshes a stale saved-login gateway before backend fallback", async (t) => {
+  const home = savedLoginHome("user_synthetic_tail_refresh", "tail-refresh@example.com");
+  let ensured = 0;
+  let tails = 0;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    if (target.endsWith("/EnsureSandBox")) return runningSandbox(++ensured === 1 ? "stale-tail" : "fresh-tail", 1424);
+    if (target.endsWith("/GetGrokBotRuntimeCapabilities")) return json(CAPS_ON);
+    if (target.endsWith("/ListGrokBotAgents")) return json(SERVER_ROSTER);
+    if (target.endsWith("/api/listAgents")) return json({ agents: [] });
+    if (target.endsWith("/api/getAgentTranscriptTail")) {
+      tails += 1;
+      if (init.headers.authorization === "Bearer fresh-tail") return json({ entries: [{ id: "fresh-entry", role: "user", content: "Synthetic" }] });
+      return new Response("The request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
+    }
+    assert.fail("unexpected backend transcript call");
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const out = await getTranscriptTail(await connectGateway(), "bot-1");
+    assert.equal(out.transcript.entries[0].id, "fresh-entry");
+  });
+  assert.equal(ensured, 2);
+  assert.equal(tails, 2);
+});
+
+test("a saved-login receipt routing failure falls back once without rebuilding or waking the box", async (t) => {
+  const home = savedLoginHome("user_synthetic_tail_route", "tail-route@example.com");
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const target = String(url);
+    const body = JSON.parse(init.body);
+    calls.push({ target, body });
+    if (target.endsWith("/EnsureSandBox")) return runningSandbox("gateway-tail", 1424);
+    if (target.endsWith("/GetGrokBotRuntimeCapabilities")) return json(CAPS_ON);
+    if (target.endsWith("/ListGrokBotAgents")) return json(SERVER_ROSTER);
+    if (target.endsWith("/api/listAgents")) return json({ agents: [{ id: "box-only", name: "Local Box", harness: "box" }] });
+    if (target.endsWith("/api/sendPrompt")) return json({ accepted: true });
+    if (target.endsWith("/api/getAgentTranscriptTail")) return new Response("The request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
+    if (target.endsWith("/ListGrokBotTranscriptEntries")) return json({ entries: [] });
+    assert.fail("unexpected request");
+  });
+  await withEnv(gatewayEnv(home), async () => {
+    const session = await connectGateway();
+    assert.equal((await sendPrompt(session, "box-only", "Synthetic", { clientNonce: "nonce-receipt" })).delivery, "accepted");
+  });
+  assert.equal(calls.filter((call) => call.target.endsWith("/EnsureSandBox")).length, 1, "only the initial running-box description");
+  assert.equal(calls.some((call) => call.body.wake === true), false);
+  assert.equal(calls.filter((call) => call.target.endsWith("/api/getAgentTranscriptTail")).length, 1);
+  assert.equal(calls.filter((call) => call.target.endsWith("/ListGrokBotTranscriptEntries")).length, 1);
+});
+
 function runningSandbox(token, port) {
   return new Response(JSON.stringify({
     runState: "SAND_BOX_RUN_STATE_RUNNING",
@@ -1202,7 +1253,8 @@ test("a later relay send stays rejected while the backend keeps answering 401", 
     if (rpc === "GetGrokBotRuntimeCapabilities") return json(CAPS_ON);
     if (rpc === "ListGrokBotAgents") return json(SERVER_ROSTER);
     if (target.endsWith("/api/listAgents")) return json({ agents: [] });
-    // A server bot's tail comes from the backend (0.78.x), not the box gateway.
+    // The removed box tail is tried before the backend.
+    if (target.endsWith("/api/getAgentTranscriptTail")) return new Response("The request could not be routed", { status: 404, headers: { "content-type": "text/plain" } });
     if (rpc === "ListGrokBotTranscriptEntries") return json({ entries: [] });
     prompts.push(body);
     return new Response("unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
@@ -1242,10 +1294,10 @@ test("a later relay send stays rejected while the backend keeps answering 401", 
     assert.notEqual(second.reason, "delivery-unknown");
     assert.equal(JSON.stringify([first, second]).includes("synthetic-r2-token-do-not-leak"), false);
   });
-  // Both sends reached the backend once each and were refused; the box session was never rebuilt.
+  // Tail fallback survives a failed box refresh; both later sends still reach the backend.
   assert.equal(prompts.length, 2);
   assert.deepEqual(prompts.map((body) => typeof body.messageId), ["string", "string"]);
-  assert.equal(ensured.length, 1);
+  assert.equal(ensured.length, 2, "initial description plus the failed tail refresh; sends reuse the backend login");
 });
 
 test("a v1 descriptor that contradicts the only saved login is not merged", {

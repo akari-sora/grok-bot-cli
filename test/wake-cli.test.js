@@ -543,7 +543,13 @@ test("gbot reconcile reports a pending or rejected backend send status instead o
       res.end(JSON.stringify({ agents: [] }));
       return;
     }
-    // A server bot's tail comes from the backend (0.78.x), not the box gateway.
+    // The removed box tail is tried before the backend.
+    if (url === "/api/getAgentTranscriptTail") {
+      res.statusCode = 404;
+      res.setHeader("content-type", "text/plain");
+      res.end("The request could not be routed");
+      return;
+    }
     if (url.endsWith("/ListGrokBotTranscriptEntries")) {
       res.end(JSON.stringify({ entries: [] }));
       return;
