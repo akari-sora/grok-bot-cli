@@ -34824,10 +34824,22 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             return applyMembers(session, records, group, next);
         }
         function sendReceiptFrom(data) {
-            if (!data || typeof data !== "object") return {
+            if (!data || typeof data !== "object" || Array.isArray(data)) return {
                 accepted: false
             };
-            const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : undefined;
+            for (const key of [
+                "accepted",
+                "ok",
+                "success"
+            ]){
+                if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== true) return {
+                    accepted: false
+                };
+            }
+            if (Object.prototype.hasOwnProperty.call(data, "error")) return {
+                accepted: false
+            };
+            const messageId = typeof data.messageId === "string" && data.messageId.trim() ? data.messageId : undefined;
             if (data.accepted === true || messageId) return {
                 accepted: true,
                 ...messageId ? {
@@ -43175,16 +43187,36 @@ else:
         function evidenceText(value) {
             if (typeof value === "string") return value;
             if (Array.isArray(value)) {
+                for (const part of value){
+                    if (part != null && typeof part !== "string" && typeof part !== "object") {
+                        throw new Error("Malformed transcript text evidence.");
+                    }
+                }
                 return value.map((part)=>evidenceText(part)).filter(Boolean).join("\n");
             }
             if (!value || typeof value !== "object") return "";
-            const candidates = [
+            const carriers = [
                 "text",
                 "prompt",
                 "message",
                 "preview",
                 "content"
-            ].filter((key)=>Object.prototype.hasOwnProperty.call(value, key)).map((key)=>evidenceText(value[key])).filter(Boolean);
+            ];
+            const present = carriers.filter((key)=>Object.prototype.hasOwnProperty.call(value, key));
+            for (const key of present){
+                const child = value[key];
+                if (child != null && typeof child !== "string" && typeof child !== "object") {
+                    throw new Error("Malformed transcript text evidence.");
+                }
+                if (child && typeof child === "object" && !Array.isArray(child) && [
+                    "text",
+                    "prompt",
+                    "preview"
+                ].includes(key) && !carriers.some((carrier)=>Object.prototype.hasOwnProperty.call(child, carrier))) {
+                    throw new Error("Malformed transcript text evidence.");
+                }
+            }
+            const candidates = present.map((key)=>evidenceText(value[key])).filter(Boolean);
             if (new Set(candidates).size > 1) {
                 throw new Error("Conflicting transcript text evidence.");
             }
@@ -43192,18 +43224,31 @@ else:
         }
         function explicitRole(entry) {
             const nested = entry.message && typeof entry.message === "object" && !Array.isArray(entry.message) ? entry.message : null;
-            const candidates = [
-                nested?.type,
+            const strict = [
                 nested?.role,
                 entry.role,
+                entry.sender
+            ];
+            if ([
+                "system",
+                "tool",
+                "developer"
+            ].includes(nested?.type)) strict.push(nested.type);
+            const loose = [
+                nested?.type,
                 entry.kind,
                 entry.type
             ];
             const roles = new Set();
-            for (const candidate of candidates){
+            let unsupported = false;
+            for (const candidate of strict){
+                if (candidate === "user" || candidate === "assistant") roles.add(candidate);
+                else if (candidate != null && candidate !== "") unsupported = true;
+            }
+            for (const candidate of loose){
                 if (candidate === "user" || candidate === "assistant") roles.add(candidate);
             }
-            return roles.size === 1 ? roles.values().next().value : "unknown";
+            return !unsupported && roles.size === 1 ? roles.values().next().value : "unknown";
         }
         function isNonblankString(value) {
             return typeof value === "string" && value.trim().length > 0;
