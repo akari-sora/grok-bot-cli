@@ -4,7 +4,9 @@
 
 Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream entries follow after this section.
 
-### Unreleased
+### 0.11.2-iml1s.17
+
+- Add `gbot mailbox send/read` for addressed, plain-data messages between agent harnesses. Reads support cursors, bounded waits and explicit opt-in for replies whose author the provider did not identify. See `FORK.md` for usage.
 
 - Contradictory gateway receipts stay unconfirmed, and normalized transcript evidence rejects malformed text and conflicting role carriers.
 
