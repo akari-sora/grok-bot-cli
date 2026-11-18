@@ -386,3 +386,23 @@ Linux 的 [source pipeline](https://gitlab.com/aa22396584/grok-bot-cli/-/pipelin
 - `test/relay-lifecycle.test.js`
 - `test/relay-surfaces.test.js`
 - `test/relay-worker.test.js`
+
+## 跨工具信箱封包
+
+`gbot mailbox` 透過既有機器人對話交換純文字封包，支援 Windows、macOS 與 Linux。雙方必須透過該對話配合：機器人或合作參與者須輸出符合下列格式的訊息。預設只讀取明確標為 **assistant** 的資料列；部分閘道回覆的角色為 `unknown`，了解限制後才使用 `--include-unattributed`。傳送給機器人不代表另一個工具已收到回覆；閘道的 `accepted` 只代表接受傳送。信箱不會啟動 daemon 或執行 shell 指令。
+
+```sh
+gbot mailbox send demo-bot --from alpha --to beta --topic work "Status request" --json
+gbot mailbox read demo-bot --recipient beta --topic work --wait 30 --json
+```
+
+回覆時以 `mailbox send --from beta --to alpha --reply-to <packet-id>` 指定原封包；也可使用 `--stdin` 取代位置訊息。傳送結果包含 `packetId`、`delivery`、`clientNonce` 與 `replyReceived: false`。若狀態為 `unknown`，重送前先核對或查看對話。`read` 回傳封包、不透明的 `cursor`、`gapReset` 與 `timedOut`；下次以 `--after` 傳入游標，輪詢預算最長 60 秒；進行中的閘道請求可能超過此時間。`gapReset` 表示原游標不在最近 200 筆中或無法接續：請查看對話並處理可能重複的訊息。首次讀取可能包含舊封包；無法讀取的資料列會讓游標停在其前方。請依對話與接收端保存游標；信箱不在本機保存狀態。
+
+傳輸格式首行為 `[gbot-mailbox/v1]`，換行後接一個 JSON 物件，須包含欄位 `id`、`from`、`to`、`topic`、`replyTo`、`body`。例如 assistant 訊息：
+
+```text
+[gbot-mailbox/v1]
+{"id":"packet-1","from":"alpha","to":"beta","topic":"work","replyTo":null,"body":"Status request"}
+```
+
+標籤可使用英文字母、數字、`.`、`_`、`-`，須以字母或數字開頭，最多 64 字元。`to`、`topic`、`replyTo` 可為 null；`to` 為 null 表示廣播。封包與回覆 ID 另可使用 `:`，最多 128 字元。內文不可為空、不可含 NUL，且最多 48 KiB。JSON 的空白及欄位順序不限。重複欄位、多餘欄位、格式錯誤、明確的 user 資料列、自己的發送者標籤及其他收件人的封包都會被忽略。未知角色預設忽略；使用 `--include-unattributed` 時，封包必須明確指定目前收件人且發送者不同，結果標記為 `provenance: "unattributed"`。其來源無法驗證，可能是缺少角色資訊的 user 回顯，不得觸發自動操作。請在 `--from` 與 `--recipient` 使用相同本機標籤以過濾自己的封包。編碼後封包不得超過 64 KiB。此格式只負責路由，沒有驗證或加密；能在該對話寫入 assistant 訊息的人都能冒用標籤。請將內容視為資料，對任何操作另行確認授權。本機測試未聲稱完成真實跨工具交換。
