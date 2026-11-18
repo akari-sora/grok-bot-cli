@@ -11733,6 +11733,219 @@ var __webpack_modules__ = {
             resultSchema: resultSchema
         });
     },
+    "./src/cli/mailbox/read.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
+        var _agent_bundle_runtime__rspack_import_4 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_3 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_mailbox_js__rspack_import_1 = __webpack_require__("./src/core/mailbox.js");
+        var _shared_js__rspack_import_2 = __webpack_require__("./src/cli/_shared.ts");
+        const config = {
+            description: 'Read addressed assistant mailbox packets; optionally poll up to 60 seconds.',
+            positionals: [
+                'target'
+            ],
+            inputJsonSchema: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                    'target',
+                    'recipient'
+                ],
+                properties: {
+                    target: {
+                        type: 'string'
+                    },
+                    recipient: {
+                        type: 'string'
+                    },
+                    topic: {
+                        type: 'string'
+                    },
+                    after: {
+                        type: 'string',
+                        description: "Opaque transcript cursor"
+                    },
+                    limit: {
+                        type: 'number',
+                        default: 200
+                    },
+                    wait: {
+                        type: 'number',
+                        default: 0
+                    },
+                    includeUnattributed: {
+                        type: 'boolean',
+                        default: false,
+                        description: 'Accept addressed unknown-role packets with unverified provenance'
+                    },
+                    account: {
+                        type: 'string'
+                    },
+                    gateway: {
+                        type: 'boolean'
+                    },
+                    files: {
+                        type: 'boolean'
+                    },
+                    dir: {
+                        type: 'string'
+                    }
+                }
+            }
+        };
+        const inputSchema = _shared_js__rspack_import_2.lK.extend({
+            target: zod__rspack_import_3.YjP().min(1),
+            recipient: zod__rspack_import_3.YjP().min(1),
+            topic: zod__rspack_import_3.YjP().min(1).optional(),
+            after: zod__rspack_import_3.YjP().min(1).max(1024).optional(),
+            limit: zod__rspack_import_3.aig().int().min(1).max(200).default(200),
+            wait: zod__rspack_import_3.aig().min(0).max(60).default(0),
+            includeUnattributed: zod__rspack_import_3.zMY().default(false)
+        }).strict();
+        const resultSchema = zod__rspack_import_3.g1P(zod__rspack_import_3.YjP(), zod__rspack_import_3.Pq9());
+        async function read({ input }) {
+            const backend = await (0, _shared_js__rspack_import_2.FS)(input);
+            const value = await (0, _core_mailbox_js__rspack_import_1.a1)(backend, input.target, {
+                recipient: input.recipient,
+                topic: input.topic ?? null,
+                after: input.after,
+                limit: input.limit,
+                waitSeconds: input.wait,
+                includeUnattributed: input.includeUnattributed
+            });
+            return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Result, {
+                value: value,
+                children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_4.g.Text, {
+                    children: JSON.stringify(value)
+                })
+            });
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>read
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
+    "./src/cli/mailbox/send.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
+        __webpack_require__.r(__webpack_exports__);
+        var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
+        var _agent_bundle_runtime__rspack_import_6 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/506.js");
+        var zod__rspack_import_5 = __webpack_require__("./node_modules/zod/v4/classic/schemas.js");
+        var _core_mailbox_js__rspack_import_1 = __webpack_require__("./src/core/mailbox.js");
+        var _core_stdin_message_js__rspack_import_2 = __webpack_require__("./src/core/stdin-message.js");
+        var _core_codex_contract_js__rspack_import_3 = __webpack_require__("./src/core/codex/contract.js");
+        var _shared_js__rspack_import_4 = __webpack_require__("./src/cli/_shared.ts");
+        const config = {
+            description: 'Send a plain mailbox packet to a bot conversation.',
+            exitCode: 'result',
+            positionals: [
+                'target',
+                'message'
+            ],
+            inputJsonSchema: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                    'target',
+                    'from'
+                ],
+                properties: {
+                    target: {
+                        type: 'string'
+                    },
+                    from: {
+                        type: 'string',
+                        description: 'Sender label'
+                    },
+                    to: {
+                        type: 'string',
+                        description: 'Optional recipient label'
+                    },
+                    topic: {
+                        type: 'string'
+                    },
+                    replyTo: {
+                        type: 'string',
+                        description: 'Packet id being answered'
+                    },
+                    message: {
+                        type: 'array',
+                        items: {
+                            type: 'string'
+                        }
+                    },
+                    stdin: {
+                        type: 'boolean',
+                        default: false
+                    },
+                    account: {
+                        type: 'string'
+                    },
+                    gateway: {
+                        type: 'boolean'
+                    },
+                    files: {
+                        type: 'boolean'
+                    },
+                    dir: {
+                        type: 'string'
+                    }
+                }
+            }
+        };
+        const inputSchema = _shared_js__rspack_import_4.lK.extend({
+            target: zod__rspack_import_5.YjP().min(1),
+            from: zod__rspack_import_5.YjP().min(1),
+            to: zod__rspack_import_5.YjP().min(1).optional(),
+            topic: zod__rspack_import_5.YjP().min(1).optional(),
+            replyTo: zod__rspack_import_5.YjP().min(1).optional(),
+            message: zod__rspack_import_5.YOg(zod__rspack_import_5.YjP()).optional(),
+            stdin: zod__rspack_import_5.zMY().default(false)
+        }).strict().refine((v)=>v.stdin !== Boolean(v.message?.length), 'Use one message or --stdin.');
+        const resultSchema = zod__rspack_import_5.g1P(zod__rspack_import_5.YjP(), zod__rspack_import_5.Pq9());
+        async function send({ input }) {
+            try {
+                const body = input.stdin ? await (0, _core_stdin_message_js__rspack_import_2.iC)() : (input.message ?? []).join(' ');
+                const packet = (0, _core_mailbox_js__rspack_import_1.NN)({
+                    from: input.from,
+                    to: input.to ?? null,
+                    topic: input.topic ?? null,
+                    replyTo: input.replyTo ?? null,
+                    body
+                });
+                const backend = await (0, _shared_js__rspack_import_4.FS)(input);
+                const result = await (0, _core_mailbox_js__rspack_import_1.Ns)(backend, input.target, packet);
+                const value = {
+                    ...result,
+                    exitCode: 0
+                };
+                return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
+                    value: value,
+                    children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
+                        children: JSON.stringify(value)
+                    })
+                });
+            } catch (error) {
+                const value = (0, _core_codex_contract_js__rspack_import_3.DG)(error);
+                return (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Result, {
+                    value: value,
+                    children: (0, react_jsx_runtime__rspack_import_0.jsx)(_agent_bundle_runtime__rspack_import_6.g.Text, {
+                        children: value.error
+                    })
+                });
+            }
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            "default": ()=>send
+        }, {
+            config: config,
+            inputSchema: inputSchema,
+            resultSchema: resultSchema
+        });
+    },
     "./src/cli/migrate/bots.tsx" (__unused_rspack_module, __webpack_exports__, __webpack_require__) {
         __webpack_require__.r(__webpack_exports__);
         var react_jsx_runtime__rspack_import_0 = __webpack_require__("./node_modules/react/jsx-runtime.react-server.js");
@@ -36350,6 +36563,175 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             u3: ()=>formatLoginCatalog
         });
     },
+    "./src/core/mailbox.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
+        var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
+        var _transcript_js__rspack_import_1 = __webpack_require__("./src/core/transcript.js");
+        const MAILBOX_HEADER = '[gbot-mailbox/v1]\n';
+        const LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+        const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+        const PACKET_KEYS = [
+            'id',
+            'from',
+            'to',
+            'topic',
+            'replyTo',
+            'body'
+        ];
+        const MAX_BODY = 48 * 1024;
+        function label(value, name, optional = false) {
+            if (optional && value === null) return;
+            if (typeof value !== 'string' || !LABEL.test(value)) throw new Error(`Invalid mailbox ${name}.`);
+        }
+        function makePacket({ from, to = null, topic = null, replyTo = null, body, id = (0, node_crypto__rspack_import_0.randomUUID)() }) {
+            label(from, 'sender');
+            label(to, 'recipient', true);
+            label(topic, 'topic', true);
+            if (typeof id !== 'string' || !ID.test(id)) throw new Error('Invalid mailbox id.');
+            if (replyTo !== null && (typeof replyTo !== 'string' || !ID.test(replyTo))) throw new Error('Invalid mailbox reply id.');
+            if (typeof body !== 'string' || body.length === 0 || body.includes('\0') || Buffer.byteLength(body, 'utf8') > MAX_BODY) throw new Error('Invalid mailbox body.');
+            return {
+                id,
+                from,
+                to,
+                topic,
+                replyTo,
+                body
+            };
+        }
+        function encodePacket(packet) {
+            const value = makePacket(packet);
+            const text = MAILBOX_HEADER + JSON.stringify(value);
+            if (Buffer.byteLength(text, 'utf8') > 64 * 1024) throw new Error('Encoded mailbox packet exceeds 64 KiB.');
+            return text;
+        }
+        function parseFields(json) {
+            let at = 0;
+            const string = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
+            const whitespace = ()=>{
+                while(/[\x20\t\r\n]/.test(json[at] ?? '') && at < json.length)at++;
+            };
+            const token = (expected)=>{
+                whitespace();
+                if (json[at++] !== expected) throw new Error('Invalid packet');
+            };
+            const readString = ()=>{
+                whitespace();
+                string.lastIndex = at;
+                const match = string.exec(json);
+                if (!match) throw new Error('Invalid string');
+                at = string.lastIndex;
+                return JSON.parse(match[0]);
+            };
+            const result = Object.create(null);
+            token('{');
+            for(;;){
+                whitespace();
+                if (json[at] === '}') {
+                    at++;
+                    break;
+                }
+                const key = readString();
+                if (Object.hasOwn(result, key) || !PACKET_KEYS.includes(key)) throw new Error('Invalid field');
+                token(':');
+                whitespace();
+                if (json.startsWith('null', at)) {
+                    result[key] = null;
+                    at += 4;
+                } else result[key] = readString();
+                whitespace();
+                if (json[at] === '}') {
+                    at++;
+                    break;
+                }
+                token(',');
+                whitespace();
+                if (json[at] === '}') throw new Error('Trailing comma');
+            }
+            whitespace();
+            if (at !== json.length || Object.keys(result).length !== PACKET_KEYS.length) throw new Error('Invalid packet');
+            return result;
+        }
+        function decodePacket(text) {
+            if (typeof text !== 'string' || !text.startsWith(MAILBOX_HEADER) || Buffer.byteLength(text, 'utf8') > 64 * 1024) return null;
+            try {
+                return makePacket(parseFields(text.slice(MAILBOX_HEADER.length)));
+            } catch  {
+                return null;
+            }
+        }
+        async function sendMailbox(backend, target, packet) {
+            const out = await backend.send(target, encodePacket(packet));
+            return {
+                delivery: out.delivery === 'accepted' ? 'accepted' : 'unknown',
+                clientNonce: out.clientNonce ?? null,
+                messageId: out.messageId ?? null,
+                packetId: packet.id,
+                replyReceived: false
+            };
+        }
+        async function readMailbox(backend, target, { recipient, topic = null, after, limit = 200, waitSeconds = 0, includeUnattributed = false, pollMs = 1000, now = ()=>Date.now(), sleep = (ms)=>new Promise((resolve)=>setTimeout(resolve, ms)) }) {
+            label(recipient, 'recipient');
+            label(topic, 'topic', true);
+            if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isFinite(waitSeconds) || waitSeconds < 0 || waitSeconds > 60) throw new Error('Invalid mailbox read bounds.');
+            if (after !== undefined && (typeof after !== 'string' || !after || after.length > 1024)) throw new Error('Invalid mailbox cursor.');
+            const resolved = await backend.resolve(target);
+            if (!resolved || typeof resolved.id !== 'string' || !resolved.id) throw new Error('Invalid resolved target.');
+            const deadline = now() + waitSeconds * 1000;
+            let cursor = after;
+            for(;;){
+                const out = await backend.transcript(target, limit);
+                if (!out?.target || out.target.id !== resolved.id) throw new Error("Mailbox transcript target mismatch.");
+                if (!out.transcript || !Array.isArray(out.transcript.entries)) throw new Error("Invalid mailbox transcript.");
+                const delta = (0, _transcript_js__rspack_import_1.N3)(out.transcript, {
+                    after: cursor,
+                    limit
+                });
+                const normalized = (0, _transcript_js__rspack_import_1.eT)({
+                    target: out.target,
+                    transcript: {
+                        entries: delta.entries
+                    }
+                });
+                const messages = normalized.messages.flatMap((entry, index)=>{
+                    if (!entry.id) return [];
+                    const raw = delta.entries[index];
+                    const nested = raw?.message && typeof raw.message === 'object' ? raw.message : null;
+                    const hasUserRole = [
+                        raw?.role,
+                        raw?.kind,
+                        raw?.type,
+                        nested?.role,
+                        nested?.type
+                    ].includes('user');
+                    const unattributed = entry.role === 'unknown' && includeUnattributed && !hasUserRole;
+                    if (entry.role !== 'assistant' && !unattributed) return [];
+                    const packet = decodePacket(entry.text);
+                    if (!packet || packet.from === recipient || (unattributed ? packet.to !== recipient : packet.to !== null && packet.to !== recipient) || topic !== null && packet.topic !== topic) return [];
+                    return [
+                        {
+                            entryId: entry.id,
+                            provenance: unattributed ? 'unattributed' : 'assistant',
+                            ...packet
+                        }
+                    ];
+                });
+                cursor = delta.cursor || cursor;
+                if (messages.length || delta.gapReset || now() >= deadline) return {
+                    messages,
+                    cursor: cursor ?? null,
+                    gapReset: delta.gapReset,
+                    timedOut: !messages.length && !delta.gapReset && waitSeconds > 0,
+                    targetId: resolved.id
+                };
+                await sleep(Math.min(pollMs, Math.max(0, deadline - now())));
+            }
+        }
+        __webpack_require__.d(__webpack_exports__, {
+            NN: ()=>makePacket,
+            Ns: ()=>sendMailbox,
+            a1: ()=>readMailbox
+        });
+    },
     "./src/core/migration-archive.js" (__unused_rspack___webpack_module__, __webpack_exports__, __webpack_require__) {
         var node_crypto__rspack_import_0 = __webpack_require__("node:crypto");
         var node_fs__rspack_import_1 = __webpack_require__("node:fs");
@@ -43757,9 +44139,9 @@ function __webpack_require__(moduleId) {
 var __webpack_exports__ = {};
 var node_worker_threads__rspack_import_0 = __webpack_require__("node:worker_threads");
 var react__rspack_import_1 = __webpack_require__("./node_modules/react/react.react-server.js");
-var _agent_bundle_runtime_flight_server__rspack_import_63 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
-var _agent_bundle_runtime__rspack_import_61 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
-var _agent_bundle_runtime__rspack_import_62 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
+var _agent_bundle_runtime_flight_server__rspack_import_65 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/flight/server.js");
+var _agent_bundle_runtime__rspack_import_63 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/49.js");
+var _agent_bundle_runtime__rspack_import_64 = __webpack_require__("./node_modules/@agent-bundle/runtime/dist/736.js");
 var node_url__rspack_import_2 = __webpack_require__("node:url");
 var _src_cli_accounts_tsx__rspack_import_3 = __webpack_require__("./src/cli/accounts.tsx");
 var _src_cli_approvals_list_tsx__rspack_import_4 = __webpack_require__("./src/cli/approvals/list.tsx");
@@ -43804,21 +44186,23 @@ var _src_cli_groups_remove_tsx__rspack_import_42 = __webpack_require__("./src/cl
 var _src_cli_groups_set_tsx__rspack_import_43 = __webpack_require__("./src/cli/groups/set.tsx");
 var _src_cli_groups_update_tsx__rspack_import_44 = __webpack_require__("./src/cli/groups/update.tsx");
 var _src_cli_history_tsx__rspack_import_45 = __webpack_require__("./src/cli/history.tsx");
-var _src_cli_migrate_bots_tsx__rspack_import_46 = __webpack_require__("./src/cli/migrate/bots.tsx");
-var _src_cli_migrate_capture_tsx__rspack_import_47 = __webpack_require__("./src/cli/migrate/capture.tsx");
-var _src_cli_migrate_check_tsx__rspack_import_48 = __webpack_require__("./src/cli/migrate/check.tsx");
-var _src_cli_migrate_import_tsx__rspack_import_49 = __webpack_require__("./src/cli/migrate/import.tsx");
-var _src_cli_migrate_preview_tsx__rspack_import_50 = __webpack_require__("./src/cli/migrate/preview.tsx");
-var _src_cli_migrate_run_tsx__rspack_import_51 = __webpack_require__("./src/cli/migrate/run.tsx");
-var _src_cli_reconcile_tsx__rspack_import_52 = __webpack_require__("./src/cli/reconcile.tsx");
-var _src_cli_send_tsx__rspack_import_53 = __webpack_require__("./src/cli/send.tsx");
-var _src_cli_skills_add_tsx__rspack_import_54 = __webpack_require__("./src/cli/skills/add.tsx");
-var _src_cli_skills_list_tsx__rspack_import_55 = __webpack_require__("./src/cli/skills/list.tsx");
-var _src_cli_skills_remove_tsx__rspack_import_56 = __webpack_require__("./src/cli/skills/remove.tsx");
-var _src_cli_thread_tsx__rspack_import_57 = __webpack_require__("./src/cli/thread.tsx");
-var _src_cli_usage_tsx__rspack_import_58 = __webpack_require__("./src/cli/usage.tsx");
-var _src_cli_wake_tsx__rspack_import_59 = __webpack_require__("./src/cli/wake.tsx");
-var _src_cli_wear_pair_tsx__rspack_import_60 = __webpack_require__("./src/cli/wear/pair.tsx");
+var _src_cli_mailbox_read_tsx__rspack_import_46 = __webpack_require__("./src/cli/mailbox/read.tsx");
+var _src_cli_mailbox_send_tsx__rspack_import_47 = __webpack_require__("./src/cli/mailbox/send.tsx");
+var _src_cli_migrate_bots_tsx__rspack_import_48 = __webpack_require__("./src/cli/migrate/bots.tsx");
+var _src_cli_migrate_capture_tsx__rspack_import_49 = __webpack_require__("./src/cli/migrate/capture.tsx");
+var _src_cli_migrate_check_tsx__rspack_import_50 = __webpack_require__("./src/cli/migrate/check.tsx");
+var _src_cli_migrate_import_tsx__rspack_import_51 = __webpack_require__("./src/cli/migrate/import.tsx");
+var _src_cli_migrate_preview_tsx__rspack_import_52 = __webpack_require__("./src/cli/migrate/preview.tsx");
+var _src_cli_migrate_run_tsx__rspack_import_53 = __webpack_require__("./src/cli/migrate/run.tsx");
+var _src_cli_reconcile_tsx__rspack_import_54 = __webpack_require__("./src/cli/reconcile.tsx");
+var _src_cli_send_tsx__rspack_import_55 = __webpack_require__("./src/cli/send.tsx");
+var _src_cli_skills_add_tsx__rspack_import_56 = __webpack_require__("./src/cli/skills/add.tsx");
+var _src_cli_skills_list_tsx__rspack_import_57 = __webpack_require__("./src/cli/skills/list.tsx");
+var _src_cli_skills_remove_tsx__rspack_import_58 = __webpack_require__("./src/cli/skills/remove.tsx");
+var _src_cli_thread_tsx__rspack_import_59 = __webpack_require__("./src/cli/thread.tsx");
+var _src_cli_usage_tsx__rspack_import_60 = __webpack_require__("./src/cli/usage.tsx");
+var _src_cli_wake_tsx__rspack_import_61 = __webpack_require__("./src/cli/wake.tsx");
+var _src_cli_wear_pair_tsx__rspack_import_62 = __webpack_require__("./src/cli/wear/pair.tsx");
 const route0 = Object.assign({}, Reflect.get(_src_cli_accounts_tsx__rspack_import_3, 'default'), _src_cli_accounts_tsx__rspack_import_3);
 const route1 = Object.assign({}, Reflect.get(_src_cli_approvals_list_tsx__rspack_import_4, 'default'), _src_cli_approvals_list_tsx__rspack_import_4);
 const route2 = Object.assign({}, Reflect.get(_src_cli_approvals_respond_tsx__rspack_import_5, 'default'), _src_cli_approvals_respond_tsx__rspack_import_5);
@@ -43862,22 +44246,24 @@ const route39 = Object.assign({}, Reflect.get(_src_cli_groups_remove_tsx__rspack
 const route40 = Object.assign({}, Reflect.get(_src_cli_groups_set_tsx__rspack_import_43, 'default'), _src_cli_groups_set_tsx__rspack_import_43);
 const route41 = Object.assign({}, Reflect.get(_src_cli_groups_update_tsx__rspack_import_44, 'default'), _src_cli_groups_update_tsx__rspack_import_44);
 const route42 = Object.assign({}, Reflect.get(_src_cli_history_tsx__rspack_import_45, 'default'), _src_cli_history_tsx__rspack_import_45);
-const route43 = Object.assign({}, Reflect.get(_src_cli_migrate_bots_tsx__rspack_import_46, 'default'), _src_cli_migrate_bots_tsx__rspack_import_46);
-const route44 = Object.assign({}, Reflect.get(_src_cli_migrate_capture_tsx__rspack_import_47, 'default'), _src_cli_migrate_capture_tsx__rspack_import_47);
-const route45 = Object.assign({}, Reflect.get(_src_cli_migrate_check_tsx__rspack_import_48, 'default'), _src_cli_migrate_check_tsx__rspack_import_48);
-const route46 = Object.assign({}, Reflect.get(_src_cli_migrate_import_tsx__rspack_import_49, 'default'), _src_cli_migrate_import_tsx__rspack_import_49);
-const route47 = Object.assign({}, Reflect.get(_src_cli_migrate_preview_tsx__rspack_import_50, 'default'), _src_cli_migrate_preview_tsx__rspack_import_50);
-const route48 = Object.assign({}, Reflect.get(_src_cli_migrate_run_tsx__rspack_import_51, 'default'), _src_cli_migrate_run_tsx__rspack_import_51);
-const route49 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_52, 'default'), _src_cli_reconcile_tsx__rspack_import_52);
-const route50 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_53, 'default'), _src_cli_send_tsx__rspack_import_53);
-const route51 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_54, 'default'), _src_cli_skills_add_tsx__rspack_import_54);
-const route52 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_55, 'default'), _src_cli_skills_list_tsx__rspack_import_55);
-const route53 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_56, 'default'), _src_cli_skills_remove_tsx__rspack_import_56);
-const route54 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_57, 'default'), _src_cli_thread_tsx__rspack_import_57);
-const route55 = Object.assign({}, Reflect.get(_src_cli_usage_tsx__rspack_import_58, 'default'), _src_cli_usage_tsx__rspack_import_58);
-const route56 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_59, 'default'), _src_cli_wake_tsx__rspack_import_59);
-const route57 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_60, 'default'), _src_cli_wear_pair_tsx__rspack_import_60);
-const pluginRoot = (0, _agent_bundle_runtime__rspack_import_61.E7)({
+const route43 = Object.assign({}, Reflect.get(_src_cli_mailbox_read_tsx__rspack_import_46, 'default'), _src_cli_mailbox_read_tsx__rspack_import_46);
+const route44 = Object.assign({}, Reflect.get(_src_cli_mailbox_send_tsx__rspack_import_47, 'default'), _src_cli_mailbox_send_tsx__rspack_import_47);
+const route45 = Object.assign({}, Reflect.get(_src_cli_migrate_bots_tsx__rspack_import_48, 'default'), _src_cli_migrate_bots_tsx__rspack_import_48);
+const route46 = Object.assign({}, Reflect.get(_src_cli_migrate_capture_tsx__rspack_import_49, 'default'), _src_cli_migrate_capture_tsx__rspack_import_49);
+const route47 = Object.assign({}, Reflect.get(_src_cli_migrate_check_tsx__rspack_import_50, 'default'), _src_cli_migrate_check_tsx__rspack_import_50);
+const route48 = Object.assign({}, Reflect.get(_src_cli_migrate_import_tsx__rspack_import_51, 'default'), _src_cli_migrate_import_tsx__rspack_import_51);
+const route49 = Object.assign({}, Reflect.get(_src_cli_migrate_preview_tsx__rspack_import_52, 'default'), _src_cli_migrate_preview_tsx__rspack_import_52);
+const route50 = Object.assign({}, Reflect.get(_src_cli_migrate_run_tsx__rspack_import_53, 'default'), _src_cli_migrate_run_tsx__rspack_import_53);
+const route51 = Object.assign({}, Reflect.get(_src_cli_reconcile_tsx__rspack_import_54, 'default'), _src_cli_reconcile_tsx__rspack_import_54);
+const route52 = Object.assign({}, Reflect.get(_src_cli_send_tsx__rspack_import_55, 'default'), _src_cli_send_tsx__rspack_import_55);
+const route53 = Object.assign({}, Reflect.get(_src_cli_skills_add_tsx__rspack_import_56, 'default'), _src_cli_skills_add_tsx__rspack_import_56);
+const route54 = Object.assign({}, Reflect.get(_src_cli_skills_list_tsx__rspack_import_57, 'default'), _src_cli_skills_list_tsx__rspack_import_57);
+const route55 = Object.assign({}, Reflect.get(_src_cli_skills_remove_tsx__rspack_import_58, 'default'), _src_cli_skills_remove_tsx__rspack_import_58);
+const route56 = Object.assign({}, Reflect.get(_src_cli_thread_tsx__rspack_import_59, 'default'), _src_cli_thread_tsx__rspack_import_59);
+const route57 = Object.assign({}, Reflect.get(_src_cli_usage_tsx__rspack_import_60, 'default'), _src_cli_usage_tsx__rspack_import_60);
+const route58 = Object.assign({}, Reflect.get(_src_cli_wake_tsx__rspack_import_61, 'default'), _src_cli_wake_tsx__rspack_import_61);
+const route59 = Object.assign({}, Reflect.get(_src_cli_wear_pair_tsx__rspack_import_62, 'default'), _src_cli_wear_pair_tsx__rspack_import_62);
+const pluginRoot = (0, _agent_bundle_runtime__rspack_import_63.E7)({
     fallback: (0, node_url__rspack_import_2.fileURLToPath)(new URL('..', import.meta.url)),
     stateAnchor: 'user-data'
 });
@@ -44151,95 +44537,107 @@ const routes = Object.freeze({
         name: "history",
         module: route42
     }),
+    "cli:mailbox/read": Object.freeze({
+        id: "cli:mailbox/read",
+        kind: "cli",
+        name: "mailbox read",
+        module: route43
+    }),
+    "cli:mailbox/send": Object.freeze({
+        id: "cli:mailbox/send",
+        kind: "cli",
+        name: "mailbox send",
+        module: route44
+    }),
     "cli:migrate/bots": Object.freeze({
         id: "cli:migrate/bots",
         kind: "cli",
         name: "migrate bots",
-        module: route43
+        module: route45
     }),
     "cli:migrate/capture": Object.freeze({
         id: "cli:migrate/capture",
         kind: "cli",
         name: "migrate capture",
-        module: route44
+        module: route46
     }),
     "cli:migrate/check": Object.freeze({
         id: "cli:migrate/check",
         kind: "cli",
         name: "migrate check",
-        module: route45
+        module: route47
     }),
     "cli:migrate/import": Object.freeze({
         id: "cli:migrate/import",
         kind: "cli",
         name: "migrate import",
-        module: route46
+        module: route48
     }),
     "cli:migrate/preview": Object.freeze({
         id: "cli:migrate/preview",
         kind: "cli",
         name: "migrate preview",
-        module: route47
+        module: route49
     }),
     "cli:migrate/run": Object.freeze({
         id: "cli:migrate/run",
         kind: "cli",
         name: "migrate run",
-        module: route48
+        module: route50
     }),
     "cli:reconcile": Object.freeze({
         id: "cli:reconcile",
         kind: "cli",
         name: "reconcile",
-        module: route49
+        module: route51
     }),
     "cli:send": Object.freeze({
         id: "cli:send",
         kind: "cli",
         name: "send",
-        module: route50
+        module: route52
     }),
     "cli:skills/add": Object.freeze({
         id: "cli:skills/add",
         kind: "cli",
         name: "skills add",
-        module: route51
+        module: route53
     }),
     "cli:skills/list": Object.freeze({
         id: "cli:skills/list",
         kind: "cli",
         name: "skills list",
-        module: route52
+        module: route54
     }),
     "cli:skills/remove": Object.freeze({
         id: "cli:skills/remove",
         kind: "cli",
         name: "skills remove",
-        module: route53
+        module: route55
     }),
     "cli:thread": Object.freeze({
         id: "cli:thread",
         kind: "cli",
         name: "thread",
-        module: route54
+        module: route56
     }),
     "cli:usage": Object.freeze({
         id: "cli:usage",
         kind: "cli",
         name: "usage",
-        module: route55
+        module: route57
     }),
     "cli:wake": Object.freeze({
         id: "cli:wake",
         kind: "cli",
         name: "wake",
-        module: route56
+        module: route58
     }),
     "cli:wear/pair": Object.freeze({
         id: "cli:wear/pair",
         kind: "cli",
         name: "wear pair",
-        module: route57
+        module: route59
     })
 });
 const requests = new Map();
@@ -44274,18 +44672,18 @@ const render = async (message)=>{
     };
     try {
         const cwd = process.cwd();
-        await (0, _agent_bundle_runtime__rspack_import_62.iC)({
+        await (0, _agent_bundle_runtime__rspack_import_64.iC)({
             capabilities: {
-                command: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
-                filesystem: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
-                network: (0, _agent_bundle_runtime__rspack_import_62.hU)(),
-                projectRoot: (0, _agent_bundle_runtime__rspack_import_62.qC)({
+                command: (0, _agent_bundle_runtime__rspack_import_64.hU)(),
+                filesystem: (0, _agent_bundle_runtime__rspack_import_64.hU)(),
+                network: (0, _agent_bundle_runtime__rspack_import_64.hU)(),
+                projectRoot: (0, _agent_bundle_runtime__rspack_import_64.qC)({
                     root: cwd
                 }, 'derived')
             },
-            host: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
+            host: (0, _agent_bundle_runtime__rspack_import_64.hU)('unsupported-surface'),
             invocation: message.request,
-            lineage: (0, _agent_bundle_runtime__rspack_import_62.hU)('unsupported-surface'),
+            lineage: (0, _agent_bundle_runtime__rspack_import_64.hU)('unsupported-surface'),
             plugin: pluginRoot.identity,
             progress: {
                 report: async (update)=>{
@@ -44298,8 +44696,8 @@ const render = async (message)=>{
             },
             process: processHit,
             signal: controller.signal,
-            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_62.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_62.qC)(message.terminal, 'native'),
-            workspace: (0, _agent_bundle_runtime__rspack_import_62.qC)({
+            terminal: message.terminal === undefined ? (0, _agent_bundle_runtime__rspack_import_64.hU)('not-provided') : (0, _agent_bundle_runtime__rspack_import_64.qC)(message.terminal, 'native'),
+            workspace: (0, _agent_bundle_runtime__rspack_import_64.qC)({
                 root: cwd
             }, 'derived')
         }, async ()=>{
@@ -44308,7 +44706,7 @@ const render = async (message)=>{
                 type: 'observed-render-start'
             });
             const renderStartedAt = performance.now();
-            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_63.y)(composeLayouts(observedRoute, {
+            const flight = (0, _agent_bundle_runtime_flight_server__rspack_import_65.y)(composeLayouts(observedRoute, {
                 ...message.props,
                 signal: controller.signal
             }, controller.signal), {

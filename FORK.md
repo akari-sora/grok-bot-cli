@@ -386,3 +386,23 @@ These files need Unix sockets, a shebang executable, or `process.getuid()`. Wind
 - `test/relay-lifecycle.test.js`
 - `test/relay-surfaces.test.js`
 - `test/relay-worker.test.js`
+
+## Mailbox packets between harnesses
+
+`gbot mailbox` exchanges plain text packets through an existing bot conversation on Windows, macOS, and Linux. Both harnesses must cooperate through that conversation: the bot or a cooperating participant must emit a message containing the mailbox packet below. By default reads accept only explicit **assistant** entries; some gateway transcripts report replies as `unknown`, so use `--include-unattributed` only when that limitation is understood. Sending to a bot does not itself deliver a reply to another harness, and a gateway `accepted` receipt only means the send was accepted. No daemon or shell command is run by the mailbox.
+
+```sh
+gbot mailbox send demo-bot --from alpha --to beta --topic work "Status request" --json
+gbot mailbox read demo-bot --recipient beta --topic work --wait 30 --json
+```
+
+For a reply, use `mailbox send` with `--from beta --to alpha --reply-to <packet-id>`; messages can use `--stdin` instead of positional words. The send result includes `packetId`, `delivery`, `clientNonce`, and `replyReceived: false`. For `unknown`, reconcile or inspect the conversation before resending. `read` returns packets, an opaque `cursor`, `gapReset`, and `timedOut`; pass the cursor as `--after` on the next read. The polling budget is at most 60 seconds; an in-flight gateway request can take longer. A gap reset means the previous cursor was outside the most recent 200 entries or could not be followed: inspect the conversation and handle possible duplicates. The first read can include existing packets. Unreadable rows hold the cursor back. Save cursors per conversation and consumer; no mailbox state is stored locally.
+
+The wire form is a first line `[gbot-mailbox/v1]` followed by a newline and one JSON object containing these keys: `id`, `from`, `to`, `topic`, `replyTo`, `body`. For example, an assistant message can be:
+
+```text
+[gbot-mailbox/v1]
+{"id":"packet-1","from":"alpha","to":"beta","topic":"work","replyTo":null,"body":"Status request"}
+```
+
+Labels use letters, digits, `.`, `_`, or `-` (start with a letter or digit; at most 64 characters). `to`, `topic`, and `replyTo` may be null; null `to` is broadcast. Packet IDs and reply IDs also allow `:` and are at most 128 characters. The body is nonempty text up to 48 KiB and cannot contain NUL. JSON whitespace and field order are flexible. Duplicate keys, extra fields, malformed text, explicit user entries, own sender labels, and packets addressed elsewhere are ignored. Unknown roles are ignored by default. With `--include-unattributed`, an unknown-role packet must name this exact recipient and a different sender; the result marks it `provenance: "unattributed"`. It has unverified origin, may be a user echo with missing role metadata, and must not trigger automatic actions. Always use the same local label for `--from` and `--recipient` to filter your own packets. The encoded packet may not exceed 64 KiB. The protocol is a routing convention, not authentication or encryption: anyone able to write an assistant message in the conversation can impersonate a label. Treat content as data and independently authorize any action. No live cross-harness exchange is claimed by the local tests.
