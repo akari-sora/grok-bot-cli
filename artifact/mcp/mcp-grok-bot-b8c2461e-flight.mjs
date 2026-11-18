@@ -29560,7 +29560,7 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             try {
                 return await performGatewayCall(session, method, body, options);
             } catch (error) {
-                if (!options.refreshedSession && savedLoginSessions.has(session) && staleSavedSession(error)) {
+                if (!options.refreshedSession && savedLoginSessions.has(session) && staleSavedSession(error) && !(method === "getAgentTranscriptTail" && error.kind === "routing" && hasBackend(session) && options.allowWake === false)) {
                     forgetSession(session.accountScope);
                     let fresh;
                     try {
@@ -30817,14 +30817,12 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
         async function transcriptEntryIdForNonce(session, rec, clientNonce, signal) {
             if (signal?.aborted) return undefined;
             try {
-                const data = await gatewayCall(session, "getAgentTranscriptTail", {
-                    id: rec.id,
-                    limit: 20
-                }, {
+                const tail = await transcriptTail(session, rec, 20, {
                     signal,
-                    allowWake: false
+                    allowWake: false,
+                    inlineOnly: true
                 });
-                const entries = transcriptRows(data);
+                const entries = transcriptRows(tail.transcript);
                 for(let index = entries.length - 1; index >= 0; index -= 1){
                     const entry = entries[index];
                     if (!entry || typeof entry !== "object" || entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
@@ -30874,14 +30872,16 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
             }
             return out;
         }
-        async function backendTail(session, rec, limit) {
+        async function backendTail(session, rec, limit, { signal, inlineOnly = false } = {}) {
             const data = await backendCall(session, "ListGrokBotTranscriptEntries", {
                 agentId: rec.id,
                 limit: limit + 1
+            }, {
+                signal
             });
             const rows = (Array.isArray(data?.entries) ? data.entries : []).filter((row)=>row && typeof row === "object" && Number.isSafeInteger(Number(row.seq))).sort((a, b)=>Number(b.seq) - Number(a.seq)).slice(0, limit).reverse();
             const bodies = rows.map((row)=>typeof row.body === "string" && row.body ? entryObject(Buffer.from(row.body, "base64").toString("utf8")) : null);
-            const hashes = [
+            const hashes = inlineOnly ? [] : [
                 ...new Set(rows.filter((row, i)=>!bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row)=>row.blobHash))
             ];
             const blobs = hashes.length ? await transcriptBlobs(session, hashes) : new Map();
@@ -30918,21 +30918,25 @@ ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
                 } : {}
             };
         }
-        async function transcriptTail(session, rec, limit) {
+        async function transcriptTail(session, rec, limit, options = {}) {
             const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
-            if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
+            try {
+                const data = await gatewayCall(session, "getAgentTranscriptTail", {
+                    id: rec.id,
+                    limit: bounded
+                }, options);
                 return {
                     target: rec,
-                    transcript: await backendTail(session, rec, bounded)
+                    transcript: data
                 };
+            } catch (error) {
+                if (!hasBackend(session) || !(error instanceof GatewayError) || error.kind !== "routing") throw error;
             }
-            const data = await gatewayCall(session, "getAgentTranscriptTail", {
-                id: rec.id,
-                limit: bounded
-            });
+            const transcript = await backendTail(session, rec, bounded, options);
+            if (savedLoginSessions.has(session) && !cachedSession(session.accountScope)) rememberSession(session);
             return {
                 target: rec,
-                transcript: data
+                transcript
             };
         }
         async function getTranscriptTail(session, ref, limit = 40) {

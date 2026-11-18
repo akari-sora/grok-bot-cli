@@ -121,7 +121,7 @@ Grok Bot 0.78.4（2026-11-03）把每個 bot 都放到伺服器上執行。2026-
 | `bots update`、`groups update` | `UpdateGrokBotAgent`；`--notify` 與 `--hidden` 用 `SetGrokBotAgentClientState` |
 | `bots delete`、`groups delete` | `DeleteGrokBotAgent` |
 | `approvals respond` | `ResolveGrokBotAutoReviewApproval` 或 `ResolveGrokBotLocalToolPermission`（照 App 對應，未實測） |
-| `thread`、`reconcile` 讀的尾端、relay、`approvals list`、MCP 的 thread 工具 | `ListGrokBotTranscriptEntries` |
+| `thread`、`reconcile` 讀的尾端、relay、`approvals list`、MCP 的 thread 工具 | 先讀 box `getAgentTranscriptTail`；有 access token 且收到無法路由的 404 時改讀 `ListGrokBotTranscriptEntries` |
 | `migrate import`、`migrate run` 加 `--move-routines` | `SetGrokBotAgentAutomationEnabled` `{ agentId, automationId, isEnabled: false, timeZone }`，匯入驗證通過後；`isEnabled: true` 只在目的地打不開、要打開回來時用 |
 
 `thread --root` 與 `skills` 走雲端電腦 gateway；0.78 的主機對它們回 404，這時 `skills list` 改經後端讀 Skills 庫。沒有 access token 的 session（`GROK_BOT_GATEWAY_URL` 加 `GROK_BOT_GATEWAY_TOKEN`，或沒有存 access token 的 descriptor 登入）照舊走 gateway，在 0.78.x 上送訊會收到 502。`bots template` 的 RPC、名單合併、名稱比對、送達狀態與 gateway 實測紀錄見 [FORK.zh-TW.md](../FORK.zh-TW.md#grok-bot-078xbot-改在伺服器上執行)。

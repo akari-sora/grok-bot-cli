@@ -104,6 +104,11 @@ beforeAll(async () => {
     const path = req.url ?? '';
     const text = await readBody(req);
     calls.push({ body: text ? JSON.parse(text) as Record<string, unknown> : {}, path });
+    if (path === '/api/getAgentTranscriptTail') {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('The request could not be routed');
+      return;
+    }
     const payload = answer(path);
     res.writeHead(payload === undefined ? 501 : 200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(payload ?? { code: 'unimplemented', message: 'no fake for ' + path }));

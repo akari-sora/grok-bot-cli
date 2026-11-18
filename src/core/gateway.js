@@ -829,6 +829,9 @@ async function gatewayCall(session, method, body = {}, options = {}) {
       !options.refreshedSession
       && savedLoginSessions.has(session)
       && staleSavedSession(error)
+      // A no-wake transcript receipt has a backend read fallback. Rebuilding its
+      // session can wake the box; ordinary reads still recover a stale gateway URL.
+      && !(method === "getAgentTranscriptTail" && error.kind === "routing" && hasBackend(session) && options.allowWake === false)
     ) {
       forgetSession(session.accountScope);
       let fresh;
@@ -2042,8 +2045,8 @@ export async function sendPrompt(session, ref, prompt, extra = {}) {
 async function transcriptEntryIdForNonce(session, rec, clientNonce, signal) {
   if (signal?.aborted) return undefined;
   try {
-    const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: 20 }, { signal, allowWake: false });
-    const entries = transcriptRows(data);
+    const tail = await transcriptTail(session, rec, 20, { signal, allowWake: false, inlineOnly: true });
+    const entries = transcriptRows(tail.transcript);
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
       if (!entry || typeof entry !== "object" || entry.role !== "user" || entry.clientNonce !== clientNonce) continue;
@@ -2096,15 +2099,16 @@ async function transcriptBlobs(session, hashes) {
 // ListGrokBotTranscriptEntries for the main session with limit + 1, newest first. Each row's body is
 // the entry the box tail returned, so an entry is that body plus `seq`, oldest first like the box tail.
 // A row with no readable body keeps its id, kind and seq with `unreadable: true`, and the page counts it.
-async function backendTail(session, rec, limit) {
-  const data = await backendCall(session, "ListGrokBotTranscriptEntries", { agentId: rec.id, limit: limit + 1 });
+async function backendTail(session, rec, limit, { signal, inlineOnly = false } = {}) {
+  const data = await backendCall(session, "ListGrokBotTranscriptEntries", { agentId: rec.id, limit: limit + 1 }, { signal });
   const rows = (Array.isArray(data?.entries) ? data.entries : [])
     .filter((row) => row && typeof row === "object" && Number.isSafeInteger(Number(row.seq)))
     .sort((a, b) => Number(b.seq) - Number(a.seq))
     .slice(0, limit)
     .reverse();
   const bodies = rows.map((row) => (typeof row.body === "string" && row.body ? entryObject(Buffer.from(row.body, "base64").toString("utf8")) : null));
-  const hashes = [...new Set(rows.filter((row, i) => !bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row) => row.blobHash))];
+  // A best-effort send receipt must not wait for store downloads after acceptance.
+  const hashes = inlineOnly ? [] : [...new Set(rows.filter((row, i) => !bodies[i] && /^[0-9a-f]{64}$/.test(String(row.blobHash ?? ""))).map((row) => row.blobHash))];
   const blobs = hashes.length ? await transcriptBlobs(session, hashes) : new Map();
   const entries = [];
   let unreadable = 0;
@@ -2123,13 +2127,22 @@ async function backendTail(session, rec, limit) {
   return { entries, ...(unreadable ? { unreadable } : {}) };
 }
 
-async function transcriptTail(session, rec, limit) {
+async function transcriptTail(session, rec, limit, options = {}) {
   const bounded = Math.min(Math.max(Math.trunc(limit) || 40, 1), 200);
-  if (hasBackend(session) && !boxOnlyRecords.has(rec)) {
-    return { target: rec, transcript: await backendTail(session, rec, bounded) };
+  try {
+    const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: bounded }, options);
+    return { target: rec, transcript: data };
+  } catch (error) {
+    // 1.1.0 gates the app's server tail separately from its roster. An access token or a
+    // server roster alone does not mean the box tail is gone. Keep a working box path;
+    // only its explicit unroutable 404 permits the read-only backend fallback.
+    if (!hasBackend(session) || !(error instanceof GatewayError) || error.kind !== "routing") throw error;
   }
-  const data = await gatewayCall(session, "getAgentTranscriptTail", { id: rec.id, limit: bounded });
-  return { target: rec, transcript: data };
+  const transcript = await backendTail(session, rec, bounded, options);
+  // A failed box refresh evicts the saved session. A successful backend read proves
+  // its login still works; retain it so later backend commands do not depend on the box.
+  if (savedLoginSessions.has(session) && !cachedSession(session.accountScope)) rememberSession(session);
+  return { target: rec, transcript };
 }
 
 export async function getTranscriptTail(session, ref, limit = 40) {
