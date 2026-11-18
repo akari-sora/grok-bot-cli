@@ -344,3 +344,30 @@ test("the first read and a gap reset also stop before an unreadable row (round 7
   const back = transcriptDelta(page({ id: "a1", kind: "send-message", text: "back" }), { after: first.cursor });
   assert.deepEqual(back.entries.map((e) => e.id), ["a1", "a2"], "read once, nothing skipped or repeated");
 });
+
+test("normalizer does not infer a role when an explicit role carrier contradicts it", () => {
+  const target = { id: "bot-1", name: "Bot", isGroup: false };
+  for (const entry of [
+    { role: "assistant", sender: "system", text: "x" },
+    { role: "system", message: { type: "assistant", content: "x" } },
+    { role: "user", message: { role: {}, content: "x" } },
+    { role: "assistant", message: { type: "system", content: "x" } },
+  ]) {
+    assert.equal(normalizeTranscript({ target, transcript: { entries: [entry] } }).messages[0].role, "unknown");
+  }
+  const textMessage = { role: "user", message: { type: "text", content: "x" } };
+  assert.equal(normalizeTranscript({ target, transcript: { entries: [textMessage] } }).messages[0].role, "user");
+});
+
+test("normalizer fails closed on malformed text carriers while preserving display behavior", () => {
+  const target = { id: "bot-1", name: "Bot", isGroup: false };
+  for (const entry of [
+    { role: "user", content: ["hello", 42] },
+    { role: "user", text: { opaque: "not text" } },
+    { role: "user", prompt: false },
+  ]) {
+    assert.throws(() => normalizeTranscript({ target, transcript: { entries: [entry] } }), /malformed transcript text/i);
+  }
+  assert.equal(entryText({ content: ["hello", 42] }), "hello");
+  assert.equal(normalizeTranscript({ target, transcript: { entries: [{ role: "user", content: { type: "image" } }] } }).messages[0].text, "");
+});

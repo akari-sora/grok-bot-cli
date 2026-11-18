@@ -1959,8 +1959,13 @@ export async function removeGroupMember(session, groupRef, memberRef) {
 // Either one is a confirmed receipt. Anything else (`{ok:true}`, `"true"`, a missing body) stays
 // unconfirmed: the caller must reconcile by clientNonce before any resend.
 export function sendReceiptFrom(data) {
-  if (!data || typeof data !== "object") return { accepted: false };
-  const messageId = typeof data.messageId === "string" && data.messageId ? data.messageId : undefined;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return { accepted: false };
+  // An explicit negative or malformed status contradicts a positive-looking receipt.
+  for (const key of ["accepted", "ok", "success"]) {
+    if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== true) return { accepted: false };
+  }
+  if (Object.prototype.hasOwnProperty.call(data, "error")) return { accepted: false };
+  const messageId = typeof data.messageId === "string" && data.messageId.trim() ? data.messageId : undefined;
   if (data.accepted === true || messageId) return { accepted: true, ...(messageId ? { messageId } : {}) };
   return { accepted: false };
 }

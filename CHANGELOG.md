@@ -6,6 +6,8 @@ Fork tags are `v0.11.2-iml1s.N`. The package version stays `0.11.2`. Upstream en
 
 ### Unreleased
 
+- Contradictory gateway receipts stay unconfirmed, and normalized transcript evidence rejects malformed text and conflicting role carriers.
+
 - Transcript reads retain a working box gateway and fall back to `ListGrokBotTranscriptEntries` only on its unroutable 404 with an access token. A roster capability does not imply the app's separate transcript feature gate. The shared path covers thread, reconcile, relay, approvals, MCP and best-effort send receipts; receipt lookups skip store downloads, and a receipt routing failure goes directly to the backend without rebuilding or waking the box. See `docs/verification/2026-11-17-transcript-1.1.0.md`.
 
 ### 0.11.2-iml1s.16

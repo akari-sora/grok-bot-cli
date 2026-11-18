@@ -276,3 +276,24 @@ test("reconcileDelivery requires a client nonce and does not call the gateway", 
   await assert.rejects(reconcileDelivery(session, "General", ""), /clientNonce is required/);
   assert.equal(seen.length, 0);
 });
+
+test("contradictory or malformed gateway receipts do not confirm a send", () => {
+  for (const receipt of [
+    { accepted: true, ok: false },
+    { accepted: true, success: "false" },
+    { accepted: true, error: "rejected" },
+    { accepted: false, messageId: "m-1" },
+    { accepted: "false", messageId: "m-1" },
+    { messageId: "   " },
+  ]) assert.deepEqual(sendReceiptFrom(receipt), { accepted: false });
+});
+
+test("a contradictory send receipt remains unknown and is not automatically resent", async (t) => {
+  const { session, seen } = await mockGateway(t, (url) =>
+    url === "/api/listAgents" ? roster : { accepted: true, ok: false, messageId: "ambiguous" });
+  const result = await sendPrompt(session, "General", "synthetic", { clientNonce: "nonce-contradictory" });
+  assert.equal(result.delivery, "unknown");
+  assert.equal(result.messageId, undefined);
+  assert.equal(seen.filter((request) => request.url === "/api/sendPrompt").length, 1);
+  assert.equal(seen.filter((request) => request.url === "/api/getAgentTranscriptTail").length, 0);
+});
